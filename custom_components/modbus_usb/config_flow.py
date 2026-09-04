@@ -119,14 +119,19 @@ class ModbusUsbConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> "ModbusUsbOptionsFlow":
-        return ModbusUsbOptionsFlow(config_entry)
+        # Do NOT pass/store config_entry ourselves. Since Home Assistant
+        # 2025.12, OptionsFlow.config_entry is a read-only property that
+        # the frontend/flow manager sets automatically; manually assigning
+        # it (as this used to do in __init__) now raises
+        # AttributeError: property 'config_entry' has no setter,
+        # which is what was causing the 500 error when opening settings.
+        return ModbusUsbOptionsFlow()
 
 
 class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
     """Options flow: manage scan interval and the list of sensor/switch entities."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        self.config_entry = config_entry
+    def __init__(self) -> None:
         self._editing_id: str | None = None
         self._pending_entity_type: str | None = None
 

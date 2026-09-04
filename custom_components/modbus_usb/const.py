@@ -2,6 +2,12 @@
 
 DOMAIN = "modbus_usb"
 
+# Platform names
+PLATFORM_SENSOR = "sensor"
+PLATFORM_SWITCH = "switch"
+PLATFORM_BINARY_SENSOR = "binary_sensor"
+PLATFORM_NUMBER = "number"
+
 # --- Hub / connection config keys ---
 CONF_PORT = "port"
 CONF_BAUDRATE = "baudrate"
@@ -38,8 +44,13 @@ CONF_DEVICE_CLASS = "device_class"
 CONF_STATE_CLASS = "state_class"
 CONF_ON_VALUE = "on_value"
 CONF_OFF_VALUE = "off_value"
+# Number entity extras
+CONF_MIN_VALUE = "min_value"
+CONF_MAX_VALUE = "max_value"
+CONF_STEP = "step"
+CONF_MODE = "mode"  # "slider" | "box"
 
-ENTITY_TYPES = ["sensor", "switch"]
+ENTITY_TYPES = ["sensor", "switch", "binary_sensor", "number"]
 
 # Modbus register types we read from / write to
 REGISTER_TYPE_HOLDING = "holding"     # read/write 16-bit registers
@@ -87,3 +98,17 @@ DEVICE_CLASS_OPTIONS = [
 ]
 
 STATE_CLASS_OPTIONS = ["none", "measurement", "total", "total_increasing"]
+
+# Diagnostics / coordinator health keys
+DIAG_TOTAL_READS = "total_reads"
+DIAG_FAILED_READS = "failed_reads"
+DIAG_LAST_ERROR = "last_error"
+DIAG_CONSECUTIVE_FAILURES = "consecutive_failures"
+DIAG_LAST_SUCCESS = "last_success"
+
+# Service names
+SERVICE_READ_REGISTER = "read_register"
+SERVICE_WRITE_REGISTER = "write_register"
+
+# Event raised after a service read completes
+EVENT_REGISTER_READ = f"{DOMAIN}_register_read"

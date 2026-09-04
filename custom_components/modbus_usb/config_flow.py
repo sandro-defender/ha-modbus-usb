@@ -20,6 +20,9 @@ from .const import (
     CONF_ENTITIES,
     CONF_ENTITY_ID,
     CONF_ENTITY_TYPE,
+    CONF_MAX_VALUE,
+    CONF_MIN_VALUE,
+    CONF_MODE,
     CONF_NAME,
     CONF_OFF_VALUE,
     CONF_ON_VALUE,
@@ -30,6 +33,7 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_SLAVE_ID,
     CONF_STATE_CLASS,
+    CONF_STEP,
     CONF_STOPBITS,
     CONF_UNIT_OF_MEASUREMENT,
     DATA_TYPES,
@@ -44,6 +48,7 @@ from .const import (
     DOMAIN,
     PARITY_OPTIONS,
     REGISTER_TYPE_COIL,
+    REGISTER_TYPE_DISCRETE,
     REGISTER_TYPE_HOLDING,
     REGISTER_TYPES_SENSOR,
     REGISTER_TYPES_SWITCH,
@@ -161,9 +166,19 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
             self._editing_id = None
             if self._pending_entity_type == "sensor":
                 return await self.async_step_edit_sensor()
+            if self._pending_entity_type == "binary_sensor":
+                return await self.async_step_edit_binary_sensor()
+            if self._pending_entity_type == "number":
+                return await self.async_step_edit_number()
             return await self.async_step_edit_switch()
 
-        schema = vol.Schema({vol.Required(CONF_ENTITY_TYPE, default="sensor"): vol.In(["sensor", "switch"])})
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_ENTITY_TYPE, default="sensor"): vol.In(
+                    ["sensor", "switch", "binary_sensor", "number"]
+                )
+            }
+        )
         return self.async_show_form(step_id="add_entity", data_schema=schema)
 
     # ---------- Manage: pick an existing entity to edit or remove ----------
@@ -196,6 +211,10 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
             self._pending_entity_type = target[CONF_ENTITY_TYPE]
             if target[CONF_ENTITY_TYPE] == "sensor":
                 return await self.async_step_edit_sensor()
+            if target[CONF_ENTITY_TYPE] == "binary_sensor":
+                return await self.async_step_edit_binary_sensor()
+            if target[CONF_ENTITY_TYPE] == "number":
+                return await self.async_step_edit_number()
             return await self.async_step_edit_switch()
 
         schema = vol.Schema(
@@ -306,3 +325,121 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
             }
         )
         return self.async_show_form(step_id="edit_switch", data_schema=schema)
+
+    # ---------- Binary sensor add/edit form ----------
+    async def async_step_edit_binary_sensor(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        existing = None
+        if self._editing_id:
+            existing = next(
+                (e for e in self._entities() if e[CONF_ENTITY_ID] == self._editing_id), None
+            )
+        d = existing or {}
+
+        if user_input is not None:
+            entities = self._entities()
+            device_class = user_input.get(CONF_DEVICE_CLASS, "none")
+            new_entry = {
+                CONF_ENTITY_ID: self._editing_id or str(uuid.uuid4()),
+                CONF_ENTITY_TYPE: "binary_sensor",
+                CONF_NAME: user_input[CONF_NAME],
+                CONF_REGISTER_TYPE: user_input[CONF_REGISTER_TYPE],
+                CONF_ADDRESS: user_input[CONF_ADDRESS],
+                CONF_DEVICE_CLASS: None if device_class == "none" else device_class,
+            }
+            if self._editing_id:
+                entities = [
+                    new_entry if e[CONF_ENTITY_ID] == self._editing_id else e
+                    for e in entities
+                ]
+            else:
+                entities.append(new_entry)
+            return await self._save_entities(entities)
+
+        _BINARY_REGISTER_TYPES = [REGISTER_TYPE_COIL, REGISTER_TYPE_DISCRETE]
+        _BINARY_DEVICE_CLASSES = [
+            "none", "motion", "door", "window", "smoke", "moisture",
+            "connectivity", "power", "plug", "battery", "occupancy",
+        ]
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_NAME, default=d.get(CONF_NAME, "")): str,
+                vol.Required(
+                    CONF_REGISTER_TYPE, default=d.get(CONF_REGISTER_TYPE, REGISTER_TYPE_COIL)
+                ): vol.In(_BINARY_REGISTER_TYPES),
+                vol.Required(CONF_ADDRESS, default=d.get(CONF_ADDRESS, 0)): vol.All(
+                    vol.Coerce(int), vol.Range(min=0, max=65535)
+                ),
+                vol.Optional(
+                    CONF_DEVICE_CLASS, default=d.get(CONF_DEVICE_CLASS) or "none"
+                ): vol.In(_BINARY_DEVICE_CLASSES),
+            }
+        )
+        return self.async_show_form(step_id="edit_binary_sensor", data_schema=schema)
+
+    # ---------- Number add/edit form ----------
+    async def async_step_edit_number(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        existing = None
+        if self._editing_id:
+            existing = next(
+                (e for e in self._entities() if e[CONF_ENTITY_ID] == self._editing_id), None
+            )
+        d = existing or {}
+
+        if user_input is not None:
+            entities = self._entities()
+            new_entry = {
+                CONF_ENTITY_ID: self._editing_id or str(uuid.uuid4()),
+                CONF_ENTITY_TYPE: "number",
+                CONF_NAME: user_input[CONF_NAME],
+                CONF_REGISTER_TYPE: user_input[CONF_REGISTER_TYPE],
+                CONF_ADDRESS: user_input[CONF_ADDRESS],
+                CONF_DATA_TYPE: user_input[CONF_DATA_TYPE],
+                CONF_SCALE: user_input.get(CONF_SCALE, 1),
+                CONF_UNIT_OF_MEASUREMENT: user_input.get(CONF_UNIT_OF_MEASUREMENT, ""),
+                CONF_MIN_VALUE: user_input.get(CONF_MIN_VALUE, 0),
+                CONF_MAX_VALUE: user_input.get(CONF_MAX_VALUE, 65535),
+                CONF_STEP: user_input.get(CONF_STEP, 1),
+                CONF_MODE: user_input.get(CONF_MODE, "slider"),
+            }
+            if self._editing_id:
+                entities = [
+                    new_entry if e[CONF_ENTITY_ID] == self._editing_id else e
+                    for e in entities
+                ]
+            else:
+                entities.append(new_entry)
+            return await self._save_entities(entities)
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_NAME, default=d.get(CONF_NAME, "")): str,
+                vol.Required(
+                    CONF_REGISTER_TYPE, default=d.get(CONF_REGISTER_TYPE, REGISTER_TYPE_HOLDING)
+                ): vol.In([REGISTER_TYPE_HOLDING]),
+                vol.Required(CONF_ADDRESS, default=d.get(CONF_ADDRESS, 0)): vol.All(
+                    vol.Coerce(int), vol.Range(min=0, max=65535)
+                ),
+                vol.Required(CONF_DATA_TYPE, default=d.get(CONF_DATA_TYPE, "uint16")): vol.In(
+                    DATA_TYPES
+                ),
+                vol.Optional(CONF_SCALE, default=d.get(CONF_SCALE, 1)): vol.Coerce(float),
+                vol.Optional(
+                    CONF_UNIT_OF_MEASUREMENT, default=d.get(CONF_UNIT_OF_MEASUREMENT, "")
+                ): str,
+                vol.Optional(
+                    CONF_MIN_VALUE, default=d.get(CONF_MIN_VALUE, 0)
+                ): vol.Coerce(float),
+                vol.Optional(
+                    CONF_MAX_VALUE, default=d.get(CONF_MAX_VALUE, 65535)
+                ): vol.Coerce(float),
+                vol.Optional(CONF_STEP, default=d.get(CONF_STEP, 1)): vol.Coerce(float),
+                vol.Optional(CONF_MODE, default=d.get(CONF_MODE, "slider")): vol.In(
+                    ["slider", "box"]
+                ),
+            }
+        )
+        return self.async_show_form(step_id="edit_number", data_schema=schema)

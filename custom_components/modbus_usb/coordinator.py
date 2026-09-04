@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import struct
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -22,6 +22,11 @@ from .const import (
     DATA_TYPE_UINT16,
     DATA_TYPE_UINT32,
     DATA_TYPE_WORD_COUNT,
+    DIAG_CONSECUTIVE_FAILURES,
+    DIAG_FAILED_READS,
+    DIAG_LAST_ERROR,
+    DIAG_LAST_SUCCESS,
+    DIAG_TOTAL_READS,
     REGISTER_TYPE_COIL,
     REGISTER_TYPE_DISCRETE,
     REGISTER_TYPE_HOLDING,
@@ -72,6 +77,14 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         # entities list is read fresh from config_entry.options each refresh so
         # the options flow (add/edit/remove) takes effect without reload in most cases
         self.hass = hass
+        # Health / diagnostics tracking
+        self.diag: dict[str, Any] = {
+            DIAG_TOTAL_READS: 0,
+            DIAG_FAILED_READS: 0,
+            DIAG_CONSECUTIVE_FAILURES: 0,
+            DIAG_LAST_ERROR: None,
+            DIAG_LAST_SUCCESS: None,
+        }
 
     def _get_entities(self) -> list[dict]:
         entry = self.hass.config_entries.async_get_entry(self.entry_id)
@@ -95,11 +108,17 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         data: dict[str, Any] = {}
         for ent in entities:
             ent_id = ent["id"]
+            self.diag[DIAG_TOTAL_READS] += 1
             try:
                 data[ent_id] = self._read_one(ent)
+                self.diag[DIAG_CONSECUTIVE_FAILURES] = 0
+                self.diag[DIAG_LAST_SUCCESS] = datetime.now().isoformat()
             except Exception as err:  # noqa: BLE001
                 _LOGGER.warning("Failed reading %s: %s", ent.get("name", ent_id), err)
                 data[ent_id] = None
+                self.diag[DIAG_FAILED_READS] += 1
+                self.diag[DIAG_CONSECUTIVE_FAILURES] += 1
+                self.diag[DIAG_LAST_ERROR] = str(err)
         return data
 
     def _read_one(self, ent: dict) -> Any:
@@ -152,3 +171,43 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         result = self.client.write_register(address, value, slave=self.slave_id)
         if result.isError():
             raise UpdateFailed(str(result))
+
+    def write_registers_32bit(self, address: int, value: int, data_type: str) -> None:
+        """Write two consecutive holding registers for 32-bit data types."""
+        if not self.client.connected:
+            self.client.connect()
+        if data_type in ("int32",):
+            raw = struct.pack(">i", value)
+        elif data_type in ("float32",):
+            raw = struct.pack(">f", value)
+        else:  # uint32
+            raw = struct.pack(">I", value)
+        high, low = struct.unpack(">HH", raw)
+        result = self.client.write_registers(address, [high, low], slave=self.slave_id)
+        if result.isError():
+            raise UpdateFailed(str(result))
+
+    def read_register_raw(self, address: int, register_type: str, data_type: str) -> Any:
+        """Perform a one-shot read of a register for the diagnostics/service call."""
+        if not self.client.connected:
+            self.client.connect()
+        count = DATA_TYPE_WORD_COUNT.get(data_type, 1)
+        if register_type == REGISTER_TYPE_COIL:
+            result = self.client.read_coils(address, 1, slave=self.slave_id)
+            if result.isError():
+                raise UpdateFailed(str(result))
+            return bool(result.bits[0])
+        if register_type == REGISTER_TYPE_DISCRETE:
+            result = self.client.read_discrete_inputs(address, 1, slave=self.slave_id)
+            if result.isError():
+                raise UpdateFailed(str(result))
+            return bool(result.bits[0])
+        if register_type == REGISTER_TYPE_HOLDING:
+            result = self.client.read_holding_registers(address, count, slave=self.slave_id)
+        elif register_type == REGISTER_TYPE_INPUT:
+            result = self.client.read_input_registers(address, count, slave=self.slave_id)
+        else:
+            raise UpdateFailed(f"Unknown register type: {register_type}")
+        if result.isError():
+            raise UpdateFailed(str(result))
+        return _decode_words(result.registers, data_type)

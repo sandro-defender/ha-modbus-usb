@@ -1,0 +1,1289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Modbus USB Controller</title>
+  <meta name="description" content="Modbus USB Controller dashboard for Home Assistant — monitor sensors, control switches, and run live register diagnostics." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Reset & Base ─────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: #0a0f1e;
+      color: #e2e8f0;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Animated Background ──────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 20% 10%, rgba(59,130,246,0.12) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 80%, rgba(139,92,246,0.10) 0%, transparent 60%),
+        radial-gradient(ellipse 40% 30% at 50% 50%, rgba(16,185,129,0.06) 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Layout ───────────────────────────────────────────────── */
+    .app {
+      position: relative;
+      z-index: 1;
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 0 1.5rem 2rem;
+    }
+
+    /* ── Header ───────────────────────────────────────────────── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.25rem 0 1rem;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+    }
+
+    .header-icon {
+      width: 42px;
+      height: 42px;
+      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.25rem;
+      box-shadow: 0 0 20px rgba(59,130,246,0.35);
+      animation: iconPulse 3s ease-in-out infinite;
+      flex-shrink: 0;
+    }
+    @keyframes iconPulse {
+      0%, 100% { box-shadow: 0 0 20px rgba(59,130,246,0.35); }
+      50%       { box-shadow: 0 0 30px rgba(59,130,246,0.6), 0 0 60px rgba(139,92,246,0.25); }
+    }
+
+    .header-title h1 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, #fff 0%, #94a3b8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .header-title p {
+      font-size: 0.72rem;
+      color: #64748b;
+      margin-top: 1px;
+      letter-spacing: 0.04em;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.3rem 0.75rem;
+      border-radius: 99px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      border: 1px solid transparent;
+      transition: all 0.3s;
+    }
+    .status-badge.connected {
+      background: rgba(16,185,129,0.12);
+      border-color: rgba(16,185,129,0.3);
+      color: #34d399;
+    }
+    .status-badge.disconnected {
+      background: rgba(239,68,68,0.12);
+      border-color: rgba(239,68,68,0.3);
+      color: #f87171;
+    }
+    .status-badge.unknown {
+      background: rgba(100,116,139,0.12);
+      border-color: rgba(100,116,139,0.3);
+      color: #94a3b8;
+    }
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .status-badge.connected .status-dot {
+      animation: blink 2s ease-in-out infinite;
+    }
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.4rem 0.85rem;
+      border-radius: 8px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-family: inherit;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #3b82f6, #6366f1);
+      color: #fff;
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(59,130,246,0.4); }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-ghost {
+      background: rgba(255,255,255,0.06);
+      color: #94a3b8;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .btn-ghost:hover { background: rgba(255,255,255,0.10); color: #e2e8f0; }
+    .btn-danger {
+      background: rgba(239,68,68,0.15);
+      color: #f87171;
+      border: 1px solid rgba(239,68,68,0.3);
+    }
+    .btn-danger:hover { background: rgba(239,68,68,0.25); }
+    .btn-success {
+      background: rgba(16,185,129,0.15);
+      color: #34d399;
+      border: 1px solid rgba(16,185,129,0.3);
+    }
+    .btn-success:hover { background: rgba(16,185,129,0.25); }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important; box-shadow: none !important; }
+
+    /* ── Tabs ─────────────────────────────────────────────────── */
+    .tabs {
+      display: flex;
+      gap: 0.25rem;
+      margin-bottom: 1.5rem;
+      background: rgba(255,255,255,0.04);
+      border-radius: 12px;
+      padding: 0.3rem;
+      border: 1px solid rgba(255,255,255,0.06);
+      overflow-x: auto;
+    }
+
+    .tab {
+      flex: 1;
+      min-width: 100px;
+      padding: 0.55rem 1rem;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      color: #64748b;
+      transition: all 0.22s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      white-space: nowrap;
+      font-family: inherit;
+    }
+    .tab:hover { color: #94a3b8; background: rgba(255,255,255,0.04); }
+    .tab.active {
+      background: linear-gradient(135deg, rgba(59,130,246,0.2), rgba(139,92,246,0.15));
+      color: #93c5fd;
+      border: 1px solid rgba(59,130,246,0.25);
+      box-shadow: 0 2px 8px rgba(59,130,246,0.15);
+    }
+
+    /* ── Tab Panels ───────────────────────────────────────────── */
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; animation: fadeIn 0.3s ease; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Cards ────────────────────────────────────────────────── */
+    .card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 16px;
+      padding: 1.25rem;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .card:hover { border-color: rgba(255,255,255,0.12); }
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .card-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #e2e8f0;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .card-subtitle {
+      font-size: 0.72rem;
+      color: #475569;
+      margin-top: 0.2rem;
+    }
+
+    /* ── Entity Grid (Dashboard) ──────────────────────────────── */
+    .entity-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 1rem;
+    }
+
+    .entity-tile {
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px;
+      padding: 1.1rem;
+      cursor: default;
+      transition: all 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+    .entity-tile::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: var(--tile-accent, linear-gradient(90deg, #3b82f6, #8b5cf6));
+      border-radius: 14px 14px 0 0;
+      opacity: 0.8;
+    }
+    .entity-tile:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); border-color: rgba(255,255,255,0.14); }
+
+    .entity-tile-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.75rem;
+    }
+    .entity-type-icon {
+      width: 28px; height: 28px;
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.85rem;
+    }
+    .entity-type-icon.sensor   { background: rgba(59,130,246,0.15); }
+    .entity-type-icon.switch   { background: rgba(139,92,246,0.15); }
+    .entity-type-icon.binary_sensor { background: rgba(245,158,11,0.15); }
+    .entity-type-icon.number   { background: rgba(16,185,129,0.15); }
+
+    .entity-state-badge {
+      font-size: 0.65rem;
+      font-weight: 700;
+      padding: 0.18rem 0.45rem;
+      border-radius: 99px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .badge-on     { background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.3); }
+    .badge-off    { background: rgba(100,116,139,0.12); color: #64748b; border: 1px solid rgba(100,116,139,0.2); }
+    .badge-sensor { background: rgba(59,130,246,0.12); color: #60a5fa; border: 1px solid rgba(59,130,246,0.2); }
+    .badge-unavail{ background: rgba(239,68,68,0.1); color: #f87171; border: 1px solid rgba(239,68,68,0.2); }
+
+    .entity-value {
+      font-size: 1.6rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      background: linear-gradient(135deg, #e2e8f0, #94a3b8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 0.25rem;
+    }
+    .entity-name {
+      font-size: 0.75rem;
+      color: #64748b;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .entity-address {
+      font-size: 0.65rem;
+      color: #334155;
+      margin-top: 0.5rem;
+      font-family: 'Courier New', monospace;
+    }
+
+    /* Switch toggle in tile */
+    .switch-toggle {
+      position: relative;
+      width: 40px; height: 22px;
+      margin-top: 0.5rem;
+    }
+    .switch-toggle input { opacity: 0; width: 0; height: 0; }
+    .switch-slider {
+      position: absolute;
+      inset: 0;
+      border-radius: 99px;
+      background: rgba(100,116,139,0.3);
+      cursor: pointer;
+      transition: background 0.25s;
+    }
+    .switch-slider::before {
+      content: '';
+      position: absolute;
+      top: 3px; left: 3px;
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      background: #94a3b8;
+      transition: transform 0.25s, background 0.25s;
+    }
+    input:checked + .switch-slider { background: rgba(16,185,129,0.4); border: 1px solid rgba(16,185,129,0.5); }
+    input:checked + .switch-slider::before { transform: translateX(18px); background: #34d399; }
+
+    /* ── Table ────────────────────────────────────────────────── */
+    .table-wrapper {
+      overflow-x: auto;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    thead th {
+      padding: 0.65rem 1rem;
+      text-align: left;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      color: #475569;
+      background: rgba(255,255,255,0.03);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      white-space: nowrap;
+    }
+    tbody tr {
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      transition: background 0.15s;
+    }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: rgba(255,255,255,0.03); }
+    tbody td {
+      padding: 0.7rem 1rem;
+      font-size: 0.78rem;
+      color: #94a3b8;
+      vertical-align: middle;
+    }
+    .td-name { color: #e2e8f0; font-weight: 500; }
+    .type-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.18rem 0.55rem;
+      border-radius: 99px;
+      font-size: 0.65rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .pill-sensor  { background: rgba(59,130,246,0.15); color: #60a5fa; }
+    .pill-switch  { background: rgba(139,92,246,0.15); color: #a78bfa; }
+    .pill-binary  { background: rgba(245,158,11,0.15); color: #fbbf24; }
+    .pill-number  { background: rgba(16,185,129,0.15); color: #34d399; }
+
+    /* ── Connection Info ──────────────────────────────────────── */
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 0.85rem;
+    }
+    .info-item {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 10px;
+      padding: 0.85rem 1rem;
+    }
+    .info-label {
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #475569;
+      margin-bottom: 0.3rem;
+    }
+    .info-value {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #e2e8f0;
+      font-family: 'Courier New', monospace;
+    }
+
+    /* ── Diagnostics ──────────────────────────────────────────── */
+    .diag-form {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 0.85rem;
+      align-items: end;
+    }
+    .form-group { display: flex; flex-direction: column; gap: 0.35rem; }
+    .form-label { font-size: 0.7rem; font-weight: 600; color: #64748b; letter-spacing: 0.04em; }
+    .form-input, .form-select {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 0.5rem 0.7rem;
+      font-size: 0.82rem;
+      color: #e2e8f0;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .form-input:focus, .form-select:focus {
+      border-color: rgba(59,130,246,0.5);
+      box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
+    }
+    .form-select option { background: #1e293b; }
+    .form-input::placeholder { color: #334155; }
+
+    .diag-result {
+      margin-top: 1rem;
+      padding: 1rem 1.25rem;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 12px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.85rem;
+      min-height: 56px;
+      color: #94a3b8;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      transition: all 0.3s;
+    }
+    .diag-result.success { border-color: rgba(16,185,129,0.3); color: #34d399; background: rgba(16,185,129,0.06); }
+    .diag-result.error   { border-color: rgba(239,68,68,0.3); color: #f87171; background: rgba(239,68,68,0.06); }
+    .diag-result.loading { color: #64748b; }
+
+    /* ── Stats Bar ────────────────────────────────────────────── */
+    .stats-bar {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 1.5rem;
+    }
+    .stat-item {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 12px;
+      padding: 0.85rem 1rem;
+      text-align: center;
+    }
+    .stat-value {
+      font-size: 1.4rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .stat-label { font-size: 0.65rem; color: #475569; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; margin-top: 0.15rem; }
+    .stat-blue   { color: #60a5fa; }
+    .stat-green  { color: #34d399; }
+    .stat-amber  { color: #fbbf24; }
+    .stat-red    { color: #f87171; }
+    .stat-purple { color: #a78bfa; }
+
+    /* ── Empty State ──────────────────────────────────────────── */
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: #334155;
+    }
+    .empty-state .empty-icon { font-size: 3rem; margin-bottom: 0.75rem; opacity: 0.5; }
+    .empty-state h3 { font-size: 1rem; font-weight: 600; color: #475569; margin-bottom: 0.4rem; }
+    .empty-state p { font-size: 0.8rem; color: #334155; }
+
+    /* ── Spinner ──────────────────────────────────────────────── */
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,0.1);
+      border-top-color: #60a5fa;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Snackbar ─────────────────────────────────────────────── */
+    #snackbar {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .snack {
+      padding: 0.7rem 1.1rem;
+      border-radius: 10px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      border: 1px solid transparent;
+      animation: slideIn 0.3s ease, slideOut 0.3s ease 3.7s forwards;
+      max-width: 320px;
+    }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(20px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes slideOut {
+      from { opacity: 1; transform: translateX(0); }
+      to   { opacity: 0; transform: translateX(20px); }
+    }
+    .snack.ok  { background: rgba(16,185,129,0.15); border-color: rgba(16,185,129,0.35); color: #34d399; }
+    .snack.err { background: rgba(239,68,68,0.15);  border-color: rgba(239,68,68,0.35);  color: #f87171; }
+    .snack.inf { background: rgba(59,130,246,0.15);  border-color: rgba(59,130,246,0.35); color: #60a5fa; }
+
+    /* ── Misc Utilities ───────────────────────────────────────── */
+    .section-title {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #475569;
+      margin-bottom: 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .section-title::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: rgba(255,255,255,0.05);
+    }
+    .mono { font-family: 'Courier New', monospace; }
+    .text-muted { color: #475569; }
+    .mt-1 { margin-top: 0.5rem; }
+    .mt-2 { margin-top: 1rem; }
+    .mt-3 { margin-top: 1.5rem; }
+    .flex-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+    .last-updated { font-size: 0.68rem; color: #334155; }
+
+    /* ── Responsive ───────────────────────────────────────────── */
+    @media (max-width: 640px) {
+      .app { padding: 0 0.75rem 1.5rem; }
+      .header { padding: 1rem 0 0.75rem; }
+      .entity-grid { grid-template-columns: 1fr 1fr; }
+      .tab { min-width: 70px; font-size: 0.72rem; padding: 0.45rem 0.5rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <div class="header-icon">🔌</div>
+        <div class="header-title">
+          <h1>Modbus USB Controller</h1>
+          <p id="header-subtitle">Loading…</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="status-badge unknown" id="conn-badge">
+          <div class="status-dot"></div>
+          <span id="conn-text">Checking…</span>
+        </div>
+        <button class="btn btn-primary" id="btn-refresh" onclick="refresh()">
+          ↻ Refresh
+        </button>
+      </div>
+    </header>
+
+    <!-- Tabs -->
+    <nav class="tabs" role="tablist" aria-label="Panel sections">
+      <button class="tab active" id="tab-dashboard"   onclick="switchTab('dashboard')"   role="tab">📊 Dashboard</button>
+      <button class="tab"        id="tab-entities"    onclick="switchTab('entities')"    role="tab">📋 Entities</button>
+      <button class="tab"        id="tab-connection"  onclick="switchTab('connection')"  role="tab">🔗 Connection</button>
+      <button class="tab"        id="tab-diagnostics" onclick="switchTab('diagnostics')" role="tab">🔬 Diagnostics</button>
+    </nav>
+
+    <!-- ── DASHBOARD TAB ─────────────────────────────────────── -->
+    <div class="tab-panel active" id="panel-dashboard">
+      <!-- Stats bar -->
+      <div class="stats-bar" id="stats-bar">
+        <div class="stat-item"><div class="stat-value stat-blue" id="stat-total">—</div><div class="stat-label">Total entities</div></div>
+        <div class="stat-item"><div class="stat-value stat-blue" id="stat-sensors">—</div><div class="stat-label">Sensors</div></div>
+        <div class="stat-item"><div class="stat-value stat-purple" id="stat-switches">—</div><div class="stat-label">Switches</div></div>
+        <div class="stat-item"><div class="stat-value stat-amber" id="stat-binary">—</div><div class="stat-label">Binary sensors</div></div>
+        <div class="stat-item"><div class="stat-value stat-green" id="stat-numbers">—</div><div class="stat-label">Numbers</div></div>
+        <div class="stat-item"><div class="stat-value stat-red" id="stat-unavail">—</div><div class="stat-label">Unavailable</div></div>
+      </div>
+
+      <!-- Last updated -->
+      <div class="flex-row mt-1" style="margin-bottom:1rem; justify-content: space-between;">
+        <span class="last-updated" id="last-updated-ts">Last updated: —</span>
+        <span class="last-updated" id="hub-entry-id" style="opacity:0.5"></span>
+      </div>
+
+      <!-- Entity tiles -->
+      <div class="entity-grid" id="entity-grid">
+        <div class="empty-state" style="grid-column:1/-1">
+          <div class="empty-icon">⏳</div>
+          <h3>Loading…</h3>
+          <p>Fetching entity states from Home Assistant</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── ENTITIES TAB ──────────────────────────────────────── -->
+    <div class="tab-panel" id="panel-entities">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">📋 All configured entities</div>
+            <div class="card-subtitle">Entity list from the integration options</div>
+          </div>
+          <button class="btn btn-ghost" onclick="openOptionsFlow()">⚙ Options</button>
+        </div>
+        <div class="table-wrapper">
+          <table id="entities-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Register</th>
+                <th>Address</th>
+                <th>Data type</th>
+                <th>Scale</th>
+                <th>Unit</th>
+                <th>Current value</th>
+              </tr>
+            </thead>
+            <tbody id="entities-tbody">
+              <tr><td colspan="8" style="text-align:center;padding:2rem;color:#334155">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── CONNECTION TAB ────────────────────────────────────── -->
+    <div class="tab-panel" id="panel-connection">
+      <div class="card" id="conn-card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">🔗 Connection parameters</div>
+            <div class="card-subtitle">Current serial port configuration</div>
+          </div>
+          <div class="status-badge unknown" id="conn-badge-2">
+            <div class="status-dot"></div>
+            <span id="conn-text-2">Checking…</span>
+          </div>
+        </div>
+        <div class="info-grid" id="conn-info-grid">
+          <div style="grid-column:1/-1;text-align:center;padding:1.5rem;color:#334155">Loading…</div>
+        </div>
+
+        <div class="section-title mt-3">Coordinator health</div>
+        <div class="info-grid" id="diag-health-grid">
+          <div style="grid-column:1/-1;text-align:center;padding:1rem;color:#334155">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── DIAGNOSTICS TAB ───────────────────────────────────── -->
+    <div class="tab-panel" id="panel-diagnostics">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">🔬 Live register read</div>
+            <div class="card-subtitle">Perform a real-time one-shot Modbus register read via the <code style="font-size:0.7rem;background:rgba(255,255,255,0.08);padding:0.1rem 0.4rem;border-radius:4px">modbus_usb.read_register</code> service</div>
+          </div>
+        </div>
+
+        <!-- Entry selector -->
+        <div class="form-group" style="max-width:320px;margin-bottom:1.25rem">
+          <label class="form-label" for="diag-entry-sel">Hub / Config Entry</label>
+          <select class="form-select" id="diag-entry-sel">
+            <option value="">Select hub…</option>
+          </select>
+        </div>
+
+        <div class="diag-form">
+          <div class="form-group">
+            <label class="form-label" for="diag-addr">Address</label>
+            <input class="form-input mono" type="number" id="diag-addr" min="0" max="65535" value="0" placeholder="0" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="diag-regtype">Register type</label>
+            <select class="form-select" id="diag-regtype">
+              <option value="holding">Holding</option>
+              <option value="input">Input</option>
+              <option value="coil">Coil</option>
+              <option value="discrete">Discrete input</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="diag-dtype">Data type</label>
+            <select class="form-select" id="diag-dtype">
+              <option value="uint16">uint16</option>
+              <option value="int16">int16</option>
+              <option value="uint32">uint32</option>
+              <option value="int32">int32</option>
+              <option value="float32">float32</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">&nbsp;</label>
+            <button class="btn btn-primary" id="btn-read-reg" onclick="doReadRegister()">▶ Read</button>
+          </div>
+        </div>
+
+        <div class="diag-result" id="diag-result">
+          <span>Enter address and click Read to perform a live Modbus read.</span>
+        </div>
+
+        <!-- Write section -->
+        <div class="section-title mt-3">Write register / coil</div>
+        <div class="diag-form">
+          <div class="form-group">
+            <label class="form-label" for="write-addr">Address</label>
+            <input class="form-input mono" type="number" id="write-addr" min="0" max="65535" value="0" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="write-regtype">Register type</label>
+            <select class="form-select" id="write-regtype">
+              <option value="holding">Holding</option>
+              <option value="coil">Coil</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="write-value">Value</label>
+            <input class="form-input mono" type="number" id="write-value" value="0" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">&nbsp;</label>
+            <button class="btn btn-danger" id="btn-write-reg" onclick="doWriteRegister()">✏ Write</button>
+          </div>
+        </div>
+        <div class="diag-result" id="write-result">
+          <span>Enter address, type and value, then click Write.</span>
+        </div>
+      </div>
+
+      <!-- Recent reads log -->
+      <div class="card mt-2">
+        <div class="card-header">
+          <div class="card-title">📜 Recent reads log</div>
+          <button class="btn btn-ghost" onclick="clearLog()">Clear</button>
+        </div>
+        <div id="read-log" style="font-family:'Courier New',monospace;font-size:0.76rem;color:#475569;min-height:60px;max-height:260px;overflow-y:auto">
+          <div style="text-align:center;padding:1rem;color:#334155">No reads yet.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Snackbar container -->
+  <div id="snackbar"></div>
+
+<script>
+// ─── Globals ────────────────────────────────────────────────────────────────
+const DOMAIN = 'modbus_usb';
+let _hass = null;
+let _hassReady = false;
+let _entryId = null;
+let _entryData = {};   // { entry_id: { port, baudrate, … } }
+let _entryOptions = {}; // { entry_id: { entities: [], scan_interval: N } }
+let _statesCache = {};
+let _readLog = [];
+let _refreshInterval = null;
+
+// ─── Bootstrap: get hass from parent window (HA iframe panel) ───────────────
+function getHass() {
+  try {
+    if (window.parent && window.parent.document) {
+      const el = window.parent.document.querySelector('home-assistant');
+      if (el && el.hass) return el.hass;
+    }
+  } catch(e) {}
+  return null;
+}
+
+async function waitForHass() {
+  return new Promise(resolve => {
+    const attempt = () => {
+      const hass = getHass();
+      if (hass) { resolve(hass); return; }
+      setTimeout(attempt, 300);
+    };
+    attempt();
+  });
+}
+
+async function init() {
+  try {
+    _hass = await waitForHass();
+    _hassReady = true;
+    await loadEntryData();
+    await refresh();
+    // Auto-refresh every 15s
+    _refreshInterval = setInterval(refresh, 15000);
+  } catch(e) {
+    console.error('[ModbusUSB Panel] init failed:', e);
+    showError('Failed to connect to Home Assistant: ' + e.message);
+  }
+}
+
+// ─── Load config entry data via hass.callApi ────────────────────────────────
+async function loadEntryData() {
+  try {
+    const entries = await _hass.callApi('GET', 'config/config_entries/entry');
+    const modbusEntries = entries.filter(e => e.domain === DOMAIN);
+
+    _entryData = {};
+    _entryOptions = {};
+
+    modbusEntries.forEach(entry => {
+      _entryData[entry.entry_id] = entry.data || {};
+      _entryOptions[entry.entry_id] = entry.options || { entities: [] };
+      if (!_entryId) _entryId = entry.entry_id;
+    });
+
+    // Populate entry selector in diagnostics
+    const sel = document.getElementById('diag-entry-sel');
+    sel.innerHTML = '';
+    if (modbusEntries.length === 0) {
+      sel.innerHTML = '<option value="">No Modbus USB hubs configured</option>';
+    } else {
+      modbusEntries.forEach(entry => {
+        const opt = document.createElement('option');
+        opt.value = entry.entry_id;
+        opt.textContent = entry.title || entry.entry_id;
+        sel.appendChild(opt);
+      });
+      sel.value = _entryId || '';
+    }
+
+    // Update header subtitle
+    const subtitle = modbusEntries.length === 1
+      ? (_entryData[_entryId]?.port || 'Connected')
+      : `${modbusEntries.length} hubs`;
+    document.getElementById('header-subtitle').textContent = subtitle;
+    document.getElementById('hub-entry-id').textContent = _entryId ? `entry: ${_entryId.substring(0,8)}…` : '';
+
+    updateConnectionTab();
+  } catch(e) {
+    console.warn('[ModbusUSB Panel] Could not load entry data:', e);
+  }
+}
+
+// ─── Main refresh ─────────────────────────────────────────────────────────
+async function refresh() {
+  const btn = document.getElementById('btn-refresh');
+  btn.disabled = true;
+  btn.textContent = '⟳ Loading…';
+
+  try {
+    _hass = getHass() || _hass;
+    _statesCache = _hass.states || {};
+    const ts = new Date().toLocaleTimeString();
+    document.getElementById('last-updated-ts').textContent = `Last updated: ${ts}`;
+
+    renderDashboard();
+    renderEntitiesTable();
+    updateConnectionStatus();
+  } catch(e) {
+    console.error('[ModbusUSB Panel] refresh error:', e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '↻ Refresh';
+  }
+}
+
+// ─── Gather entities from options ──────────────────────────────────────────
+function getAllEntities() {
+  const result = [];
+  for (const [entryId, opts] of Object.entries(_entryOptions)) {
+    const entities = opts.entities || [];
+    entities.forEach(ent => result.push({ ...ent, _entryId: entryId }));
+  }
+  return result;
+}
+
+function findHAState(ent, entryId) {
+  // HA entity_id format: domain.name (slugified)
+  // We search for any state whose attributes.friendly_name matches or entity_id contains slug
+  const slug = (ent.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  const possibleIds = [
+    `${ent.entity_type === 'switch' ? 'switch' : ent.entity_type === 'binary_sensor' ? 'binary_sensor' : ent.entity_type === 'number' ? 'number' : 'sensor'}.${slug}`,
+    `sensor.${slug}`,
+    `switch.${slug}`,
+    `binary_sensor.${slug}`,
+    `number.${slug}`,
+  ];
+  for (const pid of possibleIds) {
+    if (_statesCache[pid]) return _statesCache[pid];
+  }
+  // Fuzzy: scan all states for matching friendly_name
+  for (const [sid, state] of Object.entries(_statesCache)) {
+    if (state.attributes?.friendly_name?.toLowerCase() === (ent.name || '').toLowerCase()) {
+      return state;
+    }
+  }
+  return null;
+}
+
+// ─── Dashboard ─────────────────────────────────────────────────────────────
+function renderDashboard() {
+  const entities = getAllEntities();
+  const grid = document.getElementById('entity-grid');
+
+  let sensors = 0, switches = 0, binary = 0, numbers = 0, unavail = 0;
+
+  if (entities.length === 0) {
+    grid.innerHTML = `
+      <div class="empty-state" style="grid-column:1/-1">
+        <div class="empty-icon">📭</div>
+        <h3>No entities configured</h3>
+        <p>Add sensors or switches via the integration options in Settings → Devices &amp; Services.</p>
+      </div>`;
+    updateStats(0, 0, 0, 0, 0, 0);
+    return;
+  }
+
+  grid.innerHTML = entities.map(ent => {
+    const state = findHAState(ent, ent._entryId);
+    const val = state ? state.state : null;
+    const unit = ent.unit_of_measurement || state?.attributes?.unit_of_measurement || '';
+    const type = ent.entity_type || 'sensor';
+
+    // Update counters
+    if (type === 'sensor') sensors++;
+    else if (type === 'switch') switches++;
+    else if (type === 'binary_sensor') binary++;
+    else if (type === 'number') numbers++;
+    if (val === null || val === 'unavailable') unavail++;
+
+    const typeIcon = { sensor:'📈', switch:'💡', binary_sensor:'🔵', number:'🔢' }[type] || '📊';
+    const tileAccent = { sensor:'linear-gradient(90deg,#3b82f6,#6366f1)', switch:'linear-gradient(90deg,#8b5cf6,#ec4899)', binary_sensor:'linear-gradient(90deg,#f59e0b,#f97316)', number:'linear-gradient(90deg,#10b981,#06b6d4)' }[type] || 'linear-gradient(90deg,#3b82f6,#8b5cf6)';
+
+    let valueHtml = '';
+    let badgeHtml = '';
+
+    if (val === null || val === 'unavailable' || val === 'unknown') {
+      valueHtml = `<div class="entity-value" style="font-size:1rem;opacity:0.4">unavail.</div>`;
+      badgeHtml = `<span class="entity-state-badge badge-unavail">N/A</span>`;
+    } else if (type === 'switch') {
+      const isOn = val === 'on';
+      valueHtml = `<label class="switch-toggle"><input type="checkbox" ${isOn?'checked':''} onchange="toggleSwitch('${ent.name}', this.checked, '${ent._entryId}')"><span class="switch-slider"></span></label>`;
+      badgeHtml = isOn ? `<span class="entity-state-badge badge-on">ON</span>` : `<span class="entity-state-badge badge-off">OFF</span>`;
+    } else if (type === 'binary_sensor') {
+      const isOn = val === 'on';
+      valueHtml = `<div class="entity-value" style="font-size:1.1rem">${isOn ? '🟢 ON' : '⚫ OFF'}</div>`;
+      badgeHtml = isOn ? `<span class="entity-state-badge badge-on">ON</span>` : `<span class="entity-state-badge badge-off">OFF</span>`;
+    } else {
+      const displayVal = parseFloat(val);
+      const formatted = isNaN(displayVal) ? val : displayVal.toLocaleString(undefined, {maximumFractionDigits:3});
+      valueHtml = `<div class="entity-value">${formatted}<span style="font-size:0.65rem;font-weight:400;margin-left:0.2rem;opacity:0.6;-webkit-text-fill-color:#94a3b8">${unit}</span></div>`;
+      badgeHtml = `<span class="entity-state-badge badge-sensor">LIVE</span>`;
+    }
+
+    return `
+    <div class="entity-tile" style="--tile-accent:${tileAccent}">
+      <div class="entity-tile-header">
+        <div class="entity-type-icon ${type}">${typeIcon}</div>
+        ${badgeHtml}
+      </div>
+      ${valueHtml}
+      <div class="entity-name">${ent.name || 'Unknown'}</div>
+      <div class="entity-address mono">${ent.register_type || ''} @ ${ent.address ?? '—'}</div>
+    </div>`;
+  }).join('');
+
+  updateStats(entities.length, sensors, switches, binary, numbers, unavail);
+}
+
+function updateStats(total, sensors, switches, binary, numbers, unavail) {
+  document.getElementById('stat-total').textContent   = total;
+  document.getElementById('stat-sensors').textContent = sensors;
+  document.getElementById('stat-switches').textContent = switches;
+  document.getElementById('stat-binary').textContent  = binary;
+  document.getElementById('stat-numbers').textContent = numbers;
+  document.getElementById('stat-unavail').textContent = unavail;
+}
+
+// ─── Entities Table ─────────────────────────────────────────────────────────
+function renderEntitiesTable() {
+  const entities = getAllEntities();
+  const tbody = document.getElementById('entities-tbody');
+
+  if (entities.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:2rem;color:#334155">No entities configured yet.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = entities.map(ent => {
+    const state = findHAState(ent, ent._entryId);
+    const val = state ? state.state : '—';
+    const unit = ent.unit_of_measurement || state?.attributes?.unit_of_measurement || '';
+    const type = ent.entity_type || 'sensor';
+    const pillClass = {sensor:'pill-sensor',switch:'pill-switch',binary_sensor:'pill-binary',number:'pill-number'}[type]||'pill-sensor';
+    const typeLabel = {sensor:'Sensor',switch:'Switch',binary_sensor:'Binary',number:'Number'}[type]||type;
+    const displayVal = val === null ? '—' : val === 'unavailable' ? '<span style="color:#ef4444">unavail.</span>' : `${val} ${unit}`;
+
+    return `<tr>
+      <td class="td-name">${ent.name || '—'}</td>
+      <td><span class="type-pill ${pillClass}">${typeLabel}</span></td>
+      <td class="mono">${ent.register_type || '—'}</td>
+      <td class="mono">${ent.address ?? '—'}</td>
+      <td class="mono">${ent.data_type || (type === 'switch' || type === 'binary_sensor' ? 'bit' : '—')}</td>
+      <td class="mono">${ent.scale != null && ent.scale !== 1 ? ent.scale : '—'}</td>
+      <td class="mono">${ent.unit_of_measurement || '—'}</td>
+      <td class="mono">${displayVal}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ─── Connection Tab ──────────────────────────────────────────────────────────
+function updateConnectionTab() {
+  if (!_entryId || !_entryData[_entryId]) {
+    document.getElementById('conn-info-grid').innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:1.5rem;color:#334155">No hub configured.</div>';
+    return;
+  }
+  const data = _entryData[_entryId];
+  const opts = _entryOptions[_entryId] || {};
+
+  const fields = [
+    ['Port', data.port || '—'],
+    ['Baud rate', data.baudrate || '—'],
+    ['Byte size', data.bytesize || '—'],
+    ['Parity', data.parity ? ({N:'None',E:'Even',O:'Odd'}[data.parity] || data.parity) : '—'],
+    ['Stop bits', data.stopbits || '—'],
+    ['Slave ID', data.slave_id || '—'],
+    ['Poll interval', opts.scan_interval ? `${opts.scan_interval} s` : '—'],
+    ['Entities', (opts.entities || []).length],
+  ];
+
+  document.getElementById('conn-info-grid').innerHTML = fields.map(([label, value]) => `
+    <div class="info-item">
+      <div class="info-label">${label}</div>
+      <div class="info-value">${value}</div>
+    </div>`).join('');
+}
+
+function updateConnectionStatus() {
+  // Heuristic: if any entity has a non-unavailable state, connection is likely OK
+  const entities = getAllEntities();
+  let hasGoodState = false;
+  let hasAnyState = false;
+
+  entities.forEach(ent => {
+    const state = findHAState(ent, ent._entryId);
+    if (state) {
+      hasAnyState = true;
+      if (state.state !== 'unavailable' && state.state !== 'unknown') hasGoodState = true;
+    }
+  });
+
+  const status = entities.length === 0 ? 'unknown' : (hasGoodState ? 'connected' : (hasAnyState ? 'disconnected' : 'unknown'));
+  const labels = { connected: 'Connected', disconnected: 'Disconnected', unknown: 'No data' };
+
+  ['conn-badge', 'conn-badge-2'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.className = `status-badge ${status}`;
+    el.querySelector('span').textContent = labels[status];
+  });
+
+  // Diagnostics health (placeholder — real data would come from coordinator diag sensor)
+  const healthItems = [
+    ['Mode', 'Local polling'],
+    ['Protocol', 'Modbus RTU over USB'],
+    ['Status', hasGoodState ? '✅ Active' : hasAnyState ? '⚠ Errors' : '❓ No data'],
+  ];
+  document.getElementById('diag-health-grid').innerHTML = healthItems.map(([label, value]) => `
+    <div class="info-item">
+      <div class="info-label">${label}</div>
+      <div class="info-value" style="font-size:0.85rem">${value}</div>
+    </div>`).join('');
+}
+
+// ─── Switch toggle ───────────────────────────────────────────────────────────
+async function toggleSwitch(entityName, isOn, entryId) {
+  const slug = entityName.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  const entityId = `switch.${slug}`;
+  try {
+    await _hass.callService('switch', isOn ? 'turn_on' : 'turn_off', { entity_id: entityId });
+    snack(`${entityName} turned ${isOn ? 'on' : 'off'}`, 'ok');
+    setTimeout(refresh, 1000);
+  } catch(e) {
+    snack(`Failed to toggle ${entityName}: ${e.message}`, 'err');
+  }
+}
+
+// ─── Diagnostics: read ───────────────────────────────────────────────────────
+async function doReadRegister() {
+  const entryId = document.getElementById('diag-entry-sel').value;
+  const address = parseInt(document.getElementById('diag-addr').value, 10);
+  const regType = document.getElementById('diag-regtype').value;
+  const dataType = document.getElementById('diag-dtype').value;
+
+  if (!entryId) { snack('Select a hub first', 'err'); return; }
+  if (isNaN(address)) { snack('Invalid address', 'err'); return; }
+
+  const resultEl = document.getElementById('diag-result');
+  resultEl.className = 'diag-result loading';
+  resultEl.innerHTML = '<div class="spinner"></div><span>Reading register…</span>';
+  document.getElementById('btn-read-reg').disabled = true;
+
+  try {
+    await _hass.callService(DOMAIN, 'read_register', {
+      entry_id: entryId,
+      address: address,
+      register_type: regType,
+      data_type: dataType,
+    });
+
+    // Listen for the event via a short poll on states (result arrives via event bus)
+    // Since we can't easily subscribe to events in an iframe, we wait briefly and show status
+    setTimeout(() => {
+      resultEl.className = 'diag-result success';
+      resultEl.innerHTML = `<span>✅ Read dispatched → result fires as event <code style="background:rgba(255,255,255,0.1);padding:0.1em 0.3em;border-radius:4px">modbus_usb_register_read</code>. Check Logbook or automations.</span>`;
+      appendLog({ address, regType, dataType, status: 'dispatched' });
+      document.getElementById('btn-read-reg').disabled = false;
+    }, 600);
+  } catch(e) {
+    resultEl.className = 'diag-result error';
+    resultEl.innerHTML = `<span>❌ ${e.message}</span>`;
+    appendLog({ address, regType, dataType, status: 'error', error: e.message });
+    document.getElementById('btn-read-reg').disabled = false;
+    snack('Read failed: ' + e.message, 'err');
+  }
+}
+
+// ─── Diagnostics: write ──────────────────────────────────────────────────────
+async function doWriteRegister() {
+  const entryId = document.getElementById('diag-entry-sel').value;
+  const address = parseInt(document.getElementById('write-addr').value, 10);
+  const regType = document.getElementById('write-regtype').value;
+  const value = parseInt(document.getElementById('write-value').value, 10);
+
+  if (!entryId) { snack('Select a hub first', 'err'); return; }
+  if (isNaN(address) || isNaN(value)) { snack('Invalid address or value', 'err'); return; }
+
+  const resultEl = document.getElementById('write-result');
+  resultEl.className = 'diag-result loading';
+  resultEl.innerHTML = '<div class="spinner"></div><span>Writing…</span>';
+  document.getElementById('btn-write-reg').disabled = true;
+
+  try {
+    await _hass.callService(DOMAIN, 'write_register', {
+      entry_id: entryId,
+      address: address,
+      register_type: regType,
+      value: value,
+    });
+    resultEl.className = 'diag-result success';
+    resultEl.innerHTML = `<span>✅ Written: address ${address} (${regType}) ← ${value}</span>`;
+    snack(`Written: addr ${address} = ${value}`, 'ok');
+    setTimeout(refresh, 1000);
+  } catch(e) {
+    resultEl.className = 'diag-result error';
+    resultEl.innerHTML = `<span>❌ ${e.message}</span>`;
+    snack('Write failed: ' + e.message, 'err');
+  } finally {
+    document.getElementById('btn-write-reg').disabled = false;
+  }
+}
+
+// ─── Read log ────────────────────────────────────────────────────────────────
+function appendLog(entry) {
+  const ts = new Date().toLocaleTimeString();
+  _readLog.unshift({ ts, ...entry });
+  if (_readLog.length > 50) _readLog.pop();
+  renderLog();
+}
+
+function renderLog() {
+  const el = document.getElementById('read-log');
+  if (_readLog.length === 0) {
+    el.innerHTML = '<div style="text-align:center;padding:1rem;color:#334155">No reads yet.</div>';
+    return;
+  }
+  el.innerHTML = _readLog.map(r => {
+    const color = r.status === 'error' ? '#f87171' : '#34d399';
+    return `<div style="padding:0.3rem 0;border-bottom:1px solid rgba(255,255,255,0.04);color:${color}">
+      [${r.ts}] ${r.regType}@${r.address} (${r.dataType}) → ${r.status}${r.error ? ': ' + r.error : ''}
+    </div>`;
+  }).join('');
+}
+
+function clearLog() { _readLog = []; renderLog(); }
+
+// ─── Tab switching ────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(`tab-${name}`).classList.add('active');
+  document.getElementById(`panel-${name}`).classList.add('active');
+}
+
+// ─── Open HA options flow ─────────────────────────────────────────────────────
+function openOptionsFlow() {
+  try {
+    window.parent.location.href = `/config/integrations/integration/${DOMAIN}`;
+  } catch(e) {
+    snack('Navigate to Settings → Devices & Services → Modbus USB', 'inf');
+  }
+}
+
+// ─── Snackbar ─────────────────────────────────────────────────────────────────
+function snack(msg, type = 'inf') {
+  const container = document.getElementById('snackbar');
+  const el = document.createElement('div');
+  el.className = `snack ${type}`;
+  el.textContent = msg;
+  container.appendChild(el);
+  setTimeout(() => el.remove(), 4200);
+}
+function showError(msg) { snack(msg, 'err'); }
+
+// ─── Start ────────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>

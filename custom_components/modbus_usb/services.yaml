@@ -1,0 +1,85 @@
+read_register:
+  name: Read Modbus Register
+  description: >
+    Perform a one-shot read of any Modbus register on the connected device.
+    The result is broadcast as the event 'modbus_usb_register_read'.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: The config entry ID of the Modbus USB hub to query.
+      required: true
+      selector:
+        text:
+    address:
+      name: Register Address
+      description: "Modbus register / coil address (0–65535)."
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 65535
+          mode: box
+    register_type:
+      name: Register Type
+      description: "Type of Modbus register to read."
+      required: true
+      default: holding
+      selector:
+        select:
+          options:
+            - holding
+            - input
+            - coil
+            - discrete
+    data_type:
+      name: Data Type
+      description: "How to decode the register word(s). Only applies to holding/input registers."
+      default: uint16
+      selector:
+        select:
+          options:
+            - uint16
+            - int16
+            - uint32
+            - int32
+            - float32
+
+write_register:
+  name: Write Modbus Register
+  description: >
+    Write a value to a Modbus coil or holding register.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: The config entry ID of the Modbus USB hub.
+      required: true
+      selector:
+        text:
+    address:
+      name: Register Address
+      description: "Modbus register / coil address (0–65535)."
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 65535
+          mode: box
+    register_type:
+      name: Register Type
+      description: "Type of Modbus register to write (holding or coil)."
+      required: true
+      default: holding
+      selector:
+        select:
+          options:
+            - holding
+            - coil
+    value:
+      name: Value
+      description: "Integer value to write. For coils: 0 = OFF, 1 = ON."
+      required: true
+      selector:
+        number:
+          min: -32768
+          max: 65535
+          mode: box

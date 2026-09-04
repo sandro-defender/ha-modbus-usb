@@ -3,20 +3,25 @@
     "step": {
       "user": {
         "title": "Connect Modbus USB Controller",
+        "description": "Configure the serial port settings and Modbus slave address for your USB-connected device.",
         "data": {
-          "name": "Name",
-          "port": "Serial port (e.g. /dev/ttyUSB0)",
+          "name": "Integration name",
+          "port": "Serial port (e.g. /dev/ttyUSB0 or COM3)",
           "baudrate": "Baud rate",
-          "bytesize": "Byte size",
+          "bytesize": "Data bits",
           "parity": "Parity",
           "stopbits": "Stop bits",
-          "slave_id": "Slave / Unit ID",
+          "slave_id": "Slave / Unit ID (1–247)",
           "scan_interval": "Poll interval (seconds)"
+        },
+        "data_description": {
+          "scan_interval": "How often the integration reads values from the Modbus device. Lower values mean faster updates but more serial bus traffic.",
+          "slave_id": "The Modbus RTU slave address of your device. Check your device manual."
         }
       }
     },
     "abort": {
-      "already_configured": "This port/slave ID is already configured."
+      "already_configured": "This port/slave ID combination is already configured."
     }
   },
   "options": {
@@ -24,23 +29,30 @@
       "init": {
         "menu_options": {
           "settings": "Change poll interval",
-          "add_entity": "Add a sensor or switch",
+          "add_entity": "Add a sensor, switch, binary sensor, or number",
           "manage_entities": "Edit or remove existing entities"
         }
       },
       "settings": {
+        "title": "Poll settings",
+        "description": "Adjust how often Modbus registers are polled.",
         "data": {
           "scan_interval": "Poll interval (seconds)"
+        },
+        "data_description": {
+          "scan_interval": "How often the integration reads values. Range: 1–3600 seconds."
         }
       },
       "add_entity": {
         "title": "Add entity",
+        "description": "Choose the entity type to create. Sensors and numbers read register values; switches write to coils or registers; binary sensors report coil/discrete state.",
         "data": {
           "entity_type": "Entity type"
         }
       },
       "manage_entities": {
         "title": "Manage entities",
+        "description": "Select an entity to edit its configuration or remove it.",
         "data": {
           "entity": "Entity",
           "action": "Action"
@@ -48,27 +60,70 @@
       },
       "edit_sensor": {
         "title": "Sensor settings",
+        "description": "Configure a read-only Modbus register as a Home Assistant sensor.",
         "data": {
-          "name": "Name",
-          "register_type": "Register type",
-          "address": "Register address",
+          "name": "Entity name",
+          "register_type": "Register type (holding or input)",
+          "address": "Register address (0–65535)",
           "data_type": "Data type",
           "scale": "Scale / multiplier",
-          "unit_of_measurement": "Unit of measurement",
+          "unit_of_measurement": "Unit of measurement (e.g. °C, W, V)",
           "device_class": "Device class",
           "state_class": "State class"
+        },
+        "data_description": {
+          "scale": "Raw register value is multiplied by this factor. Use 0.1 for values stored as 10× integers.",
+          "state_class": "Set to 'measurement' for sensors that constantly change, 'total_increasing' for energy meters."
         }
       },
       "edit_switch": {
         "title": "Switch settings",
+        "description": "Configure a Modbus coil or holding register as a Home Assistant switch.",
         "data": {
-          "name": "Name",
-          "register_type": "Register type",
-          "address": "Register/coil address",
+          "name": "Entity name",
+          "register_type": "Register type (coil or holding)",
+          "address": "Register/coil address (0–65535)",
           "on_value": "Value written for ON (holding register mode only)",
           "off_value": "Value written for OFF (holding register mode only)"
+        },
+        "data_description": {
+          "on_value": "Only used when register type is 'holding'. Ignored for coil registers.",
+          "off_value": "Only used when register type is 'holding'. Ignored for coil registers."
+        }
+      },
+      "edit_binary_sensor": {
+        "title": "Binary sensor settings",
+        "description": "Configure a read-only Modbus coil or discrete input as a binary sensor (on/off state).",
+        "data": {
+          "name": "Entity name",
+          "register_type": "Register type (coil or discrete input)",
+          "address": "Coil/discrete address (0–65535)",
+          "device_class": "Device class"
+        }
+      },
+      "edit_number": {
+        "title": "Number entity settings",
+        "description": "Configure a writable Modbus holding register as a numeric input (slider or text box).",
+        "data": {
+          "name": "Entity name",
+          "register_type": "Register type",
+          "address": "Register address (0–65535)",
+          "data_type": "Data type",
+          "scale": "Scale / multiplier",
+          "unit_of_measurement": "Unit of measurement",
+          "min_value": "Minimum value",
+          "max_value": "Maximum value",
+          "step": "Step size",
+          "mode": "Display mode"
+        },
+        "data_description": {
+          "mode": "Slider shows a draggable range control. Box shows a numeric input field.",
+          "scale": "Display value = raw register value × scale."
         }
       }
+    },
+    "error": {
+      "no_entities": "No entities are configured yet. Use 'Add a sensor or switch' first."
     }
   }
 }

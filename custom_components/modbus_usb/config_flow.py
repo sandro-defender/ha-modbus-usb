@@ -7,7 +7,10 @@ from typing import Any
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import FlowResult
+try:
+    from homeassistant.config_entries import ConfigFlowResult
+except ImportError:
+    from homeassistant.data_entry_flow import FlowResult as ConfigFlowResult
 
 from .const import (
     BAUDRATE_OPTIONS,
@@ -90,7 +93,7 @@ class ModbusUsbConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
             await self.async_set_unique_id(f"{user_input[CONF_PORT]}_{user_input[CONF_SLAVE_ID]}")
@@ -130,20 +133,20 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
     def _entities(self) -> list[dict]:
         return list(self.config_entry.options.get(CONF_ENTITIES, []))
 
-    async def _save_entities(self, entities: list[dict]) -> FlowResult:
+    async def _save_entities(self, entities: list[dict]) -> ConfigFlowResult:
         new_options = dict(self.config_entry.options)
         new_options[CONF_ENTITIES] = entities
         return self.async_create_entry(title="", data=new_options)
 
     # ---------- Main menu ----------
-    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         return self.async_show_menu(
             step_id="init",
             menu_options=["settings", "add_entity", "manage_entities"],
         )
 
     # ---------- Global settings (scan interval) ----------
-    async def async_step_settings(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_settings(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
             new_options = dict(self.config_entry.options)
             new_options[CONF_SCAN_INTERVAL] = user_input[CONF_SCAN_INTERVAL]
@@ -160,7 +163,7 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(step_id="settings", data_schema=schema)
 
     # ---------- Add entity: choose type ----------
-    async def async_step_add_entity(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_add_entity(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
             self._pending_entity_type = user_input[CONF_ENTITY_TYPE]
             self._editing_id = None
@@ -184,7 +187,7 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
     # ---------- Manage: pick an existing entity to edit or remove ----------
     async def async_step_manage_entities(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         entities = self._entities()
         if not entities:
             return self.async_show_form(
@@ -226,7 +229,7 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(step_id="manage_entities", data_schema=schema)
 
     # ---------- Sensor add/edit form ----------
-    async def async_step_edit_sensor(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_edit_sensor(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         existing = None
         if self._editing_id:
             existing = next(
@@ -284,7 +287,7 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(step_id="edit_sensor", data_schema=schema)
 
     # ---------- Switch add/edit form ----------
-    async def async_step_edit_switch(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_edit_switch(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         existing = None
         if self._editing_id:
             existing = next(
@@ -329,7 +332,7 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
     # ---------- Binary sensor add/edit form ----------
     async def async_step_edit_binary_sensor(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         existing = None
         if self._editing_id:
             existing = next(
@@ -381,7 +384,7 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
     # ---------- Number add/edit form ----------
     async def async_step_edit_number(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         existing = None
         if self._editing_id:
             existing = next(

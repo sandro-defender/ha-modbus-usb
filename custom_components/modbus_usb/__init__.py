@@ -43,11 +43,17 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
 
     # Serve static files from the www/ sub-directory next to this file
     www_path = os.path.join(os.path.dirname(__file__), "www")
-    hass.http.register_static_path(
-        f"/modbus_usb_panel",
-        www_path,
-        cache_headers=False,
-    )
+    if hasattr(hass.http, "register_static_path"):
+        hass.http.register_static_path(
+            "/modbus_usb_panel",
+            www_path,
+            cache_headers=False,
+        )
+    else:
+        from homeassistant.components.http import StaticPathConfig
+        hass.http.async_register_static_paths([
+            StaticPathConfig("/modbus_usb_panel", www_path, cache_headers=False)
+        ])
 
     # Register the sidebar panel
     hass.components.frontend.async_register_built_in_panel(

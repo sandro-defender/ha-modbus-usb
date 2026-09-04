@@ -6,6 +6,7 @@ import os
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import (
     CONF_BAUDRATE,
@@ -41,30 +42,41 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         return
     _PANEL_REGISTERED = True
 
-    # Serve static files from the www/ sub-directory next to this file
+    # Serve static files from the www/ sub-directory next to this file.
+    # Prefer the modern async API; only fall back to the deprecated,
+    # blocking `register_static_path` on older HA cores that don't have
+    # `async_register_static_paths` yet. Checking hasattr() for the OLD
+    # method first (as before) meant current installs — which still keep
+    # the deprecated method around for back-compat — would always take
+    # the blocking path instead of the async one.
     www_path = os.path.join(os.path.dirname(__file__), "www")
-    if hasattr(hass.http, "register_static_path"):
+    if hasattr(hass.http, "async_register_static_paths"):
+        from homeassistant.components.http import StaticPathConfig
+        await hass.http.async_register_static_paths([
+            StaticPathConfig("/modbus_usb_panel", www_path, cache_headers=False)
+        ])
+    else:
         hass.http.register_static_path(
             "/modbus_usb_panel",
             www_path,
             cache_headers=False,
         )
-    else:
-        from homeassistant.components.http import StaticPathConfig
-        hass.http.async_register_static_paths([
-            StaticPathConfig("/modbus_usb_panel", www_path, cache_headers=False)
-        ])
 
     # Register the sidebar panel
-    hass.components.frontend.async_register_built_in_panel(
-        "iframe",
-        "Modbus USB",
-        "mdi:usb",
-        "modbus-usb",
-        {"url": "/modbus_usb_panel/modbus-panel.html"},
-        require_admin=False,
-    )
-    _LOGGER.debug("Modbus USB sidebar panel registered")
+    try:
+        from homeassistant.components import frontend
+        frontend.async_register_built_in_panel(
+            hass,
+            "iframe",
+            "Modbus USB",
+            "mdi:usb",
+            "modbus-usb",
+            {"url": "/modbus_usb_panel/modbus-panel.html"},
+            require_admin=False,
+        )
+        _LOGGER.debug("Modbus USB sidebar panel registered")
+    except Exception:
+        _LOGGER.warning("Failed to register sidebar panel", exc_info=True)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -97,7 +109,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         scan_interval=scan_interval,
         entry_id=entry.entry_id,
     )
-    await coordinator.async_config_entry_first_refresh()
+
+    # If the first refresh fails (e.g. raises ConfigEntryNotReady because the
+    # device isn't reachable yet), HA will retry async_setup_entry later.
+    # Without closing the client here first, the already-opened serial port
+    # is leaked and a new client/port is opened on every retry.
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except Exception:
+        await hass.async_add_executor_job(client.close)
+        raise
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = coordinator

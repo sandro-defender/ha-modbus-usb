@@ -67,11 +67,11 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         from homeassistant.components import frontend
         frontend.async_register_built_in_panel(
             hass,
-            "iframe",
-            "Modbus USB",
-            "mdi:usb",
-            "modbus-usb",
-            {"url": "/modbus_usb_panel/modbus-panel.html"},
+            component_name="iframe",
+            sidebar_title="Modbus USB",
+            sidebar_icon="mdi:usb",
+            frontend_url_path="modbus-usb",
+            config={"url": "/modbus_usb_panel/modbus-panel.html"},
             require_admin=False,
         )
         _LOGGER.debug("Modbus USB sidebar panel registered")

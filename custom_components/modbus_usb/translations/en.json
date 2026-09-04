@@ -1,0 +1,74 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect Modbus USB Controller",
+        "data": {
+          "name": "Name",
+          "port": "Serial port (e.g. /dev/ttyUSB0)",
+          "baudrate": "Baud rate",
+          "bytesize": "Byte size",
+          "parity": "Parity",
+          "stopbits": "Stop bits",
+          "slave_id": "Slave / Unit ID",
+          "scan_interval": "Poll interval (seconds)"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This port/slave ID is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "menu_options": {
+          "settings": "Change poll interval",
+          "add_entity": "Add a sensor or switch",
+          "manage_entities": "Edit or remove existing entities"
+        }
+      },
+      "settings": {
+        "data": {
+          "scan_interval": "Poll interval (seconds)"
+        }
+      },
+      "add_entity": {
+        "title": "Add entity",
+        "data": {
+          "entity_type": "Entity type"
+        }
+      },
+      "manage_entities": {
+        "title": "Manage entities",
+        "data": {
+          "entity": "Entity",
+          "action": "Action"
+        }
+      },
+      "edit_sensor": {
+        "title": "Sensor settings",
+        "data": {
+          "name": "Name",
+          "register_type": "Register type",
+          "address": "Register address",
+          "data_type": "Data type",
+          "scale": "Scale / multiplier",
+          "unit_of_measurement": "Unit of measurement",
+          "device_class": "Device class",
+          "state_class": "State class"
+        }
+      },
+      "edit_switch": {
+        "title": "Switch settings",
+        "data": {
+          "name": "Name",
+          "register_type": "Register type",
+          "address": "Register/coil address",
+          "on_value": "Value written for ON (holding register mode only)",
+          "off_value": "Value written for OFF (holding register mode only)"
+        }
+      }
+    }
+  }
+}

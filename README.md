@@ -1,126 +1,214 @@
-# Modbus USB Controller for Home Assistant
+# Modbus USB Controller
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-[![GitHub Release](https://img.shields.io/github/v/release/sandro-defender/ha-modbus-usb)](https://github.com/sandro-defender/ha-modbus-usb/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+<p align="center">
+  <img src="https://img.shields.io/badge/Home%20Assistant-Custom%20Integration-18bcf2?style=for-the-badge&logo=homeassistant&logoColor=white" alt="Home Assistant">
+  <img src="https://img.shields.io/badge/HACS-Custom-41BDF5?style=for-the-badge" alt="HACS">
+</p>
 
-A feature-rich Home Assistant custom integration that connects to any **Modbus RTU device over USB** (RS-485 serial adapter). Configure sensors, switches, binary sensors and number entities entirely from the UI — zero YAML required.
+<p align="center">
+  <a href="https://github.com/hacs/integration"><img src="https://img.shields.io/badge/HACS-Custom-orange.svg" alt="HACS Custom"></a>
+  <a href="https://github.com/sandro-defender/ha-modbus-usb/releases"><img src="https://img.shields.io/github/v/release/sandro-defender/ha-modbus-usb" alt="GitHub Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
+  <img src="https://img.shields.io/badge/HA-2024.1%2B-green.svg" alt="Home Assistant 2024.1+">
+  <img src="https://img.shields.io/badge/Modbus-RTU%20%2F%20USB-purple.svg" alt="Modbus RTU USB">
+</p>
 
-Includes a **custom sidebar panel** with live dashboard, entity table, connection details, and a built-in Modbus register diagnostic tool.
+Connect **Modbus RTU devices on a USB–RS-485 adapter** to Home Assistant. One serial hub, many slaves. Sensors, switches, binary sensors, and numbers are created from the UI — no YAML entity definitions required.
+
+A **sidebar panel** (`Modbus USB`) is the main control surface: live values, device management, YAML templates, hub settings, and register diagnostics.
+
+---
+
+## Why this integration
+
+Home Assistant’s built-in Modbus integration is YAML-first and treats the serial port as a bag of registers. This project models the bus the way it actually works:
+
+| Layer | What it is | Home Assistant |
+| --- | --- | --- |
+| **Hub** | USB serial adapter (port, baud, parity, poll interval) | Config entry + hub device |
+| **Device** | One Modbus slave (ID 1–247), model, manufacturer | Child device *via* the hub |
+| **Entity** | A register or coil mapped to a platform | Sensor / switch / binary sensor / number |
+
+Multiple meters, relays, and sensors can share the same RS-485 cable. Each device keeps its own slave ID; entities inherit it automatically.
 
 ---
 
 ## Features
 
-### Entity platforms
-| Platform | Register types | Description |
-|----------|----------------|-------------|
-| **Sensor** | Holding, Input | Read numeric values with scale, unit, device class, state class |
-| **Switch** | Coil, Holding | Toggle coils or holding registers with custom ON/OFF values |
-| **Binary Sensor** | Coil, Discrete input | Read-only on/off state with HA binary sensor device class |
-| **Number** | Holding | Writable register as a slider or text box (min/max/step/scale) |
+### Platforms
 
-### Sidebar Panel & UI Configuration
-A dark, glassmorphism dashboard and management panel accessible directly from the HA sidebar:
+| Platform | Register types | Notes |
+| --- | --- | --- |
+| **Sensor** | Holding, Input | Scale, unit, device class, state class (`measurement` / `total` / `total_increasing`) |
+| **Switch** | Coil, Holding | Optional custom ON / OFF values for holding registers |
+| **Binary sensor** | Coil, Discrete input | Read-only; HA binary-sensor device classes |
+| **Number** | Holding | Slider or box; min / max / step / scale |
 
-- **🎛 Devices** — Manage separated, individual Modbus devices with their own Slave IDs (1–247), models, and manufacturers. Add entities directly or apply templates per device.
-- **📑 Device Templates** — Device templates saved as individual `.yaml` files in `modbus_usb_templates/`. Create, edit (with built-in YAML editor), duplicate, and delete templates right from the sidebar.
-- **📊 Live Dashboard** — Live entity tiles with current values, inline switch toggles, number controls, device filter chips, stats bar (total / per-type / unavailable counts), auto-refresh every 15 s.
-- **📋 All Entities** — Complete table of all configured entities with device tags, type, register, address, data type, scale, unit, and inline edit/delete actions.
-- **🔗 Hub & Connection** — Serial port parameters at a glance + direct "Edit Hub Settings" modal to reconfigure serial port, baud rate, parity, stop bits, and poll interval without opening HA options flow wizard.
-- **🔬 Diagnostics** — One-shot live register reads and writes via custom HA services, with target slave ID selector.
+**Data types:** `uint16`, `int16`, `uint32`, `int32`, `float32` (32-bit values use two registers, big-endian / high word first).
 
-### Services
-Two custom services usable in automations and Developer Tools:
+### Sidebar panel
 
-| Service | Description |
-|---------|-------------|
-| `modbus_usb.read_register` | One-shot live read with optional `slave_id` → fires `modbus_usb_register_read` event with the value |
-| `modbus_usb.write_register` | Write a value to a coil or holding register with optional `slave_id` |
+Open **Modbus USB** in the Home Assistant sidebar after the integration is loaded.
 
-### Other
-- **100% Sidebar UI Configurable** — add/edit/remove hubs, separated devices, entities, and templates directly from the sidebar UI without modal wizard popups
-- **Separate Device Architecture** — each Modbus device is registered in HA Device Registry under the hub
-- **Per-Device Slave ID** — supports multiple devices on the same RS-485 serial bus with distinct slave addresses (1–247)
-- **Preloaded YAML Templates** — includes starter templates for Eastron SDM120, XY-MD02, 8-Channel Relay, and DDS238
-- Adjustable poll interval (1–3600 s)
-- Automatic reconnection if the USB device is temporarily disconnected
-- HACS-compatible with GitHub Releases for update notifications
-- `mdi:usb` icon in the integrations list
+- **Devices** — Add, edit, and remove slaves. Apply a template or add entities on a specific device.
+- **Templates** — YAML files in `config/modbus_usb_templates/`. Create, edit, duplicate, and delete from the panel. Empty folder is seeded with bundled starters.
+- **Dashboard** — Live tiles, switch toggles, number controls, device chips, counts (total / by type / unavailable), refresh ~15 s.
+- **Entities** — Full table (device, type, register, address, data type, scale, unit) with inline edit / delete.
+- **Hub** — Serial settings and poll interval (1–3600 s) without walking the options-flow wizard.
+- **Diagnostics** — One-shot register read / write with slave ID, backed by the same HA services used in automations.
+
+### Runtime
+
+- Automatic retry if the USB adapter is missing at startup or disconnects later
+- Devices and entities reload when options change
+- `modbus_usb.read_register` / `modbus_usb.write_register` for automations and Developer Tools
+- HACS + GitHub Releases for update notifications
+
+---
+
+## Bundled templates
+
+Copied into `config/modbus_usb_templates/` on first run if that folder has no YAML yet. Treat them as starting points — verify addresses against your datasheet.
+
+| File | Device | Entities |
+| --- | --- | --- |
+| `sdm120.yaml` | Eastron SDM120 | Voltage, current, power, PF, frequency, energy |
+| `dds238.yaml` | Hiking DDS238-2 ZN/S | Energy, V, I, P, Q, PF, frequency |
+| `xy_md02.yaml` | XY-MD02 (temp / humidity) | Temperature, humidity |
+| `relay_8ch.yaml` | 8-ch Modbus relay | 8 coil switches + 2 discrete inputs |
+| `generic_meter.yaml` | Generic RTU device | Sensor, number, switch, binary sensor |
+
+Template files look like this:
+
+```yaml
+id: xy_md02
+name: XY-MD02 Temperature & Humidity
+manufacturer: SHT20
+model: XY-MD02
+default_slave_id: 1
+description: RS485 Modbus RTU temperature and humidity environmental sensor
+entities:
+  - name: Temperature
+    entity_type: sensor
+    register_type: input
+    address: 1
+    data_type: int16
+    scale: 0.1
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+```
 
 ---
 
 ## Requirements
 
-- Home Assistant 2024.1 or newer
-- `pymodbus >= 3.6.0` (installed automatically)
-- A USB-to-RS485 adapter and a Modbus RTU device
+- Home Assistant **2024.1.0** or newer
+- **pymodbus ≥ 3.6.0** (installed automatically)
+- A USB-to-RS-485 adapter and at least one Modbus RTU slave
 
 ---
 
-## Installation via HACS
+## Installation
 
-1. In Home Assistant open **HACS → Integrations → ⋮ → Custom repositories**.
-2. Add `https://github.com/sandro-defender/ha-modbus-usb` — category **Integration**.
-3. Find **Modbus USB Controller** and click **Download**.
-4. Restart Home Assistant.
-5. Go to **Settings → Devices & Services → Add Integration → Modbus USB Controller**.
+### HACS
 
----
+1. **HACS → Integrations → ⋮ → Custom repositories**
+2. Add `https://github.com/sandro-defender/ha-modbus-usb` as category **Integration**
+3. Download **Modbus USB Controller**
+4. Restart Home Assistant
+5. **Settings → Devices & Services → Add Integration → Modbus USB Controller**
 
-## Manual installation
+### Manual
 
-1. Download or clone this repository.
-2. Copy `custom_components/modbus_usb/` into your HA `config/custom_components/` directory.
-3. Restart Home Assistant.
+1. Copy `custom_components/modbus_usb/` into `config/custom_components/`
+2. Restart Home Assistant
+3. Add the integration as above
 
 ---
 
 ## Setup
 
-1. **Settings → Devices & Services → Add Integration → Modbus USB Controller**
-2. Enter your serial port (e.g. `/dev/ttyUSB0` on Linux/HAOS, `COM3` on Windows), baud rate, parity, stop bits, slave/unit ID and poll interval.
-3. After setup, click **Configure** on the integration card to add entities.
+### 1. Create the hub
 
-### Adding entities
+**Settings → Devices & Services → Add Integration → Modbus USB Controller**
 
-Go to **Settings → Devices & Services → Modbus USB Controller → Configure** and choose:
+| Field | Typical values |
+| --- | --- |
+| Serial port | `/dev/ttyUSB0` (HAOS / Linux), `COM3` (Windows) |
+| Baud rate | 1200–115200 (default **9600**) |
+| Data bits | 7 or 8 (default **8**) |
+| Parity | None / Even / Odd (default **N**) |
+| Stop bits | 1 or 2 (default **1**) |
+| Default slave ID | 1–247 (fallback when a device has no ID of its own) |
+| Poll interval | 1–3600 seconds (default **10**) |
 
-- **Add a sensor** — specify register type (holding/input), address, data type, scale, unit, device class and state class.
-- **Add a switch** — specify coil or holding register, address, and optional ON/OFF register values.
-- **Add a binary sensor** — specify coil or discrete-input address and device class.
-- **Add a number** — specify holding register, address, data type, scale, unit, min/max/step and display mode (slider or box).
+The adapter does not need to be connected on first save; the coordinator keeps retrying.
 
-### Finding your register map
+### 2. Add devices and entities
 
-Check your device's documentation or datasheet to identify:
-- **Register type** — holding (read/write 16-bit), input (read-only 16-bit), coil (read/write 1-bit), discrete input (read-only 1-bit)
-- **Address** — 0-based or 1-based depending on the device (subtract 1 from the datasheet address if it starts at 40001)
-- **Data type** — uint16, int16, uint32, int32 or float32
+Prefer the **Modbus USB** sidebar:
+
+1. Open **Devices** and add a slave (name, slave ID, optional manufacturer / model).
+2. Apply a template, or add sensors / switches / binary sensors / numbers on that device.
+3. Confirm live values on the **Dashboard**.
+
+You can still use **Configure** on the integration card (options flow) to add or edit entities one at a time.
+
+### Register addresses
+
+Use the device datasheet:
+
+| Type | Meaning |
+| --- | --- |
+| Holding | 16-bit read / write |
+| Input | 16-bit read-only |
+| Coil | 1-bit read / write |
+| Discrete | 1-bit read-only |
+
+Many manuals use **1-based** or **40001-style** numbering. If the sheet says holding `40001`, the Modbus address is usually **0**. If reads look shifted by one, subtract 1 from the documented address.
 
 ---
 
-## USB passthrough (Docker / HAOS)
+## USB access (HAOS / Docker)
 
-Make sure the USB adapter is accessible inside the HA container:
+The serial device must be visible inside Home Assistant.
 
-**HAOS** — use the *Hardware* page to enable USB passthrough, or add the device in your `configuration.yaml`:
+**Home Assistant OS / Supervised** — plug in the adapter and pick the port from **Settings → System → Hardware** (often `/dev/ttyUSB0` or `/dev/serial/by-id/...`). Prefer a `/dev/serial/by-id/` path so the port stays stable across reboots.
+
+**Docker** — pass the device through:
+
 ```yaml
-homeassistant:
-  usb_path: /dev/ttyUSB0
-```
-
-**Docker** — add `--device /dev/ttyUSB0:/dev/ttyUSB0` to your `docker run` command, or add to `docker-compose.yml`:
-```yaml
+# docker-compose.yml
 devices:
   - /dev/ttyUSB0:/dev/ttyUSB0
 ```
 
+Or: `docker run --device /dev/ttyUSB0:/dev/ttyUSB0 ...`
+
 ---
 
-## Using the services in automations
+## Services
 
-### Read a register and act on the value
+Both services take `entry_id` (config entry ID from **Settings → Devices & Services → Modbus USB Controller**). Optional `slave_id` overrides the hub default.
+
+### `modbus_usb.read_register`
+
+Reads once and fires event `modbus_usb_register_read`.
+
+```yaml
+action:
+  - service: modbus_usb.read_register
+    data:
+      entry_id: "YOUR_ENTRY_ID"
+      address: 0
+      register_type: holding   # holding | input | coil | discrete
+      data_type: uint16        # holding/input only
+      slave_id: 1              # optional, 1–247
+```
+
+React to the result:
+
 ```yaml
 automation:
   trigger:
@@ -128,14 +216,17 @@ automation:
       event_type: modbus_usb_register_read
   condition:
     - condition: template
-      value_template: "{{ trigger.event.data.success and trigger.event.data.address == 100 }}"
+      value_template: "{{ trigger.event.data.success and trigger.event.data.address == 0 }}"
   action:
-    - service: notify.mobile_app_my_phone
+    - service: notify.persistent_notification
       data:
-        message: "Register 100 = {{ trigger.event.data.value }}"
+        message: "Register 0 = {{ trigger.event.data.value }}"
 ```
 
-### Write a register on a schedule
+### `modbus_usb.write_register`
+
+Writes a coil or holding register.
+
 ```yaml
 automation:
   trigger:
@@ -144,29 +235,38 @@ automation:
   action:
     - service: modbus_usb.write_register
       data:
-        entry_id: "YOUR_ENTRY_ID"   # find in Settings → Devices & Services → Integration → entry ID
+        entry_id: "YOUR_ENTRY_ID"
         address: 10
-        register_type: holding
-        value: 1
+        register_type: holding   # holding | coil
+        value: 1                 # coils: 0 = off, 1 = on
+        slave_id: 1
 ```
 
 ---
 
 ## Releasing updates
 
-1. Bump `"version"` in [`manifest.json`](custom_components/modbus_usb/manifest.json).
+1. Bump `"version"` in [`custom_components/modbus_usb/manifest.json`](custom_components/modbus_usb/manifest.json).
 2. Commit and push.
-3. Create a GitHub **Release** with a matching tag (e.g. `v1.1.1`).
-4. HACS users will see an **Update available** notification.
+3. Create a GitHub **Release** whose tag matches (for example `v1.1.5`).
+4. HACS users get an **Update available** notice.
 
 ---
 
 ## Contributing
 
-Issues and pull requests are welcome at [github.com/sandro-defender/ha-modbus-usb](https://github.com/sandro-defender/ha-modbus-usb/issues).
+Issues and pull requests: [github.com/sandro-defender/ha-modbus-usb](https://github.com/sandro-defender/ha-modbus-usb/issues).
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[Apache License 2.0](LICENSE).
+
+---
+
+## Changelog
+
+### 2026-09-06
+- Rewrote README: hub → device → entity model, sidebar-first setup, bundled templates, services, USB passthrough, Apache 2.0 badge (was incorrectly listed as MIT).
+- Date modified: 2026-09-06

@@ -18,7 +18,7 @@ from .const import (
     CONF_UNIT_OF_MEASUREMENT,
     DOMAIN,
 )
-from .coordinator import ModbusUsbCoordinator
+from .coordinator import ModbusUsbCoordinator, get_device_info
 
 
 async def async_setup_entry(
@@ -46,11 +46,7 @@ class ModbusUsbSensor(CoordinatorEntity[ModbusUsbCoordinator], SensorEntity):
         self._attr_native_unit_of_measurement = ent.get(CONF_UNIT_OF_MEASUREMENT) or None
         self._attr_device_class = ent.get(CONF_DEVICE_CLASS)
         self._attr_state_class = ent.get(CONF_STATE_CLASS)
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title,
-            manufacturer="Modbus USB",
-        )
+        self._attr_device_info = get_device_info(entry, ent)
 
     @property
     def native_value(self):

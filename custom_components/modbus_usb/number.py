@@ -17,6 +17,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     CONF_ADDRESS,
     CONF_DATA_TYPE,
+    CONF_DEVICES,
+    CONF_DEVICE_ID,
     CONF_ENTITIES,
     CONF_ENTITY_ID,
     CONF_ENTITY_TYPE,
@@ -26,6 +28,7 @@ from .const import (
     CONF_NAME,
     CONF_REGISTER_TYPE,
     CONF_SCALE,
+    CONF_SLAVE_ID,
     CONF_STEP,
     CONF_UNIT_OF_MEASUREMENT,
     DATA_TYPE_UINT16,
@@ -33,7 +36,7 @@ from .const import (
     DOMAIN,
     REGISTER_TYPE_HOLDING,
 )
-from .coordinator import ModbusUsbCoordinator
+from .coordinator import ModbusUsbCoordinator, get_device_info
 
 
 async def async_setup_entry(
@@ -68,11 +71,19 @@ class ModbusUsbNumber(CoordinatorEntity[ModbusUsbCoordinator], NumberEntity):
         mode_str = ent.get(CONF_MODE, "slider")
         self._attr_mode = NumberMode.SLIDER if mode_str == "slider" else NumberMode.BOX
         self._scale: float = float(ent.get(CONF_SCALE, 1))
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title,
-            manufacturer="Modbus USB",
-        )
+        self._attr_device_info = get_device_info(entry, ent)
+
+    def _resolve_slave_id(self) -> int | None:
+        slave = self._ent.get(CONF_SLAVE_ID)
+        if slave is None and self._ent.get(CONF_DEVICE_ID):
+            devices = self._entry.options.get(CONF_DEVICES, [])
+            dev = next(
+                (d for d in devices if str(d.get("id")) == str(self._ent.get(CONF_DEVICE_ID))),
+                None,
+            )
+            if dev and dev.get(CONF_SLAVE_ID) is not None:
+                slave = dev.get(CONF_SLAVE_ID)
+        return int(slave) if slave is not None else None
 
     @property
     def native_value(self) -> float | None:
@@ -90,17 +101,18 @@ class ModbusUsbNumber(CoordinatorEntity[ModbusUsbCoordinator], NumberEntity):
         data_type = self._ent.get(CONF_DATA_TYPE, DATA_TYPE_UINT16)
         count = DATA_TYPE_WORD_COUNT.get(data_type, 1)
         scale = self._scale
+        slave = self._resolve_slave_id()
 
         # Convert display value back to raw integer
         raw_int = int(round(value / scale)) if scale not in (1.0, 0.0) else int(round(value))
 
         if count == 1:
             await self.hass.async_add_executor_job(
-                self.coordinator.write_register, address, raw_int
+                self.coordinator.write_register, address, raw_int, slave
             )
         else:
             # 32-bit: write two registers using pymodbus write_registers
             await self.hass.async_add_executor_job(
-                self.coordinator.write_registers_32bit, address, raw_int, data_type
+                self.coordinator.write_registers_32bit, address, raw_int, data_type, slave
             )
         await self.coordinator.async_request_refresh()

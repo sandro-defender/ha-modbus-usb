@@ -1,0 +1,70 @@
+id: dds238
+name: Hiking DDS238 Energy Meter
+manufacturer: Hiking
+model: DDS238-2 ZN/S
+default_slave_id: 1
+description: Single phase DIN rail smart electricity meter with RS485 Modbus RTU
+entities:
+  - name: Total Energy
+    entity_type: sensor
+    register_type: holding
+    address: 0
+    data_type: uint32
+    scale: 0.01
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+  - name: Voltage
+    entity_type: sensor
+    register_type: holding
+    address: 12
+    data_type: uint16
+    scale: 0.1
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+  - name: Current
+    entity_type: sensor
+    register_type: holding
+    address: 13
+    data_type: uint16
+    scale: 0.01
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+  - name: Active Power
+    entity_type: sensor
+    register_type: holding
+    address: 14
+    data_type: uint16
+    scale: 1
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+  - name: Reactive Power
+    entity_type: sensor
+    register_type: holding
+    address: 15
+    data_type: uint16
+    scale: 1
+    unit_of_measurement: "var"
+    device_class: power
+    state_class: measurement
+  - name: Power Factor
+    entity_type: sensor
+    register_type: holding
+    address: 16
+    data_type: uint16
+    scale: 0.001
+    unit_of_measurement: ""
+    device_class: power_factor
+    state_class: measurement
+  - name: Frequency
+    entity_type: sensor
+    register_type: holding
+    address: 17
+    data_type: uint16
+    scale: 0.01
+    unit_of_measurement: "Hz"
+    device_class: frequency
+    state_class: measurement

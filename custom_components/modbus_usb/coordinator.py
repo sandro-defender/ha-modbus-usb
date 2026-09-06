@@ -6,16 +6,24 @@ import struct
 from datetime import datetime, timedelta
 from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
     CONF_ADDRESS,
     CONF_DATA_TYPE,
+    CONF_DEVICES,
+    CONF_DEVICE_ID,
     CONF_ENTITIES,
     CONF_ENTITY_TYPE,
+    CONF_MANUFACTURER,
+    CONF_MODEL,
+    CONF_NAME,
     CONF_REGISTER_TYPE,
     CONF_SCALE,
+    CONF_SLAVE_ID,
     DATA_TYPE_FLOAT32,
     DATA_TYPE_INT16,
     DATA_TYPE_INT32,
@@ -27,6 +35,7 @@ from .const import (
     DIAG_LAST_ERROR,
     DIAG_LAST_SUCCESS,
     DIAG_TOTAL_READS,
+    DOMAIN,
     REGISTER_TYPE_COIL,
     REGISTER_TYPE_DISCRETE,
     REGISTER_TYPE_HOLDING,
@@ -52,6 +61,28 @@ def _decode_words(words: list[int], data_type: str) -> float | int:
     if data_type == DATA_TYPE_FLOAT32:
         return struct.unpack(">f", raw)[0]
     return words[0]
+
+
+def get_device_info(entry: ConfigEntry, ent: dict) -> DeviceInfo:
+    """Return DeviceInfo for an entity, linking it to a separated device or the hub."""
+    device_id = ent.get(CONF_DEVICE_ID)
+    if device_id:
+        devices = entry.options.get(CONF_DEVICES, [])
+        device = next((d for d in devices if str(d.get("id")) == str(device_id)), None)
+        if device:
+            return DeviceInfo(
+                identifiers={(DOMAIN, f"{entry.entry_id}_{device_id}")},
+                name=device.get(CONF_NAME, f"Device {device_id}"),
+                manufacturer=device.get(CONF_MANUFACTURER, "Modbus USB"),
+                model=device.get(CONF_MODEL, "Modbus Device"),
+                via_device=(DOMAIN, entry.entry_id),
+            )
+    return DeviceInfo(
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=entry.title,
+        manufacturer="Modbus USB",
+        model="Modbus Serial Hub",
+    )
 
 
 class ModbusUsbCoordinator(DataUpdateCoordinator):
@@ -92,25 +123,42 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             return []
         return entry.options.get(CONF_ENTITIES, [])
 
+    def _get_device_slave_map(self) -> dict[str, int]:
+        entry = self.hass.config_entries.async_get_entry(self.entry_id)
+        if entry is None:
+            return {}
+        devices = entry.options.get(CONF_DEVICES, [])
+        return {
+            str(d.get("id")): int(d.get(CONF_SLAVE_ID, self.slave_id))
+            for d in devices
+            if "id" in d and d.get(CONF_SLAVE_ID) is not None
+        }
+
     async def _async_update_data(self) -> dict[str, Any]:
         entities = self._get_entities()
         if not entities:
             return {}
         try:
-            return await self.hass.async_add_executor_job(self._read_all, entities)
+            device_slave_map = self._get_device_slave_map()
+            return await self.hass.async_add_executor_job(
+                self._read_all, entities, device_slave_map
+            )
         except Exception as err:  # noqa: BLE001
             raise UpdateFailed(f"Error communicating with Modbus device: {err}") from err
 
-    def _read_all(self, entities: list[dict]) -> dict[str, Any]:
+    def _read_all(
+        self, entities: list[dict], device_slave_map: dict[str, int] | None = None
+    ) -> dict[str, Any]:
         if not self.client.connected:
             self.client.connect()
 
+        device_slave_map = device_slave_map or {}
         data: dict[str, Any] = {}
         for ent in entities:
             ent_id = ent["id"]
             self.diag[DIAG_TOTAL_READS] += 1
             try:
-                data[ent_id] = self._read_one(ent)
+                data[ent_id] = self._read_one(ent, device_slave_map)
                 self.diag[DIAG_CONSECUTIVE_FAILURES] = 0
                 self.diag[DIAG_LAST_SUCCESS] = datetime.now().isoformat()
             except Exception as err:  # noqa: BLE001
@@ -121,18 +169,26 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 self.diag[DIAG_LAST_ERROR] = str(err)
         return data
 
-    def _read_one(self, ent: dict) -> Any:
+    def _read_one(self, ent: dict, device_slave_map: dict[str, int] | None = None) -> Any:
         register_type = ent[CONF_REGISTER_TYPE]
         address = ent[CONF_ADDRESS]
 
+        # Resolve slave ID: entity -> device -> hub default
+        slave = ent.get(CONF_SLAVE_ID)
+        if slave is None and device_slave_map and ent.get(CONF_DEVICE_ID):
+            slave = device_slave_map.get(str(ent.get(CONF_DEVICE_ID)))
+        if slave is None:
+            slave = self.slave_id
+        target_slave = int(slave)
+
         if register_type == REGISTER_TYPE_COIL:
-            result = self.client.read_coils(address, 1, slave=self.slave_id)
+            result = self.client.read_coils(address, 1, slave=target_slave)
             if result.isError():
                 raise UpdateFailed(str(result))
             return bool(result.bits[0])
 
         if register_type == REGISTER_TYPE_DISCRETE:
-            result = self.client.read_discrete_inputs(address, 1, slave=self.slave_id)
+            result = self.client.read_discrete_inputs(address, 1, slave=target_slave)
             if result.isError():
                 raise UpdateFailed(str(result))
             return bool(result.bits[0])
@@ -142,9 +198,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         scale = ent.get(CONF_SCALE, 1)
 
         if register_type == REGISTER_TYPE_HOLDING:
-            result = self.client.read_holding_registers(address, count, slave=self.slave_id)
+            result = self.client.read_holding_registers(address, count, slave=target_slave)
         elif register_type == REGISTER_TYPE_INPUT:
-            result = self.client.read_input_registers(address, count, slave=self.slave_id)
+            result = self.client.read_input_registers(address, count, slave=target_slave)
         else:
             raise UpdateFailed(f"Unknown register type: {register_type}")
 
@@ -156,26 +212,31 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             value = value * scale
         return value
 
-    def write_coil(self, address: int, value: bool) -> None:
+    def write_coil(self, address: int, value: bool, slave: int | None = None) -> None:
         """Write a coil value (used by switches). Runs synchronously - call via executor."""
         if not self.client.connected:
             self.client.connect()
-        result = self.client.write_coil(address, value, slave=self.slave_id)
+        target_slave = int(slave if slave is not None else self.slave_id)
+        result = self.client.write_coil(address, value, slave=target_slave)
         if result.isError():
             raise UpdateFailed(str(result))
 
-    def write_register(self, address: int, value: int) -> None:
+    def write_register(self, address: int, value: int, slave: int | None = None) -> None:
         """Write a single holding register (used by switches modeled as registers)."""
         if not self.client.connected:
             self.client.connect()
-        result = self.client.write_register(address, value, slave=self.slave_id)
+        target_slave = int(slave if slave is not None else self.slave_id)
+        result = self.client.write_register(address, value, slave=target_slave)
         if result.isError():
             raise UpdateFailed(str(result))
 
-    def write_registers_32bit(self, address: int, value: int, data_type: str) -> None:
+    def write_registers_32bit(
+        self, address: int, value: int, data_type: str, slave: int | None = None
+    ) -> None:
         """Write two consecutive holding registers for 32-bit data types."""
         if not self.client.connected:
             self.client.connect()
+        target_slave = int(slave if slave is not None else self.slave_id)
         if data_type in ("int32",):
             raw = struct.pack(">i", value)
         elif data_type in ("float32",):
@@ -183,29 +244,32 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         else:  # uint32
             raw = struct.pack(">I", value)
         high, low = struct.unpack(">HH", raw)
-        result = self.client.write_registers(address, [high, low], slave=self.slave_id)
+        result = self.client.write_registers(address, [high, low], slave=target_slave)
         if result.isError():
             raise UpdateFailed(str(result))
 
-    def read_register_raw(self, address: int, register_type: str, data_type: str) -> Any:
+    def read_register_raw(
+        self, address: int, register_type: str, data_type: str, slave: int | None = None
+    ) -> Any:
         """Perform a one-shot read of a register for the diagnostics/service call."""
         if not self.client.connected:
             self.client.connect()
+        target_slave = int(slave if slave is not None else self.slave_id)
         count = DATA_TYPE_WORD_COUNT.get(data_type, 1)
         if register_type == REGISTER_TYPE_COIL:
-            result = self.client.read_coils(address, 1, slave=self.slave_id)
+            result = self.client.read_coils(address, 1, slave=target_slave)
             if result.isError():
                 raise UpdateFailed(str(result))
             return bool(result.bits[0])
         if register_type == REGISTER_TYPE_DISCRETE:
-            result = self.client.read_discrete_inputs(address, 1, slave=self.slave_id)
+            result = self.client.read_discrete_inputs(address, 1, slave=target_slave)
             if result.isError():
                 raise UpdateFailed(str(result))
             return bool(result.bits[0])
         if register_type == REGISTER_TYPE_HOLDING:
-            result = self.client.read_holding_registers(address, count, slave=self.slave_id)
+            result = self.client.read_holding_registers(address, count, slave=target_slave)
         elif register_type == REGISTER_TYPE_INPUT:
-            result = self.client.read_input_registers(address, count, slave=self.slave_id)
+            result = self.client.read_input_registers(address, count, slave=target_slave)
         else:
             raise UpdateFailed(f"Unknown register type: {register_type}")
         if result.isError():

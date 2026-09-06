@@ -1,0 +1,49 @@
+id: relay_8ch
+name: 8-Channel Modbus Relay Board
+manufacturer: Waveshare
+model: Modbus RTU Relay 8-CH
+default_slave_id: 1
+description: 8-channel relay output module with digital inputs via Modbus RTU
+entities:
+  - name: Relay 1
+    entity_type: switch
+    register_type: coil
+    address: 0
+  - name: Relay 2
+    entity_type: switch
+    register_type: coil
+    address: 1
+  - name: Relay 3
+    entity_type: switch
+    register_type: coil
+    address: 2
+  - name: Relay 4
+    entity_type: switch
+    register_type: coil
+    address: 3
+  - name: Relay 5
+    entity_type: switch
+    register_type: coil
+    address: 4
+  - name: Relay 6
+    entity_type: switch
+    register_type: coil
+    address: 5
+  - name: Relay 7
+    entity_type: switch
+    register_type: coil
+    address: 6
+  - name: Relay 8
+    entity_type: switch
+    register_type: coil
+    address: 7
+  - name: Digital Input 1
+    entity_type: binary_sensor
+    register_type: discrete
+    address: 0
+    device_class: connectivity
+  - name: Digital Input 2
+    entity_type: binary_sensor
+    register_type: discrete
+    address: 1
+    device_class: connectivity

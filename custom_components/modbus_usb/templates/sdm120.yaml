@@ -1,0 +1,63 @@
+id: sdm120
+name: Eastron SDM120 Energy Meter
+manufacturer: Eastron
+model: SDM120
+default_slave_id: 1
+description: Single-phase DIN rail energy meter with Modbus RTU communication
+entities:
+  - name: Voltage
+    entity_type: sensor
+    register_type: input
+    address: 0
+    data_type: float32
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+  - name: Current
+    entity_type: sensor
+    register_type: input
+    address: 6
+    data_type: float32
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+  - name: Active Power
+    entity_type: sensor
+    register_type: input
+    address: 12
+    data_type: float32
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+  - name: Apparent Power
+    entity_type: sensor
+    register_type: input
+    address: 18
+    data_type: float32
+    unit_of_measurement: "VA"
+    device_class: power
+    state_class: measurement
+  - name: Power Factor
+    entity_type: sensor
+    register_type: input
+    address: 30
+    data_type: float32
+    unit_of_measurement: ""
+    device_class: power_factor
+    state_class: measurement
+  - name: Frequency
+    entity_type: sensor
+    register_type: input
+    address: 70
+    data_type: float32
+    unit_of_measurement: "Hz"
+    device_class: frequency
+    state_class: measurement
+  - name: Total Active Energy
+    entity_type: sensor
+    register_type: input
+    address: 342
+    data_type: float32
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing

@@ -20,24 +20,29 @@ Includes a **custom sidebar panel** with live dashboard, entity table, connectio
 | **Binary Sensor** | Coil, Discrete input | Read-only on/off state with HA binary sensor device class |
 | **Number** | Holding | Writable register as a slider or text box (min/max/step/scale) |
 
-### Sidebar Panel
-A dark, glassmorphism dashboard panel accessible directly from the HA sidebar:
+### Sidebar Panel & UI Configuration
+A dark, glassmorphism dashboard and management panel accessible directly from the HA sidebar:
 
-- **📊 Dashboard** — live entity tiles with current values, inline switch toggles, stats bar (total / per-type / unavailable counts), auto-refresh every 15 s
-- **📋 Entities** — full table of all configured entities with type, register, address, data type, scale, unit and live value
-- **🔗 Connection** — serial port parameters at a glance (port, baud, parity, stop bits, slave ID, poll interval) + coordinator health status
-- **🔬 Diagnostics** — one-shot live register reads and writes via custom HA services, with a timestamped session log
+- **🎛 Devices** — Manage separated, individual Modbus devices with their own Slave IDs (1–247), models, and manufacturers. Add entities directly or apply templates per device.
+- **📑 Device Templates** — Device templates saved as individual `.yaml` files in `modbus_usb_templates/`. Create, edit (with built-in YAML editor), duplicate, and delete templates right from the sidebar.
+- **📊 Live Dashboard** — Live entity tiles with current values, inline switch toggles, number controls, device filter chips, stats bar (total / per-type / unavailable counts), auto-refresh every 15 s.
+- **📋 All Entities** — Complete table of all configured entities with device tags, type, register, address, data type, scale, unit, and inline edit/delete actions.
+- **🔗 Hub & Connection** — Serial port parameters at a glance + direct "Edit Hub Settings" modal to reconfigure serial port, baud rate, parity, stop bits, and poll interval without opening HA options flow wizard.
+- **🔬 Diagnostics** — One-shot live register reads and writes via custom HA services, with target slave ID selector.
 
 ### Services
 Two custom services usable in automations and Developer Tools:
 
 | Service | Description |
 |---------|-------------|
-| `modbus_usb.read_register` | One-shot live read → fires `modbus_usb_register_read` event with the value |
-| `modbus_usb.write_register` | Write a value to a coil or holding register |
+| `modbus_usb.read_register` | One-shot live read with optional `slave_id` → fires `modbus_usb_register_read` event with the value |
+| `modbus_usb.write_register` | Write a value to a coil or holding register with optional `slave_id` |
 
 ### Other
-- Fully UI-configurable (no YAML) — add/edit/remove entities at any time from Settings → Devices & Services
+- **100% Sidebar UI Configurable** — add/edit/remove hubs, separated devices, entities, and templates directly from the sidebar UI without modal wizard popups
+- **Separate Device Architecture** — each Modbus device is registered in HA Device Registry under the hub
+- **Per-Device Slave ID** — supports multiple devices on the same RS-485 serial bus with distinct slave addresses (1–247)
+- **Preloaded YAML Templates** — includes starter templates for Eastron SDM120, XY-MD02, 8-Channel Relay, and DDS238
 - Adjustable poll interval (1–3600 s)
 - Automatic reconnection if the USB device is temporarily disconnected
 - HACS-compatible with GitHub Releases for update notifications

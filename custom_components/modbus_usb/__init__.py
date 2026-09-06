@@ -6,11 +6,15 @@ import os
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
 
+from .api import async_register_api
 from .const import (
     CONF_BAUDRATE,
     CONF_BYTESIZE,
+    CONF_DEVICES,
+    CONF_MANUFACTURER,
+    CONF_MODEL,
+    CONF_NAME,
     CONF_PARITY,
     CONF_PORT,
     CONF_SCAN_INTERVAL,
@@ -21,6 +25,7 @@ from .const import (
 )
 from .coordinator import ModbusUsbCoordinator
 from .services import async_register_services, async_unregister_services
+from .templates import ensure_templates_dir
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,8 +35,10 @@ _PANEL_REGISTERED = False  # module-level guard so we only register once
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:  # noqa: ARG001
-    """Global (YAML) setup hook — register the sidebar panel once."""
+    """Global (YAML) setup hook — register panel, API, and templates once."""
     await _async_register_panel(hass)
+    await async_register_api(hass)
+    await hass.async_add_executor_job(ensure_templates_dir, hass)
     return True
 
 
@@ -123,12 +130,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
+    # Register hub and child devices in HA Device Registry
+    from homeassistant.helpers import device_registry as dr
+
+    device_registry = dr.async_get(hass)
+    device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=entry.title,
+        manufacturer="Modbus USB",
+        model="Modbus Serial Hub",
+    )
+
+    for dev in entry.options.get(CONF_DEVICES, []):
+        dev_id = dev.get("id")
+        if dev_id:
+            device_registry.async_get_or_create(
+                config_entry_id=entry.entry_id,
+                identifiers={(DOMAIN, f"{entry.entry_id}_{dev_id}")},
+                name=dev.get(CONF_NAME, f"Device {dev_id}"),
+                manufacturer=dev.get(CONF_MANUFACTURER, "Modbus USB"),
+                model=dev.get(CONF_MODEL, "Modbus Device"),
+                via_device=(DOMAIN, entry.entry_id),
+            )
+
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Register services (idempotent — safe to call on each entry load)
+    # Register services and API (idempotent)
     await async_register_services(hass)
+    await async_register_api(hass)
+    await hass.async_add_executor_job(ensure_templates_dir, hass)
 
     # Ensure panel is registered (idempotent)
     await _async_register_panel(hass)

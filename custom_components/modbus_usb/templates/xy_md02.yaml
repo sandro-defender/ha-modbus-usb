@@ -1,0 +1,25 @@
+id: xy_md02
+name: XY-MD02 Temperature & Humidity
+manufacturer: SHT20
+model: XY-MD02
+default_slave_id: 1
+description: RS485 Modbus RTU temperature and humidity environmental sensor
+entities:
+  - name: Temperature
+    entity_type: sensor
+    register_type: input
+    address: 1
+    data_type: int16
+    scale: 0.1
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+  - name: Humidity
+    entity_type: sensor
+    register_type: input
+    address: 2
+    data_type: uint16
+    scale: 0.1
+    unit_of_measurement: "%"
+    device_class: humidity
+    state_class: measurement

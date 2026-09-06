@@ -3,98 +3,140 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Modbus USB Controller</title>
-  <meta name="description" content="Modbus USB Controller dashboard for Home Assistant — monitor sensors, control switches, and run live register diagnostics." />
+  <title>Modbus USB Controller &amp; Device Manager</title>
+  <meta name="description" content="Modbus USB Controller dashboard for Home Assistant — configure hubs, separated devices, YAML templates, sensors, and switches directly from the sidebar." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
-    /* ── Reset & Base ─────────────────────────────────────────── */
+    /* ── Reset & Theme ─────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
 
-    body {
-      font-family: 'Inter', system-ui, sans-serif;
-      background: #0a0f1e;
-      color: #e2e8f0;
-      min-height: 100vh;
-      overflow-x: hidden;
+    :root {
+      --bg-dark: #070b14;
+      --bg-card: rgba(17, 24, 39, 0.7);
+      --bg-card-hover: rgba(30, 41, 59, 0.8);
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --border-focus: rgba(99, 102, 241, 0.5);
+      --primary: #3b82f6;
+      --primary-gradient: linear-gradient(135deg, #3b82f6, #6366f1);
+      --purple-gradient: linear-gradient(135deg, #8b5cf6, #ec4899);
+      --green-gradient: linear-gradient(135deg, #10b981, #059669);
+      --amber-gradient: linear-gradient(135deg, #f59e0b, #d97706);
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --font-mono: 'JetBrains Mono', monospace;
     }
 
-    /* ── Animated Background ──────────────────────────────────── */
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg-dark);
+      color: var(--text-main);
+      min-height: 100vh;
+      overflow-x: hidden;
+      line-height: 1.5;
+    }
+
     body::before {
       content: '';
       position: fixed;
       inset: 0;
       background:
-        radial-gradient(ellipse 80% 50% at 20% 10%, rgba(59,130,246,0.12) 0%, transparent 60%),
-        radial-gradient(ellipse 60% 40% at 80% 80%, rgba(139,92,246,0.10) 0%, transparent 60%),
-        radial-gradient(ellipse 40% 30% at 50% 50%, rgba(16,185,129,0.06) 0%, transparent 60%);
+        radial-gradient(ellipse 70% 45% at 15% 10%, rgba(59,130,246,0.14) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 85% 85%, rgba(139,92,246,0.12) 0%, transparent 60%),
+        radial-gradient(ellipse 45% 35% at 50% 45%, rgba(16,185,129,0.06) 0%, transparent 60%);
       pointer-events: none;
       z-index: 0;
     }
 
-    /* ── Layout ───────────────────────────────────────────────── */
     .app {
       position: relative;
       z-index: 1;
-      max-width: 1280px;
+      max-width: 1360px;
       margin: 0 auto;
-      padding: 0 1.5rem 2rem;
+      padding: 0 1.5rem 2.5rem;
     }
 
-    /* ── Header ───────────────────────────────────────────────── */
+    /* ── Typography & Helpers ───────────────────────────────────── */
+    .mono { font-family: var(--font-mono); font-size: 0.85em; }
+    .text-sm { font-size: 0.75rem; }
+    .text-muted { color: var(--text-muted); }
+    .flex { display: flex; }
+    .items-center { align-items: center; }
+    .justify-between { justify-content: space-between; }
+    .gap-1 { gap: 0.5rem; }
+    .gap-2 { gap: 1rem; }
+    .mt-1 { margin-top: 0.5rem; }
+    .mt-2 { margin-top: 1rem; }
+    .mt-3 { margin-top: 1.5rem; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.2rem 0.55rem;
+      border-radius: 99px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .badge-blue { background: rgba(59,130,246,0.15); color: #93c5fd; border: 1px solid rgba(59,130,246,0.3); }
+    .badge-purple { background: rgba(139,92,246,0.15); color: #c4b5fd; border: 1px solid rgba(139,92,246,0.3); }
+    .badge-green { background: rgba(16,185,129,0.15); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.3); }
+    .badge-amber { background: rgba(245,158,11,0.15); color: #fcd34d; border: 1px solid rgba(245,158,11,0.3); }
+    .badge-slate { background: rgba(148,163,184,0.12); color: #cbd5e1; border: 1px solid rgba(148,163,184,0.25); }
+
+    /* ── Header ────────────────────────────────────────────────── */
     .header {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 1.25rem 0 1rem;
-      border-bottom: 1px solid rgba(255,255,255,0.06);
-      margin-bottom: 1.5rem;
+      padding: 1.25rem 0 1.1rem;
+      border-bottom: 1px solid var(--border-subtle);
+      margin-bottom: 1.25rem;
       flex-wrap: wrap;
-      gap: 0.75rem;
+      gap: 1rem;
     }
-
     .header-left {
       display: flex;
       align-items: center;
       gap: 0.85rem;
     }
-
     .header-icon {
-      width: 42px;
-      height: 42px;
-      background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+      width: 44px;
+      height: 44px;
+      background: var(--primary-gradient);
       border-radius: 12px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 1.25rem;
-      box-shadow: 0 0 20px rgba(59,130,246,0.35);
-      animation: iconPulse 3s ease-in-out infinite;
+      font-size: 1.35rem;
+      box-shadow: 0 0 24px rgba(59,130,246,0.4);
+      animation: pulseGlow 3.5s ease-in-out infinite;
       flex-shrink: 0;
     }
-    @keyframes iconPulse {
+    @keyframes pulseGlow {
       0%, 100% { box-shadow: 0 0 20px rgba(59,130,246,0.35); }
-      50%       { box-shadow: 0 0 30px rgba(59,130,246,0.6), 0 0 60px rgba(139,92,246,0.25); }
+      50% { box-shadow: 0 0 35px rgba(99,102,241,0.65), 0 0 60px rgba(139,92,246,0.25); }
     }
-
     .header-title h1 {
-      font-size: 1.25rem;
+      font-size: 1.35rem;
       font-weight: 700;
       letter-spacing: -0.02em;
-      background: linear-gradient(135deg, #fff 0%, #94a3b8 100%);
+      background: linear-gradient(135deg, #ffffff 30%, #94a3b8 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
     }
     .header-title p {
-      font-size: 0.72rem;
-      color: #64748b;
-      margin-top: 1px;
-      letter-spacing: 0.04em;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-top: 2px;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
     }
-
     .header-right {
       display: flex;
       align-items: center;
@@ -102,17 +144,41 @@
       flex-wrap: wrap;
     }
 
-    .status-badge {
+    .hub-select-wrapper {
+      position: relative;
       display: flex;
       align-items: center;
+    }
+    .hub-select {
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid var(--border-subtle);
+      color: #e2e8f0;
+      padding: 0.4rem 2rem 0.4rem 0.75rem;
+      border-radius: 8px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    .hub-select-wrapper::after {
+      content: '▼';
+      position: absolute;
+      right: 0.75rem;
+      font-size: 0.55rem;
+      color: #94a3b8;
+      pointer-events: none;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
       gap: 0.4rem;
-      padding: 0.3rem 0.75rem;
+      padding: 0.35rem 0.8rem;
       border-radius: 99px;
       font-size: 0.72rem;
       font-weight: 600;
-      letter-spacing: 0.04em;
       border: 1px solid transparent;
-      transition: all 0.3s;
     }
     .status-badge.connected {
       background: rgba(16,185,129,0.12);
@@ -124,10 +190,10 @@
       border-color: rgba(239,68,68,0.3);
       color: #f87171;
     }
-    .status-badge.unknown {
-      background: rgba(100,116,139,0.12);
-      border-color: rgba(100,116,139,0.3);
-      color: #94a3b8;
+    .status-badge.local {
+      background: rgba(59,130,246,0.12);
+      border-color: rgba(59,130,246,0.3);
+      color: #60a5fa;
     }
     .status-dot {
       width: 7px;
@@ -139,105 +205,122 @@
       animation: blink 2s ease-in-out infinite;
     }
     @keyframes blink {
-      0%, 100% { opacity: 1; }
-      50%       { opacity: 0.3; }
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.3; transform: scale(0.85); }
     }
 
+    /* ── Buttons ────────────────────────────────────────────────── */
     .btn {
       display: inline-flex;
       align-items: center;
-      gap: 0.4rem;
-      padding: 0.4rem 0.85rem;
+      gap: 0.45rem;
+      padding: 0.45rem 0.9rem;
       border-radius: 8px;
       font-size: 0.78rem;
       font-weight: 600;
       border: none;
       cursor: pointer;
-      transition: all 0.2s;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
       font-family: inherit;
+      white-space: nowrap;
+      text-decoration: none;
     }
+    .btn:hover { transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
     .btn-primary {
-      background: linear-gradient(135deg, #3b82f6, #6366f1);
+      background: var(--primary-gradient);
       color: #fff;
+      box-shadow: 0 4px 14px rgba(59,130,246,0.3);
     }
-    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(59,130,246,0.4); }
-    .btn-primary:active { transform: translateY(0); }
+    .btn-primary:hover { box-shadow: 0 6px 20px rgba(59,130,246,0.45); }
+    .btn-secondary {
+      background: rgba(99, 102, 241, 0.15);
+      color: #a5b4fc;
+      border: 1px solid rgba(99, 102, 241, 0.3);
+    }
+    .btn-secondary:hover { background: rgba(99, 102, 241, 0.25); color: #fff; }
     .btn-ghost {
-      background: rgba(255,255,255,0.06);
-      color: #94a3b8;
+      background: rgba(255,255,255,0.05);
+      color: #cbd5e1;
       border: 1px solid rgba(255,255,255,0.08);
     }
-    .btn-ghost:hover { background: rgba(255,255,255,0.10); color: #e2e8f0; }
-    .btn-danger {
-      background: rgba(239,68,68,0.15);
-      color: #f87171;
-      border: 1px solid rgba(239,68,68,0.3);
-    }
-    .btn-danger:hover { background: rgba(239,68,68,0.25); }
+    .btn-ghost:hover { background: rgba(255,255,255,0.1); color: #fff; }
     .btn-success {
       background: rgba(16,185,129,0.15);
       color: #34d399;
       border: 1px solid rgba(16,185,129,0.3);
     }
     .btn-success:hover { background: rgba(16,185,129,0.25); }
-    .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important; box-shadow: none !important; }
+    .btn-danger {
+      background: rgba(239,68,68,0.15);
+      color: #f87171;
+      border: 1px solid rgba(239,68,68,0.3);
+    }
+    .btn-danger:hover { background: rgba(239,68,68,0.25); }
+    .btn-sm { padding: 0.3rem 0.65rem; font-size: 0.72rem; }
 
-    /* ── Tabs ─────────────────────────────────────────────────── */
-    .tabs {
+    /* ── Navigation Tabs ────────────────────────────────────────── */
+    .nav-tabs {
       display: flex;
-      gap: 0.25rem;
+      gap: 0.35rem;
       margin-bottom: 1.5rem;
-      background: rgba(255,255,255,0.04);
+      background: rgba(255,255,255,0.03);
       border-radius: 12px;
-      padding: 0.3rem;
-      border: 1px solid rgba(255,255,255,0.06);
+      padding: 0.35rem;
+      border: 1px solid var(--border-subtle);
       overflow-x: auto;
     }
-
-    .tab {
+    .nav-tab {
       flex: 1;
-      min-width: 100px;
-      padding: 0.55rem 1rem;
+      min-width: 110px;
+      padding: 0.6rem 1rem;
       border-radius: 8px;
-      font-size: 0.8rem;
+      font-size: 0.82rem;
       font-weight: 600;
       cursor: pointer;
       border: none;
       background: transparent;
-      color: #64748b;
+      color: var(--text-dim);
       transition: all 0.22s;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 0.4rem;
+      gap: 0.45rem;
       white-space: nowrap;
       font-family: inherit;
     }
-    .tab:hover { color: #94a3b8; background: rgba(255,255,255,0.04); }
-    .tab.active {
-      background: linear-gradient(135deg, rgba(59,130,246,0.2), rgba(139,92,246,0.15));
+    .nav-tab:hover { color: var(--text-main); background: rgba(255,255,255,0.04); }
+    .nav-tab.active {
+      background: linear-gradient(135deg, rgba(59,130,246,0.22), rgba(139,92,246,0.16));
       color: #93c5fd;
-      border: 1px solid rgba(59,130,246,0.25);
-      box-shadow: 0 2px 8px rgba(59,130,246,0.15);
+      border: 1px solid rgba(59,130,246,0.3);
+      box-shadow: 0 2px 10px rgba(59,130,246,0.2);
+    }
+    .nav-tab .tab-count {
+      background: rgba(255,255,255,0.1);
+      padding: 0.1rem 0.45rem;
+      border-radius: 99px;
+      font-size: 0.68rem;
     }
 
-    /* ── Tab Panels ───────────────────────────────────────────── */
-    .tab-panel { display: none; }
-    .tab-panel.active { display: block; animation: fadeIn 0.3s ease; }
-    @keyframes fadeIn {
+    /* ── Tab Panes ──────────────────────────────────────────────── */
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; animation: tabFadeIn 0.25s ease-out; }
+    @keyframes tabFadeIn {
       from { opacity: 0; transform: translateY(6px); }
-      to   { opacity: 1; transform: translateY(0); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
-    /* ── Cards ────────────────────────────────────────────────── */
+    /* ── Cards & Glass ─────────────────────────────────────────── */
     .card {
-      background: rgba(255,255,255,0.04);
-      border: 1px solid rgba(255,255,255,0.07);
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
       border-radius: 16px;
       padding: 1.25rem;
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
       transition: border-color 0.2s, box-shadow 0.2s;
+      margin-bottom: 1.25rem;
     }
     .card:hover { border-color: rgba(255,255,255,0.12); }
     .card-header {
@@ -249,364 +332,606 @@
       gap: 0.5rem;
     }
     .card-title {
-      font-size: 0.9rem;
-      font-weight: 600;
-      color: #e2e8f0;
+      font-size: 1rem;
+      font-weight: 700;
+      color: #fff;
       display: flex;
       align-items: center;
       gap: 0.5rem;
     }
     .card-subtitle {
-      font-size: 0.72rem;
-      color: #475569;
-      margin-top: 0.2rem;
+      font-size: 0.74rem;
+      color: var(--text-dim);
+      margin-top: 2px;
     }
 
-    /* ── Entity Grid (Dashboard) ──────────────────────────────── */
-    .entity-grid {
+    /* ── Stats Bar ──────────────────────────────────────────────── */
+    .stats-bar {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 1.25rem;
+    }
+    .stat-card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 0.75rem 1rem;
+      text-align: center;
+      transition: all 0.2s;
+    }
+    .stat-card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.12); }
+    .stat-num {
+      font-size: 1.4rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+    .stat-label {
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-top: 2px;
+    }
+
+    /* ── DEVICES VIEW (Separated & Editable) ────────────────────── */
+    .device-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+    .device-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      overflow: hidden;
+      backdrop-filter: blur(16px);
+      transition: all 0.22s;
+    }
+    .device-card:hover { border-color: rgba(99, 102, 241, 0.35); }
+    .device-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 1.25rem;
+      background: rgba(255,255,255,0.02);
+      border-bottom: 1px solid var(--border-subtle);
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+    .device-header-left {
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+    }
+    .device-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, rgba(59,130,246,0.2), rgba(139,92,246,0.25));
+      border: 1px solid rgba(99,102,241,0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.2rem;
+      flex-shrink: 0;
+    }
+    .device-meta h3 {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .device-meta p {
+      font-size: 0.73rem;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+    .device-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .device-entities-list {
+      padding: 0.75rem 1.25rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 0.75rem;
+    }
+    .device-entity-item {
+      background: rgba(255,255,255,0.025);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 10px;
+      padding: 0.65rem 0.85rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.65rem;
+      transition: all 0.2s;
+    }
+    .device-entity-item:hover {
+      background: rgba(255,255,255,0.05);
+      border-color: rgba(255,255,255,0.1);
+    }
+    .ent-left {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      min-width: 0;
+      flex: 1;
+    }
+    .ent-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.9rem;
+      flex-shrink: 0;
+    }
+    .ent-icon.sensor { background: rgba(59,130,246,0.15); color: #60a5fa; }
+    .ent-icon.switch { background: rgba(139,92,246,0.15); color: #c084fc; }
+    .ent-icon.binary_sensor { background: rgba(245,158,11,0.15); color: #fbbf24; }
+    .ent-icon.number { background: rgba(16,185,129,0.15); color: #34d399; }
+    .ent-info { min-width: 0; }
+    .ent-name {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #e2e8f0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .ent-sub {
+      font-size: 0.68rem;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .ent-right {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-shrink: 0;
+    }
+    .ent-val {
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: #93c5fd;
+      text-align: right;
+    }
+    .ent-val-unit {
+      font-size: 0.65rem;
+      font-weight: 400;
+      color: var(--text-dim);
+      margin-left: 2px;
+    }
+
+    /* ── Switch Slider Component ────────────────────────────────── */
+    .switch-toggle {
+      position: relative;
+      display: inline-block;
+      width: 36px;
+      height: 20px;
+    }
+    .switch-toggle input { opacity: 0; width: 0; height: 0; }
+    .switch-slider {
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background-color: #334155;
+      transition: 0.25s;
+      border-radius: 99px;
+    }
+    .switch-slider::before {
+      position: absolute;
+      content: "";
+      height: 14px;
+      width: 14px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: 0.25s;
+      border-radius: 50%;
+    }
+    input:checked + .switch-slider {
+      background: linear-gradient(135deg, #8b5cf6, #3b82f6);
+      box-shadow: 0 0 10px rgba(139,92,246,0.4);
+    }
+    input:checked + .switch-slider::before {
+      transform: translateX(16px);
+    }
+
+    /* ── TEMPLATES VIEW ─────────────────────────────────────────── */
+    .template-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      gap: 1.25rem;
+    }
+    .template-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      backdrop-filter: blur(16px);
+      transition: all 0.22s;
+    }
+    .template-card:hover {
+      border-color: rgba(99,102,241,0.4);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    }
+    .template-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+    .template-title h3 {
+      font-size: 0.98rem;
+      font-weight: 700;
+      color: #fff;
+    }
+    .template-filename {
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      color: var(--text-dim);
+      margin-top: 2px;
+    }
+    .template-desc {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 0.85rem;
+      min-height: 2.2em;
+    }
+    .template-entities-preview {
+      background: rgba(0,0,0,0.25);
+      border: 1px solid rgba(255,255,255,0.04);
+      border-radius: 10px;
+      padding: 0.65rem;
+      margin-bottom: 1rem;
+      max-height: 140px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .preview-pill {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.7rem;
+      padding: 0.2rem 0.4rem;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.03);
+    }
+    .template-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: auto;
+      padding-top: 0.75rem;
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
+
+    /* ── DASHBOARD ENTITY TILES ─────────────────────────────────── */
+    .filter-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+      overflow-x: auto;
+      padding-bottom: 0.25rem;
+    }
+    .filter-chip {
+      padding: 0.35rem 0.8rem;
+      border-radius: 99px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s;
+    }
+    .filter-chip:hover { color: #fff; background: rgba(255,255,255,0.08); }
+    .filter-chip.active {
+      background: rgba(59,130,246,0.2);
+      border-color: rgba(59,130,246,0.4);
+      color: #93c5fd;
+    }
+
+    .tile-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-      gap: 1rem;
+      gap: 0.85rem;
     }
-
     .entity-tile {
-      background: rgba(255,255,255,0.05);
-      border: 1px solid rgba(255,255,255,0.08);
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
       border-radius: 14px;
-      padding: 1.1rem;
-      cursor: default;
-      transition: all 0.2s;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
       position: relative;
       overflow: hidden;
+      transition: all 0.2s;
     }
     .entity-tile::before {
       content: '';
       position: absolute;
       top: 0; left: 0; right: 0;
-      height: 2px;
-      background: var(--tile-accent, linear-gradient(90deg, #3b82f6, #8b5cf6));
-      border-radius: 14px 14px 0 0;
-      opacity: 0.8;
+      height: 3px;
+      background: var(--tile-accent, var(--primary-gradient));
     }
-    .entity-tile:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.3); border-color: rgba(255,255,255,0.14); }
-
-    .entity-tile-header {
+    .entity-tile:hover {
+      border-color: rgba(255,255,255,0.15);
+      transform: translateY(-2px);
+    }
+    .tile-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       margin-bottom: 0.75rem;
     }
-    .entity-type-icon {
-      width: 28px; height: 28px;
-      border-radius: 8px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 0.85rem;
-    }
-    .entity-type-icon.sensor   { background: rgba(59,130,246,0.15); }
-    .entity-type-icon.switch   { background: rgba(139,92,246,0.15); }
-    .entity-type-icon.binary_sensor { background: rgba(245,158,11,0.15); }
-    .entity-type-icon.number   { background: rgba(16,185,129,0.15); }
-
-    .entity-state-badge {
-      font-size: 0.65rem;
-      font-weight: 700;
-      padding: 0.18rem 0.45rem;
-      border-radius: 99px;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-    }
-    .badge-on     { background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.3); }
-    .badge-off    { background: rgba(100,116,139,0.12); color: #64748b; border: 1px solid rgba(100,116,139,0.2); }
-    .badge-sensor { background: rgba(59,130,246,0.12); color: #60a5fa; border: 1px solid rgba(59,130,246,0.2); }
-    .badge-unavail{ background: rgba(239,68,68,0.1); color: #f87171; border: 1px solid rgba(239,68,68,0.2); }
-
-    .entity-value {
-      font-size: 1.6rem;
-      font-weight: 700;
-      letter-spacing: -0.03em;
-      line-height: 1.1;
-      background: linear-gradient(135deg, #e2e8f0, #94a3b8);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
+    .tile-value {
+      font-size: 1.4rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: #fff;
       margin-bottom: 0.25rem;
     }
-    .entity-name {
-      font-size: 0.75rem;
-      color: #64748b;
-      font-weight: 500;
+    .tile-name {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #e2e8f0;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .entity-address {
-      font-size: 0.65rem;
-      color: #334155;
-      margin-top: 0.5rem;
-      font-family: 'Courier New', monospace;
+    .tile-sub {
+      font-size: 0.68rem;
+      color: var(--text-dim);
+      margin-top: 2px;
     }
 
-    /* Switch toggle in tile */
-    .switch-toggle {
-      position: relative;
-      width: 40px; height: 22px;
-      margin-top: 0.5rem;
-    }
-    .switch-toggle input { opacity: 0; width: 0; height: 0; }
-    .switch-slider {
-      position: absolute;
-      inset: 0;
-      border-radius: 99px;
-      background: rgba(100,116,139,0.3);
-      cursor: pointer;
-      transition: background 0.25s;
-    }
-    .switch-slider::before {
-      content: '';
-      position: absolute;
-      top: 3px; left: 3px;
-      width: 16px; height: 16px;
-      border-radius: 50%;
-      background: #94a3b8;
-      transition: transform 0.25s, background 0.25s;
-    }
-    input:checked + .switch-slider { background: rgba(16,185,129,0.4); border: 1px solid rgba(16,185,129,0.5); }
-    input:checked + .switch-slider::before { transform: translateX(18px); background: #34d399; }
-
-    /* ── Table ────────────────────────────────────────────────── */
+    /* ── Table Styling ──────────────────────────────────────────── */
     .table-wrapper {
       overflow-x: auto;
-      border-radius: 12px;
-      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 10px;
+      border: 1px solid var(--border-subtle);
     }
     table {
       width: 100%;
       border-collapse: collapse;
-    }
-    thead th {
-      padding: 0.65rem 1rem;
-      text-align: left;
-      font-size: 0.7rem;
-      font-weight: 700;
-      letter-spacing: 0.07em;
-      text-transform: uppercase;
-      color: #475569;
-      background: rgba(255,255,255,0.03);
-      border-bottom: 1px solid rgba(255,255,255,0.06);
-      white-space: nowrap;
-    }
-    tbody tr {
-      border-bottom: 1px solid rgba(255,255,255,0.04);
-      transition: background 0.15s;
-    }
-    tbody tr:last-child { border-bottom: none; }
-    tbody tr:hover { background: rgba(255,255,255,0.03); }
-    tbody td {
-      padding: 0.7rem 1rem;
       font-size: 0.78rem;
-      color: #94a3b8;
-      vertical-align: middle;
+      text-align: left;
     }
-    .td-name { color: #e2e8f0; font-weight: 500; }
-    .type-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.3rem;
-      padding: 0.18rem 0.55rem;
-      border-radius: 99px;
-      font-size: 0.65rem;
-      font-weight: 700;
+    th {
+      background: rgba(255,255,255,0.03);
+      padding: 0.65rem 0.85rem;
+      font-size: 0.7rem;
       text-transform: uppercase;
       letter-spacing: 0.05em;
+      color: var(--text-dim);
+      border-bottom: 1px solid var(--border-subtle);
     }
-    .pill-sensor  { background: rgba(59,130,246,0.15); color: #60a5fa; }
-    .pill-switch  { background: rgba(139,92,246,0.15); color: #a78bfa; }
-    .pill-binary  { background: rgba(245,158,11,0.15); color: #fbbf24; }
-    .pill-number  { background: rgba(16,185,129,0.15); color: #34d399; }
+    td {
+      padding: 0.65rem 0.85rem;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      color: #cbd5e1;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
 
-    /* ── Connection Info ──────────────────────────────────────── */
-    .info-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-      gap: 0.85rem;
+    /* ── Modal System ───────────────────────────────────────────── */
+    .modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      animation: modalFadeIn 0.2s ease;
     }
-    .info-item {
-      background: rgba(255,255,255,0.04);
-      border: 1px solid rgba(255,255,255,0.06);
-      border-radius: 10px;
-      padding: 0.85rem 1rem;
+    .modal-backdrop.open { display: flex; }
+    @keyframes modalFadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
     }
-    .info-label {
-      font-size: 0.65rem;
+    .modal-box {
+      background: #0d1424;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 18px;
+      width: 100%;
+      max-width: 620px;
+      max-height: 90vh;
+      overflow-y: auto;
+      box-shadow: 0 25px 60px -15px rgba(0,0,0,0.8);
+      animation: modalSlideUp 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .modal-box.modal-lg { max-width: 820px; }
+    @keyframes modalSlideUp {
+      from { transform: translateY(20px) scale(0.97); }
+      to { transform: translateY(0) scale(1); }
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.1rem 1.4rem;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .modal-title {
+      font-size: 1.05rem;
       font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: #475569;
-      margin-bottom: 0.3rem;
+      color: #fff;
     }
-    .info-value {
-      font-size: 0.95rem;
-      font-weight: 600;
-      color: #e2e8f0;
-      font-family: 'Courier New', monospace;
+    .modal-close {
+      background: transparent;
+      border: none;
+      color: var(--text-dim);
+      font-size: 1.25rem;
+      cursor: pointer;
+      line-height: 1;
+      padding: 0.2rem;
+      border-radius: 6px;
+    }
+    .modal-close:hover { color: #fff; background: rgba(255,255,255,0.08); }
+    .modal-body { padding: 1.25rem 1.4rem; }
+    .modal-footer {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.75rem;
+      padding: 1rem 1.4rem;
+      border-top: 1px solid var(--border-subtle);
+      background: rgba(0,0,0,0.2);
     }
 
-    /* ── Diagnostics ──────────────────────────────────────────── */
-    .diag-form {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-      gap: 0.85rem;
-      align-items: end;
+    /* ── Forms ──────────────────────────────────────────────────── */
+    .form-group {
+      margin-bottom: 1rem;
     }
-    .form-group { display: flex; flex-direction: column; gap: 0.35rem; }
-    .form-label { font-size: 0.7rem; font-weight: 600; color: #64748b; letter-spacing: 0.04em; }
-    .form-input, .form-select {
-      background: rgba(255,255,255,0.06);
+    .form-label {
+      display: block;
+      font-size: 0.73rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-muted);
+      margin-bottom: 0.35rem;
+    }
+    .form-input, .form-select, .form-textarea {
+      width: 100%;
+      background: rgba(15, 23, 42, 0.8);
       border: 1px solid rgba(255,255,255,0.1);
       border-radius: 8px;
-      padding: 0.5rem 0.7rem;
+      padding: 0.55rem 0.75rem;
+      color: #f1f5f9;
       font-size: 0.82rem;
-      color: #e2e8f0;
       font-family: inherit;
       outline: none;
       transition: border-color 0.2s, box-shadow 0.2s;
     }
-    .form-input:focus, .form-select:focus {
-      border-color: rgba(59,130,246,0.5);
-      box-shadow: 0 0 0 3px rgba(59,130,246,0.12);
+    .form-input:focus, .form-select:focus, .form-textarea:focus {
+      border-color: #6366f1;
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.2);
     }
-    .form-select option { background: #1e293b; }
-    .form-input::placeholder { color: #334155; }
+    .form-grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+    }
+    .form-grid-3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 0.75rem;
+    }
+    .form-hint {
+      font-size: 0.68rem;
+      color: var(--text-dim);
+      margin-top: 0.3rem;
+    }
 
-    .diag-result {
-      margin-top: 1rem;
-      padding: 1rem 1.25rem;
-      background: rgba(255,255,255,0.04);
-      border: 1px solid rgba(255,255,255,0.07);
-      border-radius: 12px;
-      font-family: 'Courier New', monospace;
-      font-size: 0.85rem;
-      min-height: 56px;
-      color: #94a3b8;
+    /* ── YAML Code Editor in Modal ──────────────────────────────── */
+    .code-editor-container {
+      background: #040810;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      overflow: hidden;
+      margin-top: 0.5rem;
+    }
+    .code-editor-bar {
       display: flex;
       align-items: center;
-      gap: 0.75rem;
-      transition: all 0.3s;
+      justify-content: space-between;
+      padding: 0.4rem 0.75rem;
+      background: rgba(255,255,255,0.03);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      font-size: 0.72rem;
+      color: var(--text-dim);
     }
-    .diag-result.success { border-color: rgba(16,185,129,0.3); color: #34d399; background: rgba(16,185,129,0.06); }
-    .diag-result.error   { border-color: rgba(239,68,68,0.3); color: #f87171; background: rgba(239,68,68,0.06); }
-    .diag-result.loading { color: #64748b; }
+    .yaml-textarea {
+      width: 100%;
+      min-height: 280px;
+      max-height: 480px;
+      background: transparent;
+      border: none;
+      color: #93c5fd;
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      line-height: 1.5;
+      padding: 0.85rem;
+      outline: none;
+      resize: vertical;
+      white-space: pre;
+    }
 
-    /* ── Stats Bar ────────────────────────────────────────────── */
-    .stats-bar {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-      gap: 0.75rem;
-      margin-bottom: 1.5rem;
-    }
-    .stat-item {
-      background: rgba(255,255,255,0.04);
-      border: 1px solid rgba(255,255,255,0.06);
-      border-radius: 12px;
-      padding: 0.85rem 1rem;
-      text-align: center;
-    }
-    .stat-value {
-      font-size: 1.4rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-    }
-    .stat-label { font-size: 0.65rem; color: #475569; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; margin-top: 0.15rem; }
-    .stat-blue   { color: #60a5fa; }
-    .stat-green  { color: #34d399; }
-    .stat-amber  { color: #fbbf24; }
-    .stat-red    { color: #f87171; }
-    .stat-purple { color: #a78bfa; }
-
-    /* ── Empty State ──────────────────────────────────────────── */
-    .empty-state {
-      text-align: center;
-      padding: 3rem 1rem;
-      color: #334155;
-    }
-    .empty-state .empty-icon { font-size: 3rem; margin-bottom: 0.75rem; opacity: 0.5; }
-    .empty-state h3 { font-size: 1rem; font-weight: 600; color: #475569; margin-bottom: 0.4rem; }
-    .empty-state p { font-size: 0.8rem; color: #334155; }
-
-    /* ── Spinner ──────────────────────────────────────────────── */
-    .spinner {
-      width: 18px; height: 18px;
-      border: 2px solid rgba(255,255,255,0.1);
-      border-top-color: #60a5fa;
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-      flex-shrink: 0;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    /* ── Snackbar ─────────────────────────────────────────────── */
+    /* ── Snackbar / Toast ───────────────────────────────────────── */
     #snackbar {
       position: fixed;
       bottom: 1.5rem;
       right: 1.5rem;
-      z-index: 9999;
+      z-index: 999;
       display: flex;
       flex-direction: column;
       gap: 0.5rem;
     }
-    .snack {
-      padding: 0.7rem 1.1rem;
+    .toast {
+      background: #0f172a;
+      border: 1px solid rgba(255,255,255,0.12);
       border-radius: 10px;
+      padding: 0.65rem 1rem;
       font-size: 0.8rem;
-      font-weight: 600;
-      border: 1px solid transparent;
-      animation: slideIn 0.3s ease, slideOut 0.3s ease 3.7s forwards;
-      max-width: 320px;
-    }
-    @keyframes slideIn {
-      from { opacity: 0; transform: translateX(20px); }
-      to   { opacity: 1; transform: translateX(0); }
-    }
-    @keyframes slideOut {
-      from { opacity: 1; transform: translateX(0); }
-      to   { opacity: 0; transform: translateX(20px); }
-    }
-    .snack.ok  { background: rgba(16,185,129,0.15); border-color: rgba(16,185,129,0.35); color: #34d399; }
-    .snack.err { background: rgba(239,68,68,0.15);  border-color: rgba(239,68,68,0.35);  color: #f87171; }
-    .snack.inf { background: rgba(59,130,246,0.15);  border-color: rgba(59,130,246,0.35); color: #60a5fa; }
-
-    /* ── Misc Utilities ───────────────────────────────────────── */
-    .section-title {
-      font-size: 0.75rem;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: #475569;
-      margin-bottom: 0.85rem;
       display: flex;
       align-items: center;
-      gap: 0.5rem;
+      gap: 0.6rem;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      animation: toastIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      max-width: 380px;
     }
-    .section-title::after {
-      content: '';
-      flex: 1;
-      height: 1px;
-      background: rgba(255,255,255,0.05);
+    .toast.ok { border-left: 4px solid #10b981; color: #6ee7b7; }
+    .toast.err { border-left: 4px solid #ef4444; color: #fca5a5; }
+    .toast.inf { border-left: 4px solid #3b82f6; color: #93c5fd; }
+    @keyframes toastIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
     }
-    .mono { font-family: 'Courier New', monospace; }
-    .text-muted { color: #475569; }
-    .mt-1 { margin-top: 0.5rem; }
-    .mt-2 { margin-top: 1rem; }
-    .mt-3 { margin-top: 1.5rem; }
-    .flex-row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
-    .last-updated { font-size: 0.68rem; color: #334155; }
 
-    /* ── Responsive ───────────────────────────────────────────── */
-    @media (max-width: 640px) {
+    /* ── Empty State ────────────────────────────────────────────── */
+    .empty-box {
+      text-align: center;
+      padding: 3rem 1.5rem;
+      color: var(--text-dim);
+    }
+    .empty-icon { font-size: 2.5rem; margin-bottom: 0.75rem; }
+    .empty-box h3 { font-size: 1.1rem; color: #e2e8f0; margin-bottom: 0.35rem; }
+    .empty-box p { font-size: 0.8rem; max-width: 420px; margin: 0 auto 1.25rem; }
+
+    /* ── Responsive ─────────────────────────────────────────────── */
+    @media (max-width: 768px) {
       .app { padding: 0 0.75rem 1.5rem; }
-      .header { padding: 1rem 0 0.75rem; }
-      .entity-grid { grid-template-columns: 1fr 1fr; }
-      .tab { min-width: 70px; font-size: 0.72rem; padding: 0.45rem 0.5rem; }
+      .header { padding: 0.75rem 0; }
+      .nav-tab { min-width: 75px; font-size: 0.75rem; padding: 0.45rem 0.5rem; }
+      .form-grid-2, .form-grid-3 { grid-template-columns: 1fr; }
+      .device-entities-list { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -618,672 +943,2222 @@
         <div class="header-icon">🔌</div>
         <div class="header-title">
           <h1>Modbus USB Controller</h1>
-          <p id="header-subtitle">Loading…</p>
+          <p id="header-subtitle">
+            <span>Loading controller status…</span>
+          </p>
         </div>
       </div>
       <div class="header-right">
-        <div class="status-badge unknown" id="conn-badge">
-          <div class="status-dot"></div>
-          <span id="conn-text">Checking…</span>
+        <!-- Hub selector -->
+        <div class="hub-select-wrapper" id="hub-select-wrap" style="display:none;">
+          <select class="hub-select" id="hub-select" onchange="onHubChange(this.value)">
+            <option value="">Select Hub…</option>
+          </select>
         </div>
-        <button class="btn btn-primary" id="btn-refresh" onclick="refresh()">
+
+        <div class="status-badge local" id="status-badge">
+          <div class="status-dot"></div>
+          <span id="status-text">Connecting…</span>
+        </div>
+
+        <button class="btn btn-primary" onclick="openAddDeviceModal()">
+          ➕ Add Device
+        </button>
+
+        <button class="btn btn-ghost" id="btn-refresh" onclick="refreshData()">
           ↻ Refresh
         </button>
       </div>
     </header>
 
-    <!-- Tabs -->
-    <nav class="tabs" role="tablist" aria-label="Panel sections">
-      <button class="tab active" id="tab-dashboard"   onclick="switchTab('dashboard')"   role="tab">📊 Dashboard</button>
-      <button class="tab"        id="tab-entities"    onclick="switchTab('entities')"    role="tab">📋 Entities</button>
-      <button class="tab"        id="tab-connection"  onclick="switchTab('connection')"  role="tab">🔗 Connection</button>
-      <button class="tab"        id="tab-diagnostics" onclick="switchTab('diagnostics')" role="tab">🔬 Diagnostics</button>
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs" role="tablist">
+      <button class="nav-tab active" id="tab-btn-devices" onclick="switchTab('devices')">
+        🎛 Devices <span class="tab-count" id="count-devices">0</span>
+      </button>
+      <button class="nav-tab" id="tab-btn-templates" onclick="switchTab('templates')">
+        📑 Device Templates <span class="tab-count" id="count-templates">0</span>
+      </button>
+      <button class="nav-tab" id="tab-btn-dashboard" onclick="switchTab('dashboard')">
+        📊 Live Dashboard
+      </button>
+      <button class="nav-tab" id="tab-btn-entities" onclick="switchTab('entities')">
+        📋 All Entities <span class="tab-count" id="count-entities">0</span>
+      </button>
+      <button class="nav-tab" id="tab-btn-hub" onclick="switchTab('hub')">
+        🔗 Hub &amp; Serial
+      </button>
+      <button class="nav-tab" id="tab-btn-diag" onclick="switchTab('diag')">
+        🔬 Diagnostics
+      </button>
     </nav>
 
-    <!-- ── DASHBOARD TAB ─────────────────────────────────────── -->
-    <div class="tab-panel active" id="panel-dashboard">
-      <!-- Stats bar -->
-      <div class="stats-bar" id="stats-bar">
-        <div class="stat-item"><div class="stat-value stat-blue" id="stat-total">—</div><div class="stat-label">Total entities</div></div>
-        <div class="stat-item"><div class="stat-value stat-blue" id="stat-sensors">—</div><div class="stat-label">Sensors</div></div>
-        <div class="stat-item"><div class="stat-value stat-purple" id="stat-switches">—</div><div class="stat-label">Switches</div></div>
-        <div class="stat-item"><div class="stat-value stat-amber" id="stat-binary">—</div><div class="stat-label">Binary sensors</div></div>
-        <div class="stat-item"><div class="stat-value stat-green" id="stat-numbers">—</div><div class="stat-label">Numbers</div></div>
-        <div class="stat-item"><div class="stat-value stat-red" id="stat-unavail">—</div><div class="stat-label">Unavailable</div></div>
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <!-- TAB 1: DEVICES (Separated & Editable)                        -->
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="tab-pane active" id="pane-devices">
+      <div class="card" style="padding:0.75rem 1.25rem; margin-bottom:1rem; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.75rem;">
+        <div style="font-size:0.82rem; color:var(--text-muted);">
+          Each Modbus slave device has its own address, sensors, and switches, organized and registered in Home Assistant.
+        </div>
+        <div class="flex gap-1">
+          <button class="btn btn-secondary btn-sm" onclick="openAddDeviceModal('template')">
+            ⚡ Add from Template
+          </button>
+          <button class="btn btn-primary btn-sm" onclick="openAddDeviceModal('blank')">
+            ➕ New Blank Device
+          </button>
+        </div>
       </div>
 
-      <!-- Last updated -->
-      <div class="flex-row mt-1" style="margin-bottom:1rem; justify-content: space-between;">
-        <span class="last-updated" id="last-updated-ts">Last updated: —</span>
-        <span class="last-updated" id="hub-entry-id" style="opacity:0.5"></span>
-      </div>
-
-      <!-- Entity tiles -->
-      <div class="entity-grid" id="entity-grid">
-        <div class="empty-state" style="grid-column:1/-1">
+      <div class="device-grid" id="device-cards-container">
+        <!-- Rendered dynamically -->
+        <div class="empty-box">
           <div class="empty-icon">⏳</div>
-          <h3>Loading…</h3>
-          <p>Fetching entity states from Home Assistant</p>
+          <h3>Loading Devices…</h3>
         </div>
       </div>
     </div>
 
-    <!-- ── ENTITIES TAB ──────────────────────────────────────── -->
-    <div class="tab-panel" id="panel-entities">
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <!-- TAB 2: TEMPLATES (Stored in separate YAML files)             -->
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="tab-pane" id="pane-templates">
+      <div class="card" style="padding:0.75rem 1.25rem; margin-bottom:1rem; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.75rem;">
+        <div>
+          <div style="font-size:0.85rem; font-weight:700; color:#fff;">📁 Device YAML Templates</div>
+          <div style="font-size:0.73rem; color:var(--text-dim); margin-top:2px;">
+            Saved as individual <code class="mono" style="color:#93c5fd;">.yaml</code> files in <code class="mono" style="color:#93c5fd;">modbus_usb_templates/</code>. Edit here or directly in HA File Editor.
+          </div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="openTemplateEditorModal(null)">
+          ➕ Create New Template (.yaml)
+        </button>
+      </div>
+
+      <div class="template-grid" id="template-cards-container">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <!-- TAB 3: DASHBOARD                                            -->
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="tab-pane" id="pane-dashboard">
+      <div class="stats-bar">
+        <div class="stat-card"><div class="stat-num" style="color:#60a5fa;" id="stat-total-dev">0</div><div class="stat-label">Devices</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#93c5fd;" id="stat-total-ent">0</div><div class="stat-label">Total Entities</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#38bdf8;" id="stat-sensors">0</div><div class="stat-label">Sensors</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#c084fc;" id="stat-switches">0</div><div class="stat-label">Switches</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#fbbf24;" id="stat-binary">0</div><div class="stat-label">Binary</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#34d399;" id="stat-numbers">0</div><div class="stat-label">Numbers</div></div>
+      </div>
+
+      <!-- Filter chips -->
+      <div class="filter-bar" id="dashboard-filter-bar">
+        <button class="filter-chip active" onclick="filterDashboard('all', this)">All Devices</button>
+        <!-- Dynamic device filter chips -->
+      </div>
+
+      <div class="tile-grid" id="dashboard-tile-grid">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <!-- TAB 4: ENTITIES TABLE                                       -->
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="tab-pane" id="pane-entities">
       <div class="card">
         <div class="card-header">
           <div>
-            <div class="card-title">📋 All configured entities</div>
-            <div class="card-subtitle">Entity list from the integration options</div>
+            <div class="card-title">📋 All Modbus Entities</div>
+            <div class="card-subtitle">Complete registry of sensors, switches, binary sensors, and numbers</div>
           </div>
-          <button class="btn btn-ghost" onclick="openOptionsFlow()">⚙ Options</button>
+          <button class="btn btn-primary btn-sm" onclick="openAddEntityModal()">
+            ➕ Add Entity
+          </button>
         </div>
         <div class="table-wrapper">
-          <table id="entities-table">
+          <table>
             <thead>
               <tr>
+                <th>Device</th>
                 <th>Name</th>
                 <th>Type</th>
                 <th>Register</th>
                 <th>Address</th>
-                <th>Data type</th>
-                <th>Scale</th>
-                <th>Unit</th>
-                <th>Current value</th>
+                <th>Data Type</th>
+                <th>Scale / Unit</th>
+                <th>Live Value</th>
+                <th>Actions</th>
               </tr>
             </thead>
-            <tbody id="entities-tbody">
-              <tr><td colspan="8" style="text-align:center;padding:2rem;color:#334155">Loading…</td></tr>
+            <tbody id="entities-table-tbody">
+              <!-- Rendered dynamically -->
             </tbody>
           </table>
         </div>
       </div>
     </div>
 
-    <!-- ── CONNECTION TAB ────────────────────────────────────── -->
-    <div class="tab-panel" id="panel-connection">
-      <div class="card" id="conn-card">
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <!-- TAB 5: HUB & SERIAL CONNECTION                              -->
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="tab-pane" id="pane-hub">
+      <div class="card">
         <div class="card-header">
           <div>
-            <div class="card-title">🔗 Connection parameters</div>
-            <div class="card-subtitle">Current serial port configuration</div>
+            <div class="card-title">🔗 Modbus USB Serial Connection</div>
+            <div class="card-subtitle">Hardware port and bus settings for this integration entry</div>
           </div>
-          <div class="status-badge unknown" id="conn-badge-2">
-            <div class="status-dot"></div>
-            <span id="conn-text-2">Checking…</span>
-          </div>
-        </div>
-        <div class="info-grid" id="conn-info-grid">
-          <div style="grid-column:1/-1;text-align:center;padding:1.5rem;color:#334155">Loading…</div>
+          <button class="btn btn-secondary btn-sm" onclick="openEditHubModal()">
+            ✏ Edit Hub Settings
+          </button>
         </div>
 
-        <div class="section-title mt-3">Coordinator health</div>
-        <div class="info-grid" id="diag-health-grid">
-          <div style="grid-column:1/-1;text-align:center;padding:1rem;color:#334155">Loading…</div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1rem;" id="hub-info-grid">
+          <!-- Populated dynamically -->
         </div>
       </div>
     </div>
 
-    <!-- ── DIAGNOSTICS TAB ───────────────────────────────────── -->
-    <div class="tab-panel" id="panel-diagnostics">
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <!-- TAB 6: DIAGNOSTICS                                          -->
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="tab-pane" id="pane-diag">
       <div class="card">
         <div class="card-header">
           <div>
-            <div class="card-title">🔬 Live register read</div>
-            <div class="card-subtitle">Perform a real-time one-shot Modbus register read via the <code style="font-size:0.7rem;background:rgba(255,255,255,0.08);padding:0.1rem 0.4rem;border-radius:4px">modbus_usb.read_register</code> service</div>
+            <div class="card-title">🔬 Live Modbus Read / Write</div>
+            <div class="card-subtitle">Send direct RTU requests over the USB adapter</div>
           </div>
         </div>
 
-        <!-- Entry selector -->
-        <div class="form-group" style="max-width:320px;margin-bottom:1.25rem">
-          <label class="form-label" for="diag-entry-sel">Hub / Config Entry</label>
-          <select class="form-select" id="diag-entry-sel">
-            <option value="">Select hub…</option>
-          </select>
-        </div>
-
-        <div class="diag-form">
+        <!-- Read section -->
+        <div class="form-grid-3">
           <div class="form-group">
-            <label class="form-label" for="diag-addr">Address</label>
-            <input class="form-input mono" type="number" id="diag-addr" min="0" max="65535" value="0" placeholder="0" />
+            <label class="form-label">Target Slave ID</label>
+            <input class="form-input mono" type="number" id="diag-slave" value="1" min="1" max="247" />
           </div>
           <div class="form-group">
-            <label class="form-label" for="diag-regtype">Register type</label>
+            <label class="form-label">Register Address</label>
+            <input class="form-input mono" type="number" id="diag-address" value="0" min="0" max="65535" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Register Type</label>
             <select class="form-select" id="diag-regtype">
-              <option value="holding">Holding</option>
-              <option value="input">Input</option>
-              <option value="coil">Coil</option>
-              <option value="discrete">Discrete input</option>
+              <option value="holding">Holding Register</option>
+              <option value="input">Input Register</option>
+              <option value="coil">Coil (1-bit)</option>
+              <option value="discrete">Discrete Input (1-bit)</option>
             </select>
           </div>
-          <div class="form-group">
-            <label class="form-label" for="diag-dtype">Data type</label>
+        </div>
+        <div class="flex items-center gap-1">
+          <div class="form-group" style="margin-bottom:0; min-width:140px;">
+            <label class="form-label">Data Type</label>
             <select class="form-select" id="diag-dtype">
-              <option value="uint16">uint16</option>
-              <option value="int16">int16</option>
-              <option value="uint32">uint32</option>
-              <option value="int32">int32</option>
-              <option value="float32">float32</option>
+              <option value="uint16">uint16 (1 word)</option>
+              <option value="int16">int16 (1 word)</option>
+              <option value="uint32">uint32 (2 words)</option>
+              <option value="int32">int32 (2 words)</option>
+              <option value="float32">float32 (2 words)</option>
             </select>
           </div>
-          <div class="form-group">
-            <label class="form-label">&nbsp;</label>
-            <button class="btn btn-primary" id="btn-read-reg" onclick="doReadRegister()">▶ Read</button>
+          <div style="margin-top:1.3rem;">
+            <button class="btn btn-primary" id="btn-diag-read" onclick="doLiveRead()">▶ Read Register</button>
           </div>
         </div>
 
-        <div class="diag-result" id="diag-result">
-          <span>Enter address and click Read to perform a live Modbus read.</span>
-        </div>
-
-        <!-- Write section -->
-        <div class="section-title mt-3">Write register / coil</div>
-        <div class="diag-form">
-          <div class="form-group">
-            <label class="form-label" for="write-addr">Address</label>
-            <input class="form-input mono" type="number" id="write-addr" min="0" max="65535" value="0" />
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="write-regtype">Register type</label>
-            <select class="form-select" id="write-regtype">
-              <option value="holding">Holding</option>
-              <option value="coil">Coil</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label" for="write-value">Value</label>
-            <input class="form-input mono" type="number" id="write-value" value="0" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">&nbsp;</label>
-            <button class="btn btn-danger" id="btn-write-reg" onclick="doWriteRegister()">✏ Write</button>
-          </div>
-        </div>
-        <div class="diag-result" id="write-result">
-          <span>Enter address, type and value, then click Write.</span>
-        </div>
-      </div>
-
-      <!-- Recent reads log -->
-      <div class="card mt-2">
-        <div class="card-header">
-          <div class="card-title">📜 Recent reads log</div>
-          <button class="btn btn-ghost" onclick="clearLog()">Clear</button>
-        </div>
-        <div id="read-log" style="font-family:'Courier New',monospace;font-size:0.76rem;color:#475569;min-height:60px;max-height:260px;overflow-y:auto">
-          <div style="text-align:center;padding:1rem;color:#334155">No reads yet.</div>
+        <div id="diag-result-box" style="margin-top:1rem; padding:0.85rem; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.06); font-family:var(--font-mono); font-size:0.8rem; color:#94a3b8;">
+          Enter parameters and click "Read Register" to query the serial bus.
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Snackbar container -->
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: ADD DEVICE (From Template or Blank)                   -->
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <div class="modal-backdrop" id="modal-add-device">
+    <div class="modal-box modal-lg">
+      <div class="modal-header">
+        <div class="modal-title" id="add-device-modal-title">➕ Add Modbus Device</div>
+        <button class="modal-close" onclick="closeModal('modal-add-device')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="flex gap-1" style="margin-bottom:1.25rem;">
+          <button class="btn btn-primary btn-sm" id="btn-mode-template" onclick="setAddDeviceMode('template')">⚡ From YAML Template</button>
+          <button class="btn btn-ghost btn-sm" id="btn-mode-blank" onclick="setAddDeviceMode('blank')">📝 Custom Blank Device</button>
+        </div>
+
+        <!-- Template Mode Form -->
+        <div id="form-device-template">
+          <div class="form-group">
+            <label class="form-label">Select Device Template (.yaml)</label>
+            <select class="form-select" id="add-dev-tpl-select" onchange="onTemplateSelectionChange(this.value)">
+              <!-- Populated dynamically -->
+            </select>
+            <div class="form-hint" id="add-dev-tpl-desc"></div>
+          </div>
+
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label class="form-label">Device Name in HA</label>
+              <input class="form-input" type="text" id="add-dev-name" placeholder="e.g. Living Room Energy Meter" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Modbus Slave / Unit ID (1–247)</label>
+              <input class="form-input mono" type="number" id="add-dev-slave" min="1" max="247" value="1" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Base Register Address Offset</label>
+            <input class="form-input mono" type="number" id="add-dev-offset" value="0" placeholder="0" />
+            <div class="form-hint">Shifts all template register addresses by this amount (usually 0).</div>
+          </div>
+
+          <div class="form-group">
+            <div class="flex items-center justify-between" style="margin-bottom:0.4rem;">
+              <label class="form-label" style="margin-bottom:0;">Entities to Create (<span id="tpl-selected-count">0</span>)</label>
+              <div class="flex gap-1">
+                <button type="button" class="btn btn-ghost btn-sm" style="padding:0.15rem 0.45rem; font-size:0.68rem;" onclick="toggleAllTemplateEntities(true)">Select All</button>
+                <button type="button" class="btn btn-ghost btn-sm" style="padding:0.15rem 0.45rem; font-size:0.68rem;" onclick="toggleAllTemplateEntities(false)">Deselect All</button>
+              </div>
+            </div>
+            <div id="add-dev-entities-list" style="max-height:220px; overflow-y:auto; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:0.5rem; display:flex; flex-direction:column; gap:0.35rem;">
+              <!-- Checkbox items populated dynamically -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Blank Mode Form -->
+        <div id="form-device-blank" style="display:none;">
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label class="form-label">Device Name</label>
+              <input class="form-input" type="text" id="blank-dev-name" placeholder="e.g. Garden Relay Controller" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Slave ID (1–247)</label>
+              <input class="form-input mono" type="number" id="blank-dev-slave" value="1" min="1" max="247" />
+            </div>
+          </div>
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label class="form-label">Manufacturer (Optional)</label>
+              <input class="form-input" type="text" id="blank-dev-mfr" placeholder="e.g. Waveshare" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Model (Optional)</label>
+              <input class="form-input" type="text" id="blank-dev-model" placeholder="e.g. RTU 8-CH" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Description (Optional)</label>
+            <input class="form-input" type="text" id="blank-dev-desc" placeholder="Notes or placement details" />
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modal-add-device')">Cancel</button>
+        <button class="btn btn-primary" id="btn-submit-add-device" onclick="submitAddDevice()">Create Device</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: EDIT DEVICE                                          -->
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <div class="modal-backdrop" id="modal-edit-device">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title">✏ Edit Device</div>
+        <button class="modal-close" onclick="closeModal('modal-edit-device')">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="edit-dev-id" />
+        <div class="form-group">
+          <label class="form-label">Device Name</label>
+          <input class="form-input" type="text" id="edit-dev-name" />
+        </div>
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label">Modbus Slave ID (1–247)</label>
+            <input class="form-input mono" type="number" id="edit-dev-slave" min="1" max="247" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Model</label>
+            <input class="form-input" type="text" id="edit-dev-model" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Manufacturer</label>
+          <input class="form-input" type="text" id="edit-dev-mfr" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Description</label>
+          <input class="form-input" type="text" id="edit-dev-desc" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modal-edit-device')">Cancel</button>
+        <button class="btn btn-primary" onclick="submitEditDevice()">Save Device</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: APPLY TEMPLATE TO EXISTING DEVICE                     -->
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <div class="modal-backdrop" id="modal-apply-template">
+    <div class="modal-box modal-lg">
+      <div class="modal-header">
+        <div class="modal-title">⚡ Apply Template to Device</div>
+        <button class="modal-close" onclick="closeModal('modal-apply-template')">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="apply-tpl-target-device-id" />
+        <div style="background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.25); border-radius:8px; padding:0.75rem; margin-bottom:1rem;">
+          <span style="color:var(--text-dim); font-size:0.75rem;">Adding entities to device:</span>
+          <div style="font-weight:700; color:#fff; font-size:0.95rem;" id="apply-tpl-device-label">Device Name</div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Choose Template</label>
+          <select class="form-select" id="apply-tpl-select" onchange="onApplyTemplateChange(this.value)">
+            <!-- Populated dynamically -->
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Register Address Offset</label>
+          <input class="form-input mono" type="number" id="apply-tpl-offset" value="0" />
+        </div>
+
+        <div class="form-group">
+          <div class="flex items-center justify-between" style="margin-bottom:0.4rem;">
+            <label class="form-label" style="margin-bottom:0;">Select Sensors / Switches to Add</label>
+            <div class="flex gap-1">
+              <button type="button" class="btn btn-ghost btn-sm" style="padding:0.15rem 0.45rem; font-size:0.68rem;" onclick="toggleAllApplyTemplateEntities(true)">Select All</button>
+              <button type="button" class="btn btn-ghost btn-sm" style="padding:0.15rem 0.45rem; font-size:0.68rem;" onclick="toggleAllApplyTemplateEntities(false)">Deselect All</button>
+            </div>
+          </div>
+          <div id="apply-tpl-entities-list" style="max-height:220px; overflow-y:auto; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:0.5rem; display:flex; flex-direction:column; gap:0.35rem;">
+            <!-- Checkbox items -->
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modal-apply-template')">Cancel</button>
+        <button class="btn btn-primary" onclick="submitApplyTemplate()">Add Selected to Device</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: YAML TEMPLATE EDITOR (CRUD for .yaml files)           -->
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <div class="modal-backdrop" id="modal-template-editor">
+    <div class="modal-box modal-lg">
+      <div class="modal-header">
+        <div class="modal-title" id="tpl-editor-title">📑 Edit Template (.yaml)</div>
+        <button class="modal-close" onclick="closeModal('modal-template-editor')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">YAML File Name</label>
+          <input class="form-input mono" type="text" id="tpl-editor-filename" placeholder="e.g. my_custom_device.yaml" />
+          <div class="form-hint">Stored in <code class="mono">modbus_usb_templates/&lt;filename&gt;.yaml</code> in your HA config directory.</div>
+        </div>
+
+        <div class="code-editor-container">
+          <div class="code-editor-bar">
+            <span>YAML Device Definition</span>
+            <span id="tpl-yaml-status">Ready</span>
+          </div>
+          <textarea class="yaml-textarea" id="tpl-editor-code" spellcheck="false" placeholder="id: my_device&#10;name: My Device&#10;..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modal-template-editor')">Cancel</button>
+        <button class="btn btn-primary" onclick="submitSaveTemplate()">💾 Save Template YAML</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: ADD / EDIT ENTITY                                     -->
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <div class="modal-backdrop" id="modal-entity-form">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title" id="entity-modal-title">➕ Add Entity</div>
+        <button class="modal-close" onclick="closeModal('modal-entity-form')">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="ent-form-id" />
+
+        <div class="form-group">
+          <label class="form-label">Assign to Device</label>
+          <select class="form-select" id="ent-form-device">
+            <!-- Populated dynamically -->
+          </select>
+        </div>
+
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label">Entity Name</label>
+            <input class="form-input" type="text" id="ent-form-name" placeholder="e.g. Phase A Voltage" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Entity Type</label>
+            <select class="form-select" id="ent-form-type" onchange="onEntityTypeChange(this.value)">
+              <option value="sensor">Sensor (Read-only)</option>
+              <option value="switch">Switch (Writable on/off)</option>
+              <option value="binary_sensor">Binary Sensor (Read-only bit)</option>
+              <option value="number">Number (Writable numeric input)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label">Register Type</label>
+            <select class="form-select" id="ent-form-regtype">
+              <option value="holding">Holding Register (Read/Write)</option>
+              <option value="input">Input Register (Read-only)</option>
+              <option value="coil">Coil (1-bit Read/Write)</option>
+              <option value="discrete">Discrete Input (1-bit Read-only)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Register Address (0–65535)</label>
+            <input class="form-input mono" type="number" id="ent-form-address" value="0" min="0" max="65535" />
+          </div>
+        </div>
+
+        <!-- Sensor & Number specifics -->
+        <div id="ent-numeric-fields">
+          <div class="form-grid-3">
+            <div class="form-group">
+              <label class="form-label">Data Type</label>
+              <select class="form-select" id="ent-form-dtype">
+                <option value="uint16">uint16 (1 word)</option>
+                <option value="int16">int16 (1 word)</option>
+                <option value="uint32">uint32 (2 words)</option>
+                <option value="int32">int32 (2 words)</option>
+                <option value="float32">float32 (2 words)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Scale Factor</label>
+              <input class="form-input mono" type="number" step="any" id="ent-form-scale" value="1" placeholder="1" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Unit of Measurement</label>
+              <input class="form-input" type="text" id="ent-form-unit" placeholder="e.g. V, A, W, °C" />
+            </div>
+          </div>
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label class="form-label">Device Class</label>
+              <input class="form-input" type="text" id="ent-form-devclass" placeholder="e.g. voltage, power, temperature" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">State Class</label>
+              <select class="form-select" id="ent-form-stateclass">
+                <option value="">None</option>
+                <option value="measurement">measurement</option>
+                <option value="total">total</option>
+                <option value="total_increasing">total_increasing</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Switch specifics -->
+        <div id="ent-switch-fields" style="display:none;">
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label class="form-label">On Value (Holding Mode)</label>
+              <input class="form-input mono" type="number" id="ent-form-onval" value="1" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Off Value (Holding Mode)</label>
+              <input class="form-input mono" type="number" id="ent-form-offval" value="0" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Number specifics -->
+        <div id="ent-number-fields" style="display:none;">
+          <div class="form-grid-3">
+            <div class="form-group">
+              <label class="form-label">Min Value</label>
+              <input class="form-input mono" type="number" id="ent-form-min" value="0" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Max Value</label>
+              <input class="form-input mono" type="number" id="ent-form-max" value="100" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Step</label>
+              <input class="form-input mono" type="number" id="ent-form-step" value="1" />
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modal-entity-form')">Cancel</button>
+        <button class="btn btn-primary" onclick="submitSaveEntity()">Save Entity</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: EDIT HUB SETTINGS                                    -->
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <div class="modal-backdrop" id="modal-edit-hub">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title">🔗 Edit Modbus Hub Settings</div>
+        <button class="modal-close" onclick="closeModal('modal-edit-hub')">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Serial Port (USB Adapter)</label>
+          <input class="form-input mono" type="text" id="hub-form-port" placeholder="/dev/ttyUSB0 or COM3" />
+        </div>
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label">Baud Rate</label>
+            <select class="form-select mono" id="hub-form-baud">
+              <option value="1200">1200</option>
+              <option value="2400">2400</option>
+              <option value="4800">4800</option>
+              <option value="9600">9600</option>
+              <option value="19200">19200</option>
+              <option value="38400">38400</option>
+              <option value="57600">57600</option>
+              <option value="115200">115200</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Data Bits</label>
+            <select class="form-select mono" id="hub-form-bytesize">
+              <option value="8">8</option>
+              <option value="7">7</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label">Parity</label>
+            <select class="form-select mono" id="hub-form-parity">
+              <option value="N">None (N)</option>
+              <option value="E">Even (E)</option>
+              <option value="O">Odd (O)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Stop Bits</label>
+            <select class="form-select mono" id="hub-form-stopbits">
+              <option value="1">1</option>
+              <option value="2">2</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label">Default Slave ID (1–247)</label>
+            <input class="form-input mono" type="number" id="hub-form-slave" min="1" max="247" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Poll Interval (seconds)</label>
+            <input class="form-input mono" type="number" id="hub-form-interval" min="1" max="3600" />
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal('modal-edit-hub')">Cancel</button>
+        <button class="btn btn-primary" onclick="submitSaveHub()">💾 Save &amp; Reconnect</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
   <div id="snackbar"></div>
 
-<script>
-// ─── Globals ────────────────────────────────────────────────────────────────
-const DOMAIN = 'modbus_usb';
-let _hass = null;
-let _hassReady = false;
-let _entryId = null;
-let _entryData = {};   // { entry_id: { port, baudrate, … } }
-let _entryOptions = {}; // { entry_id: { entities: [], scan_interval: N } }
-let _statesCache = {};
-let _readLog = [];
-let _refreshInterval = null;
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <!-- CLIENT JAVASCRIPT LOGIC                                      -->
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <script>
+    const DOMAIN = 'modbus_usb';
+    let _hass = null;
+    let _isLiveHA = false;
 
-// ─── Bootstrap: get hass from parent window (HA iframe panel) ───────────────
-function getHass() {
-  try {
-    if (window.parent && window.parent.document) {
-      const el = window.parent.document.querySelector('home-assistant');
-      if (el && el.hass) return el.hass;
-    }
-  } catch(e) {}
-  return null;
-}
+    // State data
+    let _entries = [];
+    let _currentEntryId = null;
+    let _templates = [];
+    let _statesCache = {};
+    let _dashboardFilter = 'all';
 
-async function waitForHass() {
-  return new Promise(resolve => {
-    const attempt = () => {
-      const hass = getHass();
-      if (hass) { resolve(hass); return; }
-      setTimeout(attempt, 300);
+    // Standalone fallback mock data for testing/preview outside Home Assistant
+    const MOCK_DATA = {
+      entries: [
+        {
+          entry_id: 'mock_hub_1',
+          title: 'Modbus USB Hub (ttyUSB0)',
+          hub: {
+            port: '/dev/ttyUSB0',
+            baudrate: 9600,
+            bytesize: 8,
+            parity: 'N',
+            stopbits: 1,
+            slave_id: 1,
+            scan_interval: 5,
+          },
+          devices: [
+            {
+              id: 'dev_sdm120_main',
+              name: 'Main Board SDM120 Energy Meter',
+              slave_id: 1,
+              model: 'SDM120',
+              manufacturer: 'Eastron',
+              description: 'Measures whole home AC power and cumulative energy',
+            },
+            {
+              id: 'dev_climate_server',
+              name: 'Server Room XY-MD02',
+              slave_id: 2,
+              model: 'XY-MD02',
+              manufacturer: 'SHT20',
+              description: 'Monitors temperature and humidity in rack',
+            },
+            {
+              id: 'dev_relays_pool',
+              name: '8-Channel Pool Relay Controller',
+              slave_id: 3,
+              model: 'Modbus RTU Relay 8-CH',
+              manufacturer: 'Waveshare',
+              description: 'Controls filter pump, heater, lighting relays',
+            }
+          ],
+          entities: [
+            { id: 'e1', device_id: 'dev_sdm120_main', name: 'Voltage', entity_type: 'sensor', register_type: 'input', address: 0, data_type: 'float32', scale: 1, unit_of_measurement: 'V', device_class: 'voltage' },
+            { id: 'e2', device_id: 'dev_sdm120_main', name: 'Current', entity_type: 'sensor', register_type: 'input', address: 6, data_type: 'float32', scale: 1, unit_of_measurement: 'A', device_class: 'current' },
+            { id: 'e3', device_id: 'dev_sdm120_main', name: 'Active Power', entity_type: 'sensor', register_type: 'input', address: 12, data_type: 'float32', scale: 1, unit_of_measurement: 'W', device_class: 'power' },
+            { id: 'e4', device_id: 'dev_sdm120_main', name: 'Total Energy', entity_type: 'sensor', register_type: 'input', address: 342, data_type: 'float32', scale: 1, unit_of_measurement: 'kWh', device_class: 'energy' },
+            { id: 'e5', device_id: 'dev_climate_server', name: 'Temperature', entity_type: 'sensor', register_type: 'input', address: 1, data_type: 'int16', scale: 0.1, unit_of_measurement: '°C', device_class: 'temperature' },
+            { id: 'e6', device_id: 'dev_climate_server', name: 'Humidity', entity_type: 'sensor', register_type: 'input', address: 2, data_type: 'uint16', scale: 0.1, unit_of_measurement: '%', device_class: 'humidity' },
+            { id: 'e7', device_id: 'dev_relays_pool', name: 'Filter Pump Relay', entity_type: 'switch', register_type: 'coil', address: 0 },
+            { id: 'e8', device_id: 'dev_relays_pool', name: 'Underwater Light Relay', entity_type: 'switch', register_type: 'coil', address: 1 },
+            { id: 'e9', device_id: 'dev_relays_pool', name: 'Flow Switch Status', entity_type: 'binary_sensor', register_type: 'discrete', address: 0 },
+            { id: 'e10', device_id: 'dev_relays_pool', name: 'Pump Speed Setpoint', entity_type: 'number', register_type: 'holding', address: 10, data_type: 'uint16', scale: 1, min_value: 0, max_value: 100, step: 5, unit_of_measurement: '%' }
+          ]
+        }
+      ],
+      templates: [
+        {
+          id: 'sdm120',
+          filename: 'sdm120.yaml',
+          name: 'Eastron SDM120 Energy Meter',
+          manufacturer: 'Eastron',
+          model: 'SDM120',
+          default_slave_id: 1,
+          description: 'Single-phase DIN rail energy meter with Modbus RTU communication',
+          entities: [
+            { name: 'Voltage', entity_type: 'sensor', register_type: 'input', address: 0, data_type: 'float32', unit_of_measurement: 'V', device_class: 'voltage' },
+            { name: 'Current', entity_type: 'sensor', register_type: 'input', address: 6, data_type: 'float32', unit_of_measurement: 'A', device_class: 'current' },
+            { name: 'Active Power', entity_type: 'sensor', register_type: 'input', address: 12, data_type: 'float32', unit_of_measurement: 'W', device_class: 'power' },
+            { name: 'Frequency', entity_type: 'sensor', register_type: 'input', address: 70, data_type: 'float32', unit_of_measurement: 'Hz', device_class: 'frequency' },
+            { name: 'Total Active Energy', entity_type: 'sensor', register_type: 'input', address: 342, data_type: 'float32', unit_of_measurement: 'kWh', device_class: 'energy' }
+          ],
+          raw_yaml: `id: sdm120
+name: Eastron SDM120 Energy Meter
+manufacturer: Eastron
+model: SDM120
+default_slave_id: 1
+description: Single-phase DIN rail energy meter with Modbus RTU communication
+entities:
+  - name: Voltage
+    entity_type: sensor
+    register_type: input
+    address: 0
+    data_type: float32
+    unit_of_measurement: "V"
+    device_class: voltage
+  - name: Current
+    entity_type: sensor
+    register_type: input
+    address: 6
+    data_type: float32
+    unit_of_measurement: "A"
+    device_class: current
+  - name: Active Power
+    entity_type: sensor
+    register_type: input
+    address: 12
+    data_type: float32
+    unit_of_measurement: "W"
+    device_class: power
+  - name: Frequency
+    entity_type: sensor
+    register_type: input
+    address: 70
+    data_type: float32
+    unit_of_measurement: "Hz"
+    device_class: frequency
+  - name: Total Active Energy
+    entity_type: sensor
+    register_type: input
+    address: 342
+    data_type: float32
+    unit_of_measurement: "kWh"
+    device_class: energy`
+        },
+        {
+          id: 'xy_md02',
+          filename: 'xy_md02.yaml',
+          name: 'XY-MD02 Temperature & Humidity',
+          manufacturer: 'SHT20',
+          model: 'XY-MD02',
+          default_slave_id: 1,
+          description: 'RS485 Modbus RTU temperature and humidity environmental sensor',
+          entities: [
+            { name: 'Temperature', entity_type: 'sensor', register_type: 'input', address: 1, data_type: 'int16', scale: 0.1, unit_of_measurement: '°C', device_class: 'temperature' },
+            { name: 'Humidity', entity_type: 'sensor', register_type: 'input', address: 2, data_type: 'uint16', scale: 0.1, unit_of_measurement: '%', device_class: 'humidity' }
+          ],
+          raw_yaml: `id: xy_md02
+name: XY-MD02 Temperature & Humidity
+manufacturer: SHT20
+model: XY-MD02
+default_slave_id: 1
+description: RS485 Modbus RTU temperature and humidity environmental sensor
+entities:
+  - name: Temperature
+    entity_type: sensor
+    register_type: input
+    address: 1
+    data_type: int16
+    scale: 0.1
+    unit_of_measurement: "°C"
+    device_class: temperature
+  - name: Humidity
+    entity_type: sensor
+    register_type: input
+    address: 2
+    data_type: uint16
+    scale: 0.1
+    unit_of_measurement: "%"
+    device_class: humidity`
+        },
+        {
+          id: 'relay_8ch',
+          filename: 'relay_8ch.yaml',
+          name: '8-Channel Modbus Relay Board',
+          manufacturer: 'Waveshare',
+          model: 'Modbus RTU Relay 8-CH',
+          default_slave_id: 1,
+          description: '8-channel relay output module with digital inputs via Modbus RTU',
+          entities: [
+            { name: 'Relay 1', entity_type: 'switch', register_type: 'coil', address: 0 },
+            { name: 'Relay 2', entity_type: 'switch', register_type: 'coil', address: 1 },
+            { name: 'Relay 3', entity_type: 'switch', register_type: 'coil', address: 2 },
+            { name: 'Relay 4', entity_type: 'switch', register_type: 'coil', address: 3 },
+            { name: 'Relay 5', entity_type: 'switch', register_type: 'coil', address: 4 },
+            { name: 'Relay 6', entity_type: 'switch', register_type: 'coil', address: 5 },
+            { name: 'Relay 7', entity_type: 'switch', register_type: 'coil', address: 6 },
+            { name: 'Relay 8', entity_type: 'switch', register_type: 'coil', address: 7 },
+            { name: 'Digital Input 1', entity_type: 'binary_sensor', register_type: 'discrete', address: 0 },
+            { name: 'Digital Input 2', entity_type: 'binary_sensor', register_type: 'discrete', address: 1 }
+          ],
+          raw_yaml: `id: relay_8ch
+name: 8-Channel Modbus Relay Board
+manufacturer: Waveshare
+model: Modbus RTU Relay 8-CH
+default_slave_id: 1
+description: 8-channel relay output module with digital inputs via Modbus RTU
+entities:
+  - name: Relay 1
+    entity_type: switch
+    register_type: coil
+    address: 0
+  - name: Relay 2
+    entity_type: switch
+    register_type: coil
+    address: 1
+  - name: Relay 3
+    entity_type: switch
+    register_type: coil
+    address: 2
+  - name: Relay 4
+    entity_type: switch
+    register_type: coil
+    address: 3
+  - name: Relay 5
+    entity_type: switch
+    register_type: coil
+    address: 4
+  - name: Relay 6
+    entity_type: switch
+    register_type: coil
+    address: 5
+  - name: Relay 7
+    entity_type: switch
+    register_type: coil
+    address: 6
+  - name: Relay 8
+    entity_type: switch
+    register_type: coil
+    address: 7
+  - name: Digital Input 1
+    entity_type: binary_sensor
+    register_type: discrete
+    address: 0
+  - name: Digital Input 2
+    entity_type: binary_sensor
+    register_type: discrete
+    address: 1`
+        }
+      ]
     };
-    attempt();
-  });
-}
 
-async function init() {
-  try {
-    _hass = await waitForHass();
-    _hassReady = true;
-    await loadEntryData();
-    await refresh();
-    // Auto-refresh every 15s
-    _refreshInterval = setInterval(refresh, 15000);
-  } catch(e) {
-    console.error('[ModbusUSB Panel] init failed:', e);
-    showError('Failed to connect to Home Assistant: ' + e.message);
-  }
-}
+    // ─── Bootstrap & HA Connection ──────────────────────────────
+    function getHass() {
+      try {
+        if (window.parent && window.parent.document) {
+          const el = window.parent.document.querySelector('home-assistant');
+          if (el && el.hass) return el.hass;
+        }
+      } catch(e) {}
+      return null;
+    }
 
-// ─── Load config entry data via hass.callApi ────────────────────────────────
-async function loadEntryData() {
-  try {
-    const entries = await _hass.callApi('GET', 'config/config_entries/entry');
-    const modbusEntries = entries.filter(e => e.domain === DOMAIN);
+    async function init() {
+      _hass = getHass();
+      if (_hass) {
+        _isLiveHA = true;
+        const statusBadge = document.getElementById('status-badge');
+        statusBadge.className = 'status-badge connected';
+        document.getElementById('status-text').textContent = 'Connected (HA)';
+      } else {
+        _isLiveHA = false;
+        const statusBadge = document.getElementById('status-badge');
+        statusBadge.className = 'status-badge local';
+        document.getElementById('status-text').textContent = 'Interactive Preview';
+      }
 
-    _entryData = {};
-    _entryOptions = {};
+      await refreshData();
+      setInterval(refreshData, 15000);
+    }
 
-    modbusEntries.forEach(entry => {
-      _entryData[entry.entry_id] = entry.data || {};
-      _entryOptions[entry.entry_id] = entry.options || { entities: [] };
-      if (!_entryId) _entryId = entry.entry_id;
-    });
+    // ─── Backend API Client ─────────────────────────────────────
+    async function apiCall(type, payload = {}) {
+      if (_isLiveHA && _hass && _hass.callWS) {
+        try {
+          return await _hass.callWS({ type: `modbus_usb/${type}`, ...payload });
+        } catch(e) {
+          console.warn(`[Modbus API] WS ${type} failed, trying REST fallback:`, e);
+        }
+      }
 
-    // Populate entry selector in diagnostics
-    const sel = document.getElementById('diag-entry-sel');
-    sel.innerHTML = '';
-    if (modbusEntries.length === 0) {
-      sel.innerHTML = '<option value="">No Modbus USB hubs configured</option>';
-    } else {
-      modbusEntries.forEach(entry => {
-        const opt = document.createElement('option');
-        opt.value = entry.entry_id;
-        opt.textContent = entry.title || entry.entry_id;
-        sel.appendChild(opt);
+      if (_isLiveHA && _hass && _hass.callApi) {
+        try {
+          if (type === 'get_data') return await _hass.callApi('GET', 'modbus_usb/config');
+          if (type === 'get_templates') return await _hass.callApi('GET', 'modbus_usb/templates');
+          if (type === 'save_template') return await _hass.callApi('POST', 'modbus_usb/templates', payload);
+          if (type === 'delete_template') return await _hass.callApi('DELETE', `modbus_usb/templates?filename=${payload.filename}`);
+        } catch(e) {
+          console.warn(`[Modbus API] REST fallback failed:`, e);
+        }
+      }
+
+      // Standalone Mock fallback
+      return handleMockCall(type, payload);
+    }
+
+    function handleMockCall(type, payload) {
+      const entry = MOCK_DATA.entries.find(e => e.entry_id === (payload.entry_id || _currentEntryId)) || MOCK_DATA.entries[0];
+
+      if (type === 'get_data') {
+        return { entries: MOCK_DATA.entries, templates: MOCK_DATA.templates };
+      }
+      if (type === 'save_device') {
+        const dev = { ...payload.device };
+        if (!dev.id) dev.id = 'dev_' + Math.random().toString(36).substring(2, 9);
+        const idx = entry.devices.findIndex(d => d.id === dev.id);
+        if (idx >= 0) entry.devices[idx] = dev; else entry.devices.push(dev);
+        return { success: true, device: dev };
+      }
+      if (type === 'delete_device') {
+        entry.devices = entry.devices.filter(d => d.id !== payload.device_id);
+        if (payload.delete_entities !== false) {
+          entry.entities = entry.entities.filter(e => e.device_id !== payload.device_id);
+        }
+        return { success: true };
+      }
+      if (type === 'save_entity') {
+        const ent = { ...payload.entity };
+        if (!ent.id) ent.id = 'e_' + Math.random().toString(36).substring(2, 8);
+        const idx = entry.entities.findIndex(e => e.id === ent.id);
+        if (idx >= 0) entry.entities[idx] = ent; else entry.entities.push(ent);
+        return { success: true, entity: ent };
+      }
+      if (type === 'delete_entity') {
+        entry.entities = entry.entities.filter(e => e.id !== payload.entity_id);
+        return { success: true };
+      }
+      if (type === 'save_hub') {
+        Object.assign(entry.hub, payload.hub);
+        return { success: true };
+      }
+      if (type === 'get_templates') {
+        return { templates: MOCK_DATA.templates };
+      }
+      if (type === 'save_template') {
+        let tpl = MOCK_DATA.templates.find(t => t.filename === payload.filename);
+        if (!tpl) {
+          tpl = { id: payload.filename.replace('.yaml',''), filename: payload.filename, name: payload.filename, entities: [], raw_yaml: payload.content };
+          MOCK_DATA.templates.push(tpl);
+        }
+        tpl.raw_yaml = payload.content;
+        return { success: true, template: tpl };
+      }
+      if (type === 'delete_template') {
+        MOCK_DATA.templates = MOCK_DATA.templates.filter(t => t.filename !== payload.filename);
+        return { success: true };
+      }
+      if (type === 'apply_template') {
+        const tpl = MOCK_DATA.templates.find(t => t.filename === payload.template_filename || t.id === payload.template_id);
+        if (!tpl) throw new Error('Template not found');
+        let devId = payload.device_id;
+        if (!devId) {
+          devId = 'dev_' + Math.random().toString(36).substring(2, 9);
+          entry.devices.push({
+            id: devId,
+            name: payload.device_name || tpl.name,
+            slave_id: payload.slave_id || tpl.default_slave_id || 1,
+            model: tpl.model,
+            manufacturer: tpl.manufacturer,
+            description: tpl.description
+          });
+        }
+        const offset = parseInt(payload.address_offset || 0, 10);
+        let count = 0;
+        (tpl.entities || []).forEach(e => {
+          if (!payload.selected_entities || payload.selected_entities.includes(e.name)) {
+            entry.entities.push({
+              ...e,
+              id: 'e_' + Math.random().toString(36).substring(2, 8),
+              device_id: devId,
+              address: (e.address || 0) + offset
+            });
+            count++;
+          }
+        });
+        return { success: true, device_id: devId, added_count: count };
+      }
+      return { success: true };
+    }
+
+    // ─── Data Loading & Refresh ─────────────────────────────────
+    async function refreshData() {
+      const btn = document.getElementById('btn-refresh');
+      btn.disabled = true;
+      btn.textContent = '⟳ Refreshing…';
+
+      try {
+        if (_isLiveHA) {
+          _hass = getHass() || _hass;
+          _statesCache = _hass ? (_hass.states || {}) : {};
+        }
+
+        const data = await apiCall('get_data');
+        _entries = data.entries || [];
+        _templates = data.templates || [];
+
+        if (_entries.length > 0) {
+          if (!_currentEntryId || !_entries.some(e => e.entry_id === _currentEntryId)) {
+            _currentEntryId = _entries[0].entry_id;
+          }
+        }
+
+        renderHubSelector();
+        renderHeaderSubtitle();
+        renderDevicesTab();
+        renderTemplatesTab();
+        renderDashboardTab();
+        renderEntitiesTab();
+        renderHubTab();
+      } catch(e) {
+        console.error('[Modbus USB] Refresh failed:', e);
+        toast('Failed to load data: ' + e.message, 'err');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '↻ Refresh';
+      }
+    }
+
+    function getCurrentEntry() {
+      return _entries.find(e => e.entry_id === _currentEntryId) || _entries[0] || null;
+    }
+
+    function renderHubSelector() {
+      const wrap = document.getElementById('hub-select-wrap');
+      const sel = document.getElementById('hub-select');
+      if (_entries.length <= 1) {
+        wrap.style.display = 'none';
+        return;
+      }
+      wrap.style.display = 'flex';
+      sel.innerHTML = _entries.map(e => `
+        <option value="${e.entry_id}" ${e.entry_id === _currentEntryId ? 'selected' : ''}>
+          ${e.title || e.entry_id} (${e.hub?.port || 'USB'})
+        </option>
+      `).join('');
+    }
+
+    function onHubChange(entryId) {
+      _currentEntryId = entryId;
+      refreshData();
+    }
+
+    function renderHeaderSubtitle() {
+      const entry = getCurrentEntry();
+      const sub = document.getElementById('header-subtitle');
+      if (!entry) {
+        sub.innerHTML = `<span>No Modbus USB controller found</span>`;
+        return;
+      }
+      const port = entry.hub?.port || '/dev/ttyUSB0';
+      const baud = entry.hub?.baudrate || 9600;
+      const devCount = (entry.devices || []).length;
+      const entCount = (entry.entities || []).length;
+      sub.innerHTML = `
+        <span class="mono badge badge-slate">${port} @ ${baud} 8N1</span>
+        <span>${devCount} separated device${devCount === 1 ? '' : 's'}</span>
+        <span>•</span>
+        <span>${entCount} entities</span>
+      `;
+    }
+
+    // ─── Find Live State ────────────────────────────────────────
+    function getLiveState(ent, dev) {
+      if (!_isLiveHA) {
+        // Return simulated value in preview mode
+        if (ent.entity_type === 'switch') return { state: 'on' };
+        if (ent.entity_type === 'binary_sensor') return { state: 'on' };
+        if (ent.name.includes('Voltage')) return { state: '230.4' };
+        if (ent.name.includes('Current')) return { state: '4.82' };
+        if (ent.name.includes('Power')) return { state: '1110.5' };
+        if (ent.name.includes('Energy')) return { state: '428.6' };
+        if (ent.name.includes('Temperature')) return { state: '24.2' };
+        if (ent.name.includes('Humidity')) return { state: '55.0' };
+        return { state: '100' };
+      }
+
+      const slug = (ent.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+      const devSlug = dev ? (dev.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_') + '_' : '';
+      const domain = ent.entity_type === 'switch' ? 'switch' : ent.entity_type === 'binary_sensor' ? 'binary_sensor' : ent.entity_type === 'number' ? 'number' : 'sensor';
+
+      const candidateIds = [
+        `${domain}.${devSlug}${slug}`,
+        `${domain}.${slug}`,
+        `sensor.${devSlug}${slug}`,
+        `sensor.${slug}`,
+        `switch.${devSlug}${slug}`,
+        `switch.${slug}`,
+      ];
+
+      for (const id of candidateIds) {
+        if (_statesCache[id]) return _statesCache[id];
+      }
+
+      // Friendly name match
+      for (const [sid, st] of Object.entries(_statesCache)) {
+        if (st.attributes?.friendly_name?.toLowerCase() === (ent.name || '').toLowerCase()) {
+          return st;
+        }
+      }
+      return null;
+    }
+
+    // ─── TAB 1: RENDER DEVICES ──────────────────────────────────
+    function renderDevicesTab() {
+      const entry = getCurrentEntry();
+      const container = document.getElementById('device-cards-container');
+      const devices = entry ? (entry.devices || []) : [];
+      const entities = entry ? (entry.entities || []) : [];
+
+      document.getElementById('count-devices').textContent = devices.length;
+
+      if (devices.length === 0) {
+        container.innerHTML = `
+          <div class="empty-box card">
+            <div class="empty-icon">🎛</div>
+            <h3>No Devices Configured Yet</h3>
+            <p>Add your first Modbus device using a pre-configured template (like an SDM120 Energy Meter, Temperature Sensor, or Relay Board) or create a custom blank device.</p>
+            <div class="flex gap-1" style="justify-content:center;">
+              <button class="btn btn-primary" onclick="openAddDeviceModal('template')">⚡ Add Device from Template</button>
+              <button class="btn btn-ghost" onclick="openAddDeviceModal('blank')">➕ Blank Device</button>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = devices.map(dev => {
+        const devEntities = entities.filter(e => e.device_id === dev.id);
+        const slaveId = dev.slave_id != null ? dev.slave_id : (entry.hub?.slave_id || 1);
+
+        const entitiesHtml = devEntities.length === 0 ? `
+          <div style="padding:1.5rem; text-align:center; color:var(--text-dim); font-size:0.8rem; width:100%;">
+            No sensors or switches added to this device yet.
+            <div class="flex gap-1" style="justify-content:center; margin-top:0.6rem;">
+              <button class="btn btn-secondary btn-sm" onclick="openApplyTemplateModal('${dev.id}')">⚡ Add from Template</button>
+              <button class="btn btn-ghost btn-sm" onclick="openAddEntityModal('${dev.id}')">➕ Add Entity</button>
+            </div>
+          </div>
+        ` : devEntities.map(ent => {
+          const type = ent.entity_type || 'sensor';
+          const typeIcon = { sensor: '📈', switch: '💡', binary_sensor: '🔵', number: '🔢' }[type] || '📊';
+          const state = getLiveState(ent, dev);
+          const val = state ? state.state : '—';
+          const unit = ent.unit_of_measurement || state?.attributes?.unit_of_measurement || '';
+
+          let controlHtml = '';
+          if (type === 'switch') {
+            const isOn = val === 'on';
+            controlHtml = `
+              <label class="switch-toggle" title="Toggle switch">
+                <input type="checkbox" ${isOn ? 'checked' : ''} onchange="toggleEntitySwitch('${ent.name}', this.checked)">
+                <span class="switch-slider"></span>
+              </label>
+            `;
+          } else if (type === 'number') {
+            controlHtml = `
+              <div class="flex items-center gap-1">
+                <span class="mono text-sm" style="font-weight:700; color:#34d399;">${val}</span>
+                <button class="btn btn-ghost btn-sm" style="padding:0.2rem 0.4rem; font-size:0.68rem;" onclick="promptWriteNumber('${ent.id}', '${ent.name}', ${val})">✏</button>
+              </div>
+            `;
+          } else {
+            const displayVal = val === null || val === 'unknown' || val === 'unavailable' ? '—' : parseFloat(val);
+            const formatted = isNaN(displayVal) ? val : displayVal.toLocaleString(undefined, { maximumFractionDigits: 3 });
+            controlHtml = `
+              <div class="ent-val">
+                ${formatted}<span class="ent-val-unit">${unit}</span>
+              </div>
+            `;
+          }
+
+          return `
+            <div class="device-entity-item">
+              <div class="ent-left">
+                <div class="ent-icon ${type}">${typeIcon}</div>
+                <div class="ent-info">
+                  <div class="ent-name" title="${ent.name}">${ent.name}</div>
+                  <div class="ent-sub mono">
+                    <span>${ent.register_type || 'holding'} @ ${ent.address ?? 0}</span>
+                    <span>•</span>
+                    <span>${ent.data_type || (type === 'switch' || type === 'binary_sensor' ? 'bit' : 'uint16')}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="ent-right">
+                ${controlHtml}
+                <button class="btn btn-ghost btn-sm" style="padding:0.2rem 0.45rem; font-size:0.68rem;" title="Edit entity" onclick="openEditEntityModal('${ent.id}')">✏</button>
+                <button class="btn btn-danger btn-sm" style="padding:0.2rem 0.45rem; font-size:0.68rem;" title="Delete entity" onclick="confirmDeleteEntity('${ent.id}', '${ent.name}')">🗑</button>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        return `
+          <div class="device-card" id="dev-card-${dev.id}">
+            <div class="device-card-header">
+              <div class="device-header-left">
+                <div class="device-avatar">🎛</div>
+                <div class="device-meta">
+                  <h3>
+                    <span>${dev.name || 'Unnamed Device'}</span>
+                    <span class="badge badge-purple mono">Slave ID: ${slaveId}</span>
+                    ${dev.model ? `<span class="badge badge-slate">${dev.model}</span>` : ''}
+                    ${dev.manufacturer ? `<span class="badge badge-slate">${dev.manufacturer}</span>` : ''}
+                    <span class="badge badge-blue">${devEntities.length} entities</span>
+                  </h3>
+                  <p>${dev.description || 'Modbus RTU device connected via USB'}</p>
+                </div>
+              </div>
+
+              <div class="device-header-actions">
+                <button class="btn btn-secondary btn-sm" onclick="openApplyTemplateModal('${dev.id}')" title="Add sensors/switches from any YAML template">
+                  ⚡ Apply Template
+                </button>
+                <button class="btn btn-primary btn-sm" onclick="openAddEntityModal('${dev.id}')" title="Add a custom entity to this device">
+                  ➕ Add Entity
+                </button>
+                <button class="btn btn-ghost btn-sm" onclick="openEditDeviceModal('${dev.id}')" title="Rename or edit slave ID">
+                  ✏ Edit
+                </button>
+                <button class="btn btn-danger btn-sm" onclick="confirmDeleteDevice('${dev.id}', '${dev.name}')" title="Delete device and its entities">
+                  🗑 Delete
+                </button>
+              </div>
+            </div>
+
+            <div class="device-entities-list">
+              ${entitiesHtml}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // ─── TAB 2: RENDER TEMPLATES ────────────────────────────────
+    function renderTemplatesTab() {
+      const container = document.getElementById('template-cards-container');
+      document.getElementById('count-templates').textContent = _templates.length;
+
+      if (_templates.length === 0) {
+        container.innerHTML = `
+          <div class="empty-box card" style="grid-column:1/-1">
+            <div class="empty-icon">📑</div>
+            <h3>No Templates Found</h3>
+            <p>Create your first device template YAML file to quickly configure new sensors and switches.</p>
+            <button class="btn btn-primary" onclick="openTemplateEditorModal(null)">➕ Create Template</button>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = _templates.map(tpl => {
+        const entCount = (tpl.entities || []).length;
+        const previewItems = (tpl.entities || []).slice(0, 5).map(e => `
+          <div class="preview-pill">
+            <span style="font-weight:600; color:#cbd5e1;">${e.name}</span>
+            <span class="mono" style="color:var(--text-dim);">${e.entity_type} • ${e.register_type}@${e.address}</span>
+          </div>
+        `).join('');
+
+        const extraCount = entCount > 5 ? `<div style="text-align:center; font-size:0.68rem; color:var(--text-dim); padding-top:2px;">+ ${entCount - 5} more entities</div>` : '';
+
+        return `
+          <div class="template-card">
+            <div>
+              <div class="template-header">
+                <div class="template-title">
+                  <h3>${tpl.name || tpl.id}</h3>
+                  <div class="template-filename">${tpl.filename}</div>
+                </div>
+                <div class="flex gap-1" style="flex-direction:column; align-items:flex-end;">
+                  <span class="badge badge-purple mono">Default Slave: ${tpl.default_slave_id || 1}</span>
+                  <span class="badge badge-blue">${entCount} entities</span>
+                </div>
+              </div>
+
+              <div class="template-desc">${tpl.description || 'Pre-configured Modbus registers and entity mappings'}</div>
+
+              <div class="template-entities-preview">
+                ${previewItems || '<div style="color:var(--text-dim); font-size:0.7rem; text-align:center;">No entities defined in template</div>'}
+                ${extraCount}
+              </div>
+            </div>
+
+            <div class="template-actions">
+              <button class="btn btn-primary btn-sm" onclick="useTemplateToCreateDevice('${tpl.filename}')" title="Create a new device using this template">
+                🚀 Use Template
+              </button>
+              <button class="btn btn-secondary btn-sm" onclick="openTemplateEditorModal('${tpl.filename}')" title="Edit YAML file">
+                ✏ Edit YAML
+              </button>
+              <button class="btn btn-ghost btn-sm" onclick="duplicateTemplate('${tpl.filename}')" title="Duplicate template">
+                📋 Duplicate
+              </button>
+              <button class="btn btn-danger btn-sm" onclick="confirmDeleteTemplate('${tpl.filename}')" title="Delete YAML file">
+                🗑
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // ─── TAB 3: RENDER DASHBOARD ────────────────────────────────
+    function renderDashboardTab() {
+      const entry = getCurrentEntry();
+      const devices = entry ? (entry.devices || []) : [];
+      const entities = entry ? (entry.entities || []) : [];
+
+      // Stats counters
+      let sensors = 0, switches = 0, binary = 0, numbers = 0;
+      entities.forEach(e => {
+        if (e.entity_type === 'sensor') sensors++;
+        else if (e.entity_type === 'switch') switches++;
+        else if (e.entity_type === 'binary_sensor') binary++;
+        else if (e.entity_type === 'number') numbers++;
       });
-      sel.value = _entryId || '';
+      document.getElementById('stat-total-dev').textContent = devices.length;
+      document.getElementById('stat-total-ent').textContent = entities.length;
+      document.getElementById('stat-sensors').textContent = sensors;
+      document.getElementById('stat-switches').textContent = switches;
+      document.getElementById('stat-binary').textContent = binary;
+      document.getElementById('stat-numbers').textContent = numbers;
+
+      // Filter chips
+      const filterBar = document.getElementById('dashboard-filter-bar');
+      filterBar.innerHTML = `
+        <button class="filter-chip ${_dashboardFilter === 'all' ? 'active' : ''}" onclick="filterDashboard('all', this)">
+          All Devices (${entities.length})
+        </button>
+        ${devices.map(d => {
+          const dEnts = entities.filter(e => e.device_id === d.id);
+          return `
+            <button class="filter-chip ${_dashboardFilter === d.id ? 'active' : ''}" onclick="filterDashboard('${d.id}', this)">
+              ${d.name} (${dEnts.length})
+            </button>
+          `;
+        }).join('')}
+      `;
+
+      // Filter entities
+      const displayEnts = _dashboardFilter === 'all'
+        ? entities
+        : entities.filter(e => e.device_id === _dashboardFilter);
+
+      const grid = document.getElementById('dashboard-tile-grid');
+      if (displayEnts.length === 0) {
+        grid.innerHTML = `
+          <div class="empty-box card" style="grid-column:1/-1;">
+            <div class="empty-icon">📊</div>
+            <h3>No Entities for this Selection</h3>
+            <p>Add sensors, switches, or apply templates to view live metrics here.</p>
+          </div>
+        `;
+        return;
+      }
+
+      grid.innerHTML = displayEnts.map(ent => {
+        const type = ent.entity_type || 'sensor';
+        const typeIcon = { sensor: '📈', switch: '💡', binary_sensor: '🔵', number: '🔢' }[type] || '📊';
+        const tileAccent = {
+          sensor: 'linear-gradient(90deg, #3b82f6, #6366f1)',
+          switch: 'linear-gradient(90deg, #8b5cf6, #ec4899)',
+          binary_sensor: 'linear-gradient(90deg, #f59e0b, #f97316)',
+          number: 'linear-gradient(90deg, #10b981, #06b6d4)'
+        }[type] || 'linear-gradient(90deg, #3b82f6, #8b5cf6)';
+
+        const dev = devices.find(d => d.id === ent.device_id);
+        const state = getLiveState(ent, dev);
+        const val = state ? state.state : '—';
+        const unit = ent.unit_of_measurement || state?.attributes?.unit_of_measurement || '';
+
+        let valHtml = '';
+        if (type === 'switch') {
+          const isOn = val === 'on';
+          valHtml = `
+            <div style="margin: 0.5rem 0;">
+              <label class="switch-toggle">
+                <input type="checkbox" ${isOn ? 'checked' : ''} onchange="toggleEntitySwitch('${ent.name}', this.checked)">
+                <span class="switch-slider"></span>
+              </label>
+              <span style="font-size:0.8rem; font-weight:700; margin-left:0.5rem; color:${isOn ? '#34d399' : '#94a3b8'}">${isOn ? 'ON' : 'OFF'}</span>
+            </div>
+          `;
+        } else if (type === 'binary_sensor') {
+          const isOn = val === 'on';
+          valHtml = `<div class="tile-value" style="font-size:1.1rem; color:${isOn ? '#34d399' : '#94a3b8'};">${isOn ? '🟢 ACTIVE' : '⚫ IDLE'}</div>`;
+        } else {
+          const displayVal = val === null || val === 'unknown' || val === 'unavailable' ? '—' : parseFloat(val);
+          const formatted = isNaN(displayVal) ? val : displayVal.toLocaleString(undefined, { maximumFractionDigits: 3 });
+          valHtml = `<div class="tile-value">${formatted}<span style="font-size:0.75rem; font-weight:400; margin-left:3px; color:var(--text-dim);">${unit}</span></div>`;
+        }
+
+        return `
+          <div class="entity-tile" style="--tile-accent: ${tileAccent};">
+            <div class="tile-header">
+              <span class="badge badge-slate" style="font-size:0.65rem;">${dev ? dev.name : 'Modbus'}</span>
+              <span style="font-size:0.9rem;">${typeIcon}</span>
+            </div>
+            ${valHtml}
+            <div class="tile-name" title="${ent.name}">${ent.name}</div>
+            <div class="tile-sub mono">${ent.register_type || 'holding'} @ ${ent.address ?? 0}</div>
+          </div>
+        `;
+      }).join('');
     }
 
-    // Update header subtitle
-    const subtitle = modbusEntries.length === 1
-      ? (_entryData[_entryId]?.port || 'Connected')
-      : `${modbusEntries.length} hubs`;
-    document.getElementById('header-subtitle').textContent = subtitle;
-    document.getElementById('hub-entry-id').textContent = _entryId ? `entry: ${_entryId.substring(0,8)}…` : '';
-
-    updateConnectionTab();
-  } catch(e) {
-    console.warn('[ModbusUSB Panel] Could not load entry data:', e);
-  }
-}
-
-// ─── Main refresh ─────────────────────────────────────────────────────────
-async function refresh() {
-  const btn = document.getElementById('btn-refresh');
-  btn.disabled = true;
-  btn.textContent = '⟳ Loading…';
-
-  try {
-    _hass = getHass() || _hass;
-    _statesCache = _hass.states || {};
-    const ts = new Date().toLocaleTimeString();
-    document.getElementById('last-updated-ts').textContent = `Last updated: ${ts}`;
-
-    renderDashboard();
-    renderEntitiesTable();
-    updateConnectionStatus();
-  } catch(e) {
-    console.error('[ModbusUSB Panel] refresh error:', e);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '↻ Refresh';
-  }
-}
-
-// ─── Gather entities from options ──────────────────────────────────────────
-function getAllEntities() {
-  const result = [];
-  for (const [entryId, opts] of Object.entries(_entryOptions)) {
-    const entities = opts.entities || [];
-    entities.forEach(ent => result.push({ ...ent, _entryId: entryId }));
-  }
-  return result;
-}
-
-function findHAState(ent, entryId) {
-  // HA entity_id format: domain.name (slugified)
-  // We search for any state whose attributes.friendly_name matches or entity_id contains slug
-  const slug = (ent.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
-  const possibleIds = [
-    `${ent.entity_type === 'switch' ? 'switch' : ent.entity_type === 'binary_sensor' ? 'binary_sensor' : ent.entity_type === 'number' ? 'number' : 'sensor'}.${slug}`,
-    `sensor.${slug}`,
-    `switch.${slug}`,
-    `binary_sensor.${slug}`,
-    `number.${slug}`,
-  ];
-  for (const pid of possibleIds) {
-    if (_statesCache[pid]) return _statesCache[pid];
-  }
-  // Fuzzy: scan all states for matching friendly_name
-  for (const [sid, state] of Object.entries(_statesCache)) {
-    if (state.attributes?.friendly_name?.toLowerCase() === (ent.name || '').toLowerCase()) {
-      return state;
-    }
-  }
-  return null;
-}
-
-// ─── Dashboard ─────────────────────────────────────────────────────────────
-function renderDashboard() {
-  const entities = getAllEntities();
-  const grid = document.getElementById('entity-grid');
-
-  let sensors = 0, switches = 0, binary = 0, numbers = 0, unavail = 0;
-
-  if (entities.length === 0) {
-    grid.innerHTML = `
-      <div class="empty-state" style="grid-column:1/-1">
-        <div class="empty-icon">📭</div>
-        <h3>No entities configured</h3>
-        <p>Add sensors or switches via the integration options in Settings → Devices &amp; Services.</p>
-      </div>`;
-    updateStats(0, 0, 0, 0, 0, 0);
-    return;
-  }
-
-  grid.innerHTML = entities.map(ent => {
-    const state = findHAState(ent, ent._entryId);
-    const val = state ? state.state : null;
-    const unit = ent.unit_of_measurement || state?.attributes?.unit_of_measurement || '';
-    const type = ent.entity_type || 'sensor';
-
-    // Update counters
-    if (type === 'sensor') sensors++;
-    else if (type === 'switch') switches++;
-    else if (type === 'binary_sensor') binary++;
-    else if (type === 'number') numbers++;
-    if (val === null || val === 'unavailable') unavail++;
-
-    const typeIcon = { sensor:'📈', switch:'💡', binary_sensor:'🔵', number:'🔢' }[type] || '📊';
-    const tileAccent = { sensor:'linear-gradient(90deg,#3b82f6,#6366f1)', switch:'linear-gradient(90deg,#8b5cf6,#ec4899)', binary_sensor:'linear-gradient(90deg,#f59e0b,#f97316)', number:'linear-gradient(90deg,#10b981,#06b6d4)' }[type] || 'linear-gradient(90deg,#3b82f6,#8b5cf6)';
-
-    let valueHtml = '';
-    let badgeHtml = '';
-
-    if (val === null || val === 'unavailable' || val === 'unknown') {
-      valueHtml = `<div class="entity-value" style="font-size:1rem;opacity:0.4">unavail.</div>`;
-      badgeHtml = `<span class="entity-state-badge badge-unavail">N/A</span>`;
-    } else if (type === 'switch') {
-      const isOn = val === 'on';
-      valueHtml = `<label class="switch-toggle"><input type="checkbox" ${isOn?'checked':''} onchange="toggleSwitch('${ent.name}', this.checked, '${ent._entryId}')"><span class="switch-slider"></span></label>`;
-      badgeHtml = isOn ? `<span class="entity-state-badge badge-on">ON</span>` : `<span class="entity-state-badge badge-off">OFF</span>`;
-    } else if (type === 'binary_sensor') {
-      const isOn = val === 'on';
-      valueHtml = `<div class="entity-value" style="font-size:1.1rem">${isOn ? '🟢 ON' : '⚫ OFF'}</div>`;
-      badgeHtml = isOn ? `<span class="entity-state-badge badge-on">ON</span>` : `<span class="entity-state-badge badge-off">OFF</span>`;
-    } else {
-      const displayVal = parseFloat(val);
-      const formatted = isNaN(displayVal) ? val : displayVal.toLocaleString(undefined, {maximumFractionDigits:3});
-      valueHtml = `<div class="entity-value">${formatted}<span style="font-size:0.65rem;font-weight:400;margin-left:0.2rem;opacity:0.6;-webkit-text-fill-color:#94a3b8">${unit}</span></div>`;
-      badgeHtml = `<span class="entity-state-badge badge-sensor">LIVE</span>`;
+    function filterDashboard(devId, btn) {
+      _dashboardFilter = devId;
+      document.querySelectorAll('#dashboard-filter-bar .filter-chip').forEach(c => c.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+      renderDashboardTab();
     }
 
-    return `
-    <div class="entity-tile" style="--tile-accent:${tileAccent}">
-      <div class="entity-tile-header">
-        <div class="entity-type-icon ${type}">${typeIcon}</div>
-        ${badgeHtml}
-      </div>
-      ${valueHtml}
-      <div class="entity-name">${ent.name || 'Unknown'}</div>
-      <div class="entity-address mono">${ent.register_type || ''} @ ${ent.address ?? '—'}</div>
-    </div>`;
-  }).join('');
+    // ─── TAB 4: RENDER ENTITIES TABLE ───────────────────────────
+    function renderEntitiesTab() {
+      const entry = getCurrentEntry();
+      const tbody = document.getElementById('entities-table-tbody');
+      const devices = entry ? (entry.devices || []) : [];
+      const entities = entry ? (entry.entities || []) : [];
 
-  updateStats(entities.length, sensors, switches, binary, numbers, unavail);
-}
+      document.getElementById('count-entities').textContent = entities.length;
 
-function updateStats(total, sensors, switches, binary, numbers, unavail) {
-  document.getElementById('stat-total').textContent   = total;
-  document.getElementById('stat-sensors').textContent = sensors;
-  document.getElementById('stat-switches').textContent = switches;
-  document.getElementById('stat-binary').textContent  = binary;
-  document.getElementById('stat-numbers').textContent = numbers;
-  document.getElementById('stat-unavail').textContent = unavail;
-}
+      if (entities.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:2rem; color:var(--text-dim);">No entities configured yet.</td></tr>`;
+        return;
+      }
 
-// ─── Entities Table ─────────────────────────────────────────────────────────
-function renderEntitiesTable() {
-  const entities = getAllEntities();
-  const tbody = document.getElementById('entities-tbody');
+      tbody.innerHTML = entities.map(ent => {
+        const dev = devices.find(d => d.id === ent.device_id);
+        const type = ent.entity_type || 'sensor';
+        const pillClass = { sensor: 'badge-blue', switch: 'badge-purple', binary_sensor: 'badge-amber', number: 'badge-green' }[type] || 'badge-blue';
+        const state = getLiveState(ent, dev);
+        const val = state ? state.state : '—';
+        const unit = ent.unit_of_measurement || '';
 
-  if (entities.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:2rem;color:#334155">No entities configured yet.</td></tr>';
-    return;
-  }
-
-  tbody.innerHTML = entities.map(ent => {
-    const state = findHAState(ent, ent._entryId);
-    const val = state ? state.state : '—';
-    const unit = ent.unit_of_measurement || state?.attributes?.unit_of_measurement || '';
-    const type = ent.entity_type || 'sensor';
-    const pillClass = {sensor:'pill-sensor',switch:'pill-switch',binary_sensor:'pill-binary',number:'pill-number'}[type]||'pill-sensor';
-    const typeLabel = {sensor:'Sensor',switch:'Switch',binary_sensor:'Binary',number:'Number'}[type]||type;
-    const displayVal = val === null ? '—' : val === 'unavailable' ? '<span style="color:#ef4444">unavail.</span>' : `${val} ${unit}`;
-
-    return `<tr>
-      <td class="td-name">${ent.name || '—'}</td>
-      <td><span class="type-pill ${pillClass}">${typeLabel}</span></td>
-      <td class="mono">${ent.register_type || '—'}</td>
-      <td class="mono">${ent.address ?? '—'}</td>
-      <td class="mono">${ent.data_type || (type === 'switch' || type === 'binary_sensor' ? 'bit' : '—')}</td>
-      <td class="mono">${ent.scale != null && ent.scale !== 1 ? ent.scale : '—'}</td>
-      <td class="mono">${ent.unit_of_measurement || '—'}</td>
-      <td class="mono">${displayVal}</td>
-    </tr>`;
-  }).join('');
-}
-
-// ─── Connection Tab ──────────────────────────────────────────────────────────
-function updateConnectionTab() {
-  if (!_entryId || !_entryData[_entryId]) {
-    document.getElementById('conn-info-grid').innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:1.5rem;color:#334155">No hub configured.</div>';
-    return;
-  }
-  const data = _entryData[_entryId];
-  const opts = _entryOptions[_entryId] || {};
-
-  const fields = [
-    ['Port', data.port || '—'],
-    ['Baud rate', data.baudrate || '—'],
-    ['Byte size', data.bytesize || '—'],
-    ['Parity', data.parity ? ({N:'None',E:'Even',O:'Odd'}[data.parity] || data.parity) : '—'],
-    ['Stop bits', data.stopbits || '—'],
-    ['Slave ID', data.slave_id || '—'],
-    ['Poll interval', opts.scan_interval ? `${opts.scan_interval} s` : '—'],
-    ['Entities', (opts.entities || []).length],
-  ];
-
-  document.getElementById('conn-info-grid').innerHTML = fields.map(([label, value]) => `
-    <div class="info-item">
-      <div class="info-label">${label}</div>
-      <div class="info-value">${value}</div>
-    </div>`).join('');
-}
-
-function updateConnectionStatus() {
-  // Heuristic: if any entity has a non-unavailable state, connection is likely OK
-  const entities = getAllEntities();
-  let hasGoodState = false;
-  let hasAnyState = false;
-
-  entities.forEach(ent => {
-    const state = findHAState(ent, ent._entryId);
-    if (state) {
-      hasAnyState = true;
-      if (state.state !== 'unavailable' && state.state !== 'unknown') hasGoodState = true;
+        return `
+          <tr>
+            <td><span class="badge badge-slate">${dev ? dev.name : '—'}</span></td>
+            <td style="font-weight:600; color:#fff;">${ent.name}</td>
+            <td><span class="badge ${pillClass}">${type}</span></td>
+            <td class="mono">${ent.register_type || 'holding'}</td>
+            <td class="mono">${ent.address ?? '0'}</td>
+            <td class="mono">${ent.data_type || (type === 'switch' || type === 'binary_sensor' ? 'bit' : 'uint16')}</td>
+            <td class="mono">${ent.scale != null && ent.scale !== 1 ? ent.scale + ' × ' : ''}${unit || '—'}</td>
+            <td class="mono" style="font-weight:700; color:#93c5fd;">${val} ${unit}</td>
+            <td>
+              <div class="flex gap-1">
+                <button class="btn btn-ghost btn-sm" onclick="openEditEntityModal('${ent.id}')" title="Edit">✏</button>
+                <button class="btn btn-danger btn-sm" onclick="confirmDeleteEntity('${ent.id}', '${ent.name}')" title="Delete">🗑</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
     }
-  });
 
-  const status = entities.length === 0 ? 'unknown' : (hasGoodState ? 'connected' : (hasAnyState ? 'disconnected' : 'unknown'));
-  const labels = { connected: 'Connected', disconnected: 'Disconnected', unknown: 'No data' };
+    // ─── TAB 5: RENDER HUB & SERIAL ─────────────────────────────
+    function renderHubTab() {
+      const entry = getCurrentEntry();
+      const grid = document.getElementById('hub-info-grid');
+      if (!entry || !entry.hub) {
+        grid.innerHTML = `<div style="grid-column:1/-1; color:var(--text-dim); text-align:center; padding:1.5rem;">No hub configured.</div>`;
+        return;
+      }
+      const hub = entry.hub;
+      const fields = [
+        ['Serial Port', hub.port || '—'],
+        ['Baud Rate', hub.baudrate ? `${hub.baudrate} baud` : '—'],
+        ['Data Format', `${hub.bytesize || 8} Data bits, ${hub.parity || 'N'} Parity, ${hub.stopbits || 1} Stop`],
+        ['Default Slave ID', hub.slave_id || '1'],
+        ['Polling Scan Interval', `${hub.scan_interval || 10} seconds`],
+        ['Config Entry ID', entry.entry_id || '—'],
+      ];
 
-  ['conn-badge', 'conn-badge-2'].forEach(id => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.className = `status-badge ${status}`;
-    el.querySelector('span').textContent = labels[status];
-  });
+      grid.innerHTML = fields.map(([label, val]) => `
+        <div style="background:rgba(255,255,255,0.025); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:0.85rem;">
+          <div style="font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; font-weight:600; letter-spacing:0.04em;">${label}</div>
+          <div class="mono" style="font-size:0.95rem; font-weight:700; color:#f1f5f9; margin-top:3px;">${val}</div>
+        </div>
+      `).join('');
+    }
 
-  // Diagnostics health (placeholder — real data would come from coordinator diag sensor)
-  const healthItems = [
-    ['Mode', 'Local polling'],
-    ['Protocol', 'Modbus RTU over USB'],
-    ['Status', hasGoodState ? '✅ Active' : hasAnyState ? '⚠ Errors' : '❓ No data'],
-  ];
-  document.getElementById('diag-health-grid').innerHTML = healthItems.map(([label, value]) => `
-    <div class="info-item">
-      <div class="info-label">${label}</div>
-      <div class="info-value" style="font-size:0.85rem">${value}</div>
-    </div>`).join('');
-}
+    // ─── TAB SWITCHING ──────────────────────────────────────────
+    function switchTab(tabName) {
+      document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
 
-// ─── Switch toggle ───────────────────────────────────────────────────────────
-async function toggleSwitch(entityName, isOn, entryId) {
-  const slug = entityName.toLowerCase().replace(/[^a-z0-9]+/g, '_');
-  const entityId = `switch.${slug}`;
-  try {
-    await _hass.callService('switch', isOn ? 'turn_on' : 'turn_off', { entity_id: entityId });
-    snack(`${entityName} turned ${isOn ? 'on' : 'off'}`, 'ok');
-    setTimeout(refresh, 1000);
-  } catch(e) {
-    snack(`Failed to toggle ${entityName}: ${e.message}`, 'err');
-  }
-}
+      const btn = document.getElementById(`tab-btn-${tabName}`);
+      const pane = document.getElementById(`pane-${tabName}`);
+      if (btn) btn.classList.add('active');
+      if (pane) pane.classList.add('active');
+    }
 
-// ─── Diagnostics: read ───────────────────────────────────────────────────────
-async function doReadRegister() {
-  const entryId = document.getElementById('diag-entry-sel').value;
-  const address = parseInt(document.getElementById('diag-addr').value, 10);
-  const regType = document.getElementById('diag-regtype').value;
-  const dataType = document.getElementById('diag-dtype').value;
+    // ─── MODALS CONTROL ─────────────────────────────────────────
+    function openModal(id) {
+      const el = document.getElementById(id);
+      if (el) el.classList.add('open');
+    }
+    function closeModal(id) {
+      const el = document.getElementById(id);
+      if (el) el.classList.remove('open');
+    }
 
-  if (!entryId) { snack('Select a hub first', 'err'); return; }
-  if (isNaN(address)) { snack('Invalid address', 'err'); return; }
+    // ─── ADD DEVICE MODAL FLOW ──────────────────────────────────
+    let _addDeviceMode = 'template';
+    let _selectedTemplateEntities = new Set();
 
-  const resultEl = document.getElementById('diag-result');
-  resultEl.className = 'diag-result loading';
-  resultEl.innerHTML = '<div class="spinner"></div><span>Reading register…</span>';
-  document.getElementById('btn-read-reg').disabled = true;
+    function openAddDeviceModal(mode = 'template') {
+      setAddDeviceMode(mode);
+      populateTemplateSelectInAddDevice();
+      openModal('modal-add-device');
+    }
 
-  try {
-    await _hass.callService(DOMAIN, 'read_register', {
-      entry_id: entryId,
-      address: address,
-      register_type: regType,
-      data_type: dataType,
-    });
+    function setAddDeviceMode(mode) {
+      _addDeviceMode = mode;
+      const tplBtn = document.getElementById('btn-mode-template');
+      const blkBtn = document.getElementById('btn-mode-blank');
+      const tplForm = document.getElementById('form-device-template');
+      const blkForm = document.getElementById('form-device-blank');
 
-    // Listen for the event via a short poll on states (result arrives via event bus)
-    // Since we can't easily subscribe to events in an iframe, we wait briefly and show status
-    setTimeout(() => {
-      resultEl.className = 'diag-result success';
-      resultEl.innerHTML = `<span>✅ Read dispatched → result fires as event <code style="background:rgba(255,255,255,0.1);padding:0.1em 0.3em;border-radius:4px">modbus_usb_register_read</code>. Check Logbook or automations.</span>`;
-      appendLog({ address, regType, dataType, status: 'dispatched' });
-      document.getElementById('btn-read-reg').disabled = false;
-    }, 600);
-  } catch(e) {
-    resultEl.className = 'diag-result error';
-    resultEl.innerHTML = `<span>❌ ${e.message}</span>`;
-    appendLog({ address, regType, dataType, status: 'error', error: e.message });
-    document.getElementById('btn-read-reg').disabled = false;
-    snack('Read failed: ' + e.message, 'err');
-  }
-}
+      if (mode === 'template') {
+        tplBtn.className = 'btn btn-primary btn-sm';
+        blkBtn.className = 'btn btn-ghost btn-sm';
+        tplForm.style.display = 'block';
+        blkForm.style.display = 'none';
+        document.getElementById('add-device-modal-title').textContent = '⚡ Add Device from YAML Template';
+      } else {
+        tplBtn.className = 'btn btn-ghost btn-sm';
+        blkBtn.className = 'btn btn-primary btn-sm';
+        tplForm.style.display = 'none';
+        blkForm.style.display = 'block';
+        document.getElementById('add-device-modal-title').textContent = '📝 Create Blank Device';
+      }
+    }
 
-// ─── Diagnostics: write ──────────────────────────────────────────────────────
-async function doWriteRegister() {
-  const entryId = document.getElementById('diag-entry-sel').value;
-  const address = parseInt(document.getElementById('write-addr').value, 10);
-  const regType = document.getElementById('write-regtype').value;
-  const value = parseInt(document.getElementById('write-value').value, 10);
+    function populateTemplateSelectInAddDevice(preselectedFilename = null) {
+      const sel = document.getElementById('add-dev-tpl-select');
+      if (_templates.length === 0) {
+        sel.innerHTML = '<option value="">No templates available</option>';
+        return;
+      }
+      sel.innerHTML = _templates.map(t => `
+        <option value="${t.filename}" ${(preselectedFilename && t.filename === preselectedFilename) || (!preselectedFilename && t === _templates[0]) ? 'selected' : ''}>
+          ${t.name} (${t.filename})
+        </option>
+      `).join('');
 
-  if (!entryId) { snack('Select a hub first', 'err'); return; }
-  if (isNaN(address) || isNaN(value)) { snack('Invalid address or value', 'err'); return; }
+      const activeFilename = preselectedFilename || _templates[0].filename;
+      onTemplateSelectionChange(activeFilename);
+    }
 
-  const resultEl = document.getElementById('write-result');
-  resultEl.className = 'diag-result loading';
-  resultEl.innerHTML = '<div class="spinner"></div><span>Writing…</span>';
-  document.getElementById('btn-write-reg').disabled = true;
+    function onTemplateSelectionChange(filename) {
+      const tpl = _templates.find(t => t.filename === filename) || _templates[0];
+      if (!tpl) return;
 
-  try {
-    await _hass.callService(DOMAIN, 'write_register', {
-      entry_id: entryId,
-      address: address,
-      register_type: regType,
-      value: value,
-    });
-    resultEl.className = 'diag-result success';
-    resultEl.innerHTML = `<span>✅ Written: address ${address} (${regType}) ← ${value}</span>`;
-    snack(`Written: addr ${address} = ${value}`, 'ok');
-    setTimeout(refresh, 1000);
-  } catch(e) {
-    resultEl.className = 'diag-result error';
-    resultEl.innerHTML = `<span>❌ ${e.message}</span>`;
-    snack('Write failed: ' + e.message, 'err');
-  } finally {
-    document.getElementById('btn-write-reg').disabled = false;
-  }
-}
+      document.getElementById('add-dev-tpl-desc').textContent = tpl.description || '';
+      document.getElementById('add-dev-name').value = tpl.name || 'New Device';
+      document.getElementById('add-dev-slave').value = tpl.default_slave_id || 1;
 
-// ─── Read log ────────────────────────────────────────────────────────────────
-function appendLog(entry) {
-  const ts = new Date().toLocaleTimeString();
-  _readLog.unshift({ ts, ...entry });
-  if (_readLog.length > 50) _readLog.pop();
-  renderLog();
-}
+      // Populate entities checklist
+      _selectedTemplateEntities.clear();
+      const list = document.getElementById('add-dev-entities-list');
+      const entities = tpl.entities || [];
 
-function renderLog() {
-  const el = document.getElementById('read-log');
-  if (_readLog.length === 0) {
-    el.innerHTML = '<div style="text-align:center;padding:1rem;color:#334155">No reads yet.</div>';
-    return;
-  }
-  el.innerHTML = _readLog.map(r => {
-    const color = r.status === 'error' ? '#f87171' : '#34d399';
-    return `<div style="padding:0.3rem 0;border-bottom:1px solid rgba(255,255,255,0.04);color:${color}">
-      [${r.ts}] ${r.regType}@${r.address} (${r.dataType}) → ${r.status}${r.error ? ': ' + r.error : ''}
-    </div>`;
-  }).join('');
-}
+      list.innerHTML = entities.map((e, idx) => {
+        _selectedTemplateEntities.add(e.name);
+        return `
+          <label class="flex items-center gap-1" style="cursor:pointer; font-size:0.75rem; padding:0.25rem 0.4rem; border-radius:6px; background:rgba(255,255,255,0.02);">
+            <input type="checkbox" checked onchange="toggleTemplateEntity('${e.name}', this.checked)" />
+            <span style="font-weight:600; color:#e2e8f0;">${e.name}</span>
+            <span class="mono" style="color:var(--text-dim); margin-left:auto;">${e.entity_type} • ${e.register_type}@${e.address}</span>
+          </label>
+        `;
+      }).join('');
 
-function clearLog() { _readLog = []; renderLog(); }
+      document.getElementById('tpl-selected-count').textContent = _selectedTemplateEntities.size;
+    }
 
-// ─── Tab switching ────────────────────────────────────────────────────────────
-function switchTab(name) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  document.getElementById(`tab-${name}`).classList.add('active');
-  document.getElementById(`panel-${name}`).classList.add('active');
-}
+    function toggleTemplateEntity(name, checked) {
+      if (checked) _selectedTemplateEntities.add(name);
+      else _selectedTemplateEntities.delete(name);
+      document.getElementById('tpl-selected-count').textContent = _selectedTemplateEntities.size;
+    }
 
-// ─── Open HA options flow ─────────────────────────────────────────────────────
-function openOptionsFlow() {
-  try {
-    window.parent.location.href = `/config/integrations/integration/${DOMAIN}`;
-  } catch(e) {
-    snack('Navigate to Settings → Devices & Services → Modbus USB', 'inf');
-  }
-}
+    function toggleAllTemplateEntities(selectAll) {
+      const inputs = document.querySelectorAll('#add-dev-entities-list input[type="checkbox"]');
+      inputs.forEach(i => {
+        i.checked = selectAll;
+        const name = i.parentElement.querySelector('span').textContent;
+        if (selectAll) _selectedTemplateEntities.add(name);
+        else _selectedTemplateEntities.delete(name);
+      });
+      document.getElementById('tpl-selected-count').textContent = _selectedTemplateEntities.size;
+    }
 
-// ─── Snackbar ─────────────────────────────────────────────────────────────────
-function snack(msg, type = 'inf') {
-  const container = document.getElementById('snackbar');
-  const el = document.createElement('div');
-  el.className = `snack ${type}`;
-  el.textContent = msg;
-  container.appendChild(el);
-  setTimeout(() => el.remove(), 4200);
-}
-function showError(msg) { snack(msg, 'err'); }
+    async function submitAddDevice() {
+      const entry = getCurrentEntry();
+      if (!entry) return;
 
-// ─── Start ────────────────────────────────────────────────────────────────────
-init();
-</script>
+      if (_addDeviceMode === 'template') {
+        const sel = document.getElementById('add-dev-tpl-select').value;
+        const devName = document.getElementById('add-dev-name').value.trim();
+        const slaveId = parseInt(document.getElementById('add-dev-slave').value, 10);
+        const offset = parseInt(document.getElementById('add-dev-offset').value || 0, 10);
+
+        if (!devName) { toast('Please enter a device name', 'err'); return; }
+
+        try {
+          await apiCall('apply_template', {
+            entry_id: entry.entry_id,
+            template_filename: sel,
+            device_name: devName,
+            slave_id: slaveId,
+            address_offset: offset,
+            selected_entities: Array.from(_selectedTemplateEntities)
+          });
+          toast(`Device "${devName}" created from template!`, 'ok');
+          closeModal('modal-add-device');
+          await refreshData();
+        } catch(e) {
+          toast('Failed to create device: ' + e.message, 'err');
+        }
+      } else {
+        // Blank device
+        const name = document.getElementById('blank-dev-name').value.trim();
+        const slave = parseInt(document.getElementById('blank-dev-slave').value, 10);
+        const mfr = document.getElementById('blank-dev-mfr').value.trim();
+        const model = document.getElementById('blank-dev-model').value.trim();
+        const desc = document.getElementById('blank-dev-desc').value.trim();
+
+        if (!name) { toast('Please enter a device name', 'err'); return; }
+
+        try {
+          await apiCall('save_device', {
+            entry_id: entry.entry_id,
+            device: {
+              name: name,
+              slave_id: slave,
+              manufacturer: mfr || 'Modbus USB',
+              model: model || 'Modbus Device',
+              description: desc
+            }
+          });
+          toast(`Device "${name}" created!`, 'ok');
+          closeModal('modal-add-device');
+          await refreshData();
+        } catch(e) {
+          toast('Failed to create device: ' + e.message, 'err');
+        }
+      }
+    }
+
+    function useTemplateToCreateDevice(filename) {
+      openAddDeviceModal('template');
+      populateTemplateSelectInAddDevice(filename);
+    }
+
+    // ─── EDIT DEVICE MODAL ──────────────────────────────────────
+    function openEditDeviceModal(devId) {
+      const entry = getCurrentEntry();
+      const dev = (entry?.devices || []).find(d => d.id === devId);
+      if (!dev) return;
+
+      document.getElementById('edit-dev-id').value = dev.id;
+      document.getElementById('edit-dev-name').value = dev.name || '';
+      document.getElementById('edit-dev-slave').value = dev.slave_id != null ? dev.slave_id : 1;
+      document.getElementById('edit-dev-model').value = dev.model || '';
+      document.getElementById('edit-dev-mfr').value = dev.manufacturer || '';
+      document.getElementById('edit-dev-desc').value = dev.description || '';
+
+      openModal('modal-edit-device');
+    }
+
+    async function submitEditDevice() {
+      const entry = getCurrentEntry();
+      const devId = document.getElementById('edit-dev-id').value;
+      const name = document.getElementById('edit-dev-name').value.trim();
+      const slave = parseInt(document.getElementById('edit-dev-slave').value, 10);
+      const model = document.getElementById('edit-dev-model').value.trim();
+      const mfr = document.getElementById('edit-dev-mfr').value.trim();
+      const desc = document.getElementById('edit-dev-desc').value.trim();
+
+      if (!name) { toast('Please enter a device name', 'err'); return; }
+
+      try {
+        await apiCall('save_device', {
+          entry_id: entry.entry_id,
+          device: {
+            id: devId,
+            name: name,
+            slave_id: slave,
+            model: model,
+            manufacturer: mfr,
+            description: desc
+          }
+        });
+        toast(`Device "${name}" updated!`, 'ok');
+        closeModal('modal-edit-device');
+        await refreshData();
+      } catch(e) {
+        toast('Failed to save device: ' + e.message, 'err');
+      }
+    }
+
+    async function confirmDeleteDevice(devId, devName) {
+      if (!confirm(`Delete device "${devName}" and all its sensors/switches?`)) return;
+      const entry = getCurrentEntry();
+      try {
+        await apiCall('delete_device', {
+          entry_id: entry.entry_id,
+          device_id: devId,
+          delete_entities: true
+        });
+        toast(`Device "${devName}" deleted.`, 'ok');
+        await refreshData();
+      } catch(e) {
+        toast('Failed to delete device: ' + e.message, 'err');
+      }
+    }
+
+    // ─── APPLY TEMPLATE TO EXISTING DEVICE MODAL ────────────────
+    let _selectedApplyEntities = new Set();
+
+    function openApplyTemplateModal(devId) {
+      const entry = getCurrentEntry();
+      const dev = (entry?.devices || []).find(d => d.id === devId);
+      if (!dev) return;
+
+      document.getElementById('apply-tpl-target-device-id').value = dev.id;
+      document.getElementById('apply-tpl-device-label').textContent = `${dev.name} (Slave ID: ${dev.slave_id || 1})`;
+
+      const sel = document.getElementById('apply-tpl-select');
+      sel.innerHTML = _templates.map((t, idx) => `
+        <option value="${t.filename}" ${idx === 0 ? 'selected' : ''}>
+          ${t.name} (${t.filename})
+        </option>
+      `).join('');
+
+      if (_templates.length > 0) {
+        onApplyTemplateChange(_templates[0].filename);
+      }
+      openModal('modal-apply-template');
+    }
+
+    function onApplyTemplateChange(filename) {
+      const tpl = _templates.find(t => t.filename === filename);
+      if (!tpl) return;
+      _selectedApplyEntities.clear();
+      const list = document.getElementById('apply-tpl-entities-list');
+      list.innerHTML = (tpl.entities || []).map(e => {
+        _selectedApplyEntities.add(e.name);
+        return `
+          <label class="flex items-center gap-1" style="cursor:pointer; font-size:0.75rem; padding:0.25rem 0.4rem; border-radius:6px; background:rgba(255,255,255,0.02);">
+            <input type="checkbox" checked onchange="toggleApplyEntity('${e.name}', this.checked)" />
+            <span style="font-weight:600; color:#e2e8f0;">${e.name}</span>
+            <span class="mono" style="color:var(--text-dim); margin-left:auto;">${e.entity_type} • ${e.register_type}@${e.address}</span>
+          </label>
+        `;
+      }).join('');
+    }
+
+    function toggleApplyEntity(name, checked) {
+      if (checked) _selectedApplyEntities.add(name);
+      else _selectedApplyEntities.delete(name);
+    }
+
+    function toggleAllApplyTemplateEntities(selectAll) {
+      const inputs = document.querySelectorAll('#apply-tpl-entities-list input[type="checkbox"]');
+      inputs.forEach(i => {
+        i.checked = selectAll;
+        const name = i.parentElement.querySelector('span').textContent;
+        if (selectAll) _selectedApplyEntities.add(name);
+        else _selectedApplyEntities.delete(name);
+      });
+    }
+
+    async function submitApplyTemplate() {
+      const entry = getCurrentEntry();
+      const devId = document.getElementById('apply-tpl-target-device-id').value;
+      const sel = document.getElementById('apply-tpl-select').value;
+      const offset = parseInt(document.getElementById('apply-tpl-offset').value || 0, 10);
+
+      try {
+        const res = await apiCall('apply_template', {
+          entry_id: entry.entry_id,
+          device_id: devId,
+          template_filename: sel,
+          address_offset: offset,
+          selected_entities: Array.from(_selectedApplyEntities)
+        });
+        toast(`Added ${res.added_count || _selectedApplyEntities.size} entities to device!`, 'ok');
+        closeModal('modal-apply-template');
+        await refreshData();
+      } catch(e) {
+        toast('Failed to apply template: ' + e.message, 'err');
+      }
+    }
+
+    // ─── YAML TEMPLATE EDITOR MODAL ─────────────────────────────
+    function openTemplateEditorModal(filename = null) {
+      const tpl = filename ? _templates.find(t => t.filename === filename) : null;
+      const title = document.getElementById('tpl-editor-title');
+      const fnInput = document.getElementById('tpl-editor-filename');
+      const codeArea = document.getElementById('tpl-editor-code');
+
+      if (tpl) {
+        title.textContent = `📑 Edit Template: ${tpl.filename}`;
+        fnInput.value = tpl.filename;
+        fnInput.readOnly = true;
+        codeArea.value = tpl.raw_yaml || '';
+      } else {
+        title.textContent = `➕ New Device Template (.yaml)`;
+        fnInput.value = 'my_device.yaml';
+        fnInput.readOnly = false;
+        codeArea.value = `id: custom_device
+name: My Custom Modbus Device
+manufacturer: Generic
+model: Modbus Device
+default_slave_id: 1
+description: Template for custom Modbus sensors and controls
+entities:
+  - name: Status Register
+    entity_type: sensor
+    register_type: holding
+    address: 0
+    data_type: uint16
+    unit_of_measurement: ""
+  - name: Power Switch
+    entity_type: switch
+    register_type: coil
+    address: 0
+  - name: Target Value
+    entity_type: number
+    register_type: holding
+    address: 1
+    data_type: uint16
+    min_value: 0
+    max_value: 100
+    step: 1
+`;
+      }
+
+      openModal('modal-template-editor');
+    }
+
+    async function submitSaveTemplate() {
+      const filename = document.getElementById('tpl-editor-filename').value.trim();
+      const content = document.getElementById('tpl-editor-code').value;
+
+      if (!filename) { toast('Please specify a filename (e.g. my_device.yaml)', 'err'); return; }
+
+      try {
+        await apiCall('save_template', {
+          filename: filename,
+          content: content
+        });
+        toast(`Template "${filename}" saved successfully!`, 'ok');
+        closeModal('modal-template-editor');
+        await refreshData();
+      } catch(e) {
+        toast('Failed to save template: ' + e.message, 'err');
+      }
+    }
+
+    async function duplicateTemplate(filename) {
+      const tpl = _templates.find(t => t.filename === filename);
+      if (!tpl) return;
+      const newFn = prompt('Enter filename for the duplicate template:', 'copy_' + filename);
+      if (!newFn) return;
+      try {
+        await apiCall('save_template', {
+          filename: newFn,
+          content: tpl.raw_yaml
+        });
+        toast(`Template duplicated as "${newFn}"`, 'ok');
+        await refreshData();
+      } catch(e) {
+        toast('Failed to duplicate template: ' + e.message, 'err');
+      }
+    }
+
+    async function confirmDeleteTemplate(filename) {
+      if (!confirm(`Delete template file "${filename}"? This action cannot be undone.`)) return;
+      try {
+        await apiCall('delete_template', { filename: filename });
+        toast(`Template "${filename}" deleted.`, 'ok');
+        await refreshData();
+      } catch(e) {
+        toast('Failed to delete template: ' + e.message, 'err');
+      }
+    }
+
+    // ─── ADD / EDIT ENTITY MODAL ────────────────────────────────
+    function openAddEntityModal(preselectedDeviceId = null) {
+      const entry = getCurrentEntry();
+      const devices = entry?.devices || [];
+
+      document.getElementById('entity-modal-title').textContent = '➕ Add Entity';
+      document.getElementById('ent-form-id').value = '';
+      document.getElementById('ent-form-name').value = '';
+      document.getElementById('ent-form-type').value = 'sensor';
+      document.getElementById('ent-form-regtype').value = 'holding';
+      document.getElementById('ent-form-address').value = '0';
+      document.getElementById('ent-form-dtype').value = 'uint16';
+      document.getElementById('ent-form-scale').value = '1';
+      document.getElementById('ent-form-unit').value = '';
+      document.getElementById('ent-form-devclass').value = '';
+      document.getElementById('ent-form-stateclass').value = '';
+
+      const devSel = document.getElementById('ent-form-device');
+      devSel.innerHTML = devices.map(d => `
+        <option value="${d.id}" ${(preselectedDeviceId && d.id === preselectedDeviceId) ? 'selected' : ''}>
+          ${d.name} (Slave ID: ${d.slave_id || 1})
+        </option>
+      `).join('');
+
+      onEntityTypeChange('sensor');
+      openModal('modal-entity-form');
+    }
+
+    function openEditEntityModal(entId) {
+      const entry = getCurrentEntry();
+      const ent = (entry?.entities || []).find(e => e.id === entId);
+      if (!ent) return;
+
+      document.getElementById('entity-modal-title').textContent = '✏ Edit Entity';
+      document.getElementById('ent-form-id').value = ent.id;
+      document.getElementById('ent-form-name').value = ent.name || '';
+      document.getElementById('ent-form-type').value = ent.entity_type || 'sensor';
+      document.getElementById('ent-form-regtype').value = ent.register_type || 'holding';
+      document.getElementById('ent-form-address').value = ent.address ?? 0;
+      document.getElementById('ent-form-dtype').value = ent.data_type || 'uint16';
+      document.getElementById('ent-form-scale').value = ent.scale != null ? ent.scale : 1;
+      document.getElementById('ent-form-unit').value = ent.unit_of_measurement || '';
+      document.getElementById('ent-form-devclass').value = ent.device_class || '';
+      document.getElementById('ent-form-stateclass').value = ent.state_class || '';
+
+      const devSel = document.getElementById('ent-form-device');
+      const devices = entry?.devices || [];
+      devSel.innerHTML = devices.map(d => `
+        <option value="${d.id}" ${d.id === ent.device_id ? 'selected' : ''}>
+          ${d.name} (Slave ID: ${d.slave_id || 1})
+        </option>
+      `).join('');
+
+      onEntityTypeChange(ent.entity_type || 'sensor');
+      openModal('modal-entity-form');
+    }
+
+    function onEntityTypeChange(type) {
+      const numFields = document.getElementById('ent-numeric-fields');
+      const swFields = document.getElementById('ent-switch-fields');
+      const nFields = document.getElementById('ent-number-fields');
+      const regTypeSel = document.getElementById('ent-form-regtype');
+
+      if (type === 'sensor') {
+        numFields.style.display = 'block';
+        swFields.style.display = 'none';
+        nFields.style.display = 'none';
+      } else if (type === 'switch') {
+        numFields.style.display = 'none';
+        swFields.style.display = 'block';
+        nFields.style.display = 'none';
+        if (regTypeSel.value !== 'coil' && regTypeSel.value !== 'holding') {
+          regTypeSel.value = 'coil';
+        }
+      } else if (type === 'binary_sensor') {
+        numFields.style.display = 'none';
+        swFields.style.display = 'none';
+        nFields.style.display = 'none';
+        if (regTypeSel.value !== 'discrete' && regTypeSel.value !== 'coil') {
+          regTypeSel.value = 'discrete';
+        }
+      } else if (type === 'number') {
+        numFields.style.display = 'block';
+        swFields.style.display = 'none';
+        nFields.style.display = 'block';
+        regTypeSel.value = 'holding';
+      }
+    }
+
+    async function submitSaveEntity() {
+      const entry = getCurrentEntry();
+      const entId = document.getElementById('ent-form-id').value;
+      const name = document.getElementById('ent-form-name').value.trim();
+      const devId = document.getElementById('ent-form-device').value;
+      const type = document.getElementById('ent-form-type').value;
+      const regtype = document.getElementById('ent-form-regtype').value;
+      const address = parseInt(document.getElementById('ent-form-address').value, 10);
+
+      if (!name) { toast('Please enter an entity name', 'err'); return; }
+
+      const entityData = {
+        id: entId || undefined,
+        device_id: devId,
+        name: name,
+        entity_type: type,
+        register_type: regtype,
+        address: address,
+      };
+
+      if (type === 'sensor' || type === 'number') {
+        entityData.data_type = document.getElementById('ent-form-dtype').value;
+        entityData.scale = parseFloat(document.getElementById('ent-form-scale').value || 1);
+        entityData.unit_of_measurement = document.getElementById('ent-form-unit').value.trim();
+        entityData.device_class = document.getElementById('ent-form-devclass').value.trim() || undefined;
+        entityData.state_class = document.getElementById('ent-form-stateclass').value || undefined;
+      }
+      if (type === 'switch') {
+        entityData.on_value = parseInt(document.getElementById('ent-form-onval').value || 1, 10);
+        entityData.off_value = parseInt(document.getElementById('ent-form-offval').value || 0, 10);
+      }
+      if (type === 'number') {
+        entityData.min_value = parseFloat(document.getElementById('ent-form-min').value || 0);
+        entityData.max_value = parseFloat(document.getElementById('ent-form-max').value || 100);
+        entityData.step = parseFloat(document.getElementById('ent-form-step').value || 1);
+      }
+
+      try {
+        await apiCall('save_entity', {
+          entry_id: entry.entry_id,
+          entity: entityData
+        });
+        toast(`Entity "${name}" saved!`, 'ok');
+        closeModal('modal-entity-form');
+        await refreshData();
+      } catch(e) {
+        toast('Failed to save entity: ' + e.message, 'err');
+      }
+    }
+
+    async function confirmDeleteEntity(entId, entName) {
+      if (!confirm(`Delete entity "${entName}"?`)) return;
+      const entry = getCurrentEntry();
+      try {
+        await apiCall('delete_entity', {
+          entry_id: entry.entry_id,
+          entity_id: entId
+        });
+        toast(`Entity "${entName}" deleted.`, 'ok');
+        await refreshData();
+      } catch(e) {
+        toast('Failed to delete entity: ' + e.message, 'err');
+      }
+    }
+
+    // ─── EDIT HUB MODAL ─────────────────────────────────────────
+    function openEditHubModal() {
+      const entry = getCurrentEntry();
+      const hub = entry?.hub || {};
+
+      document.getElementById('hub-form-port').value = hub.port || '/dev/ttyUSB0';
+      document.getElementById('hub-form-baud').value = hub.baudrate || 9600;
+      document.getElementById('hub-form-bytesize').value = hub.bytesize || 8;
+      document.getElementById('hub-form-parity').value = hub.parity || 'N';
+      document.getElementById('hub-form-stopbits').value = hub.stopbits || 1;
+      document.getElementById('hub-form-slave').value = hub.slave_id || 1;
+      document.getElementById('hub-form-interval').value = hub.scan_interval || 10;
+
+      openModal('modal-edit-hub');
+    }
+
+    async function submitSaveHub() {
+      const entry = getCurrentEntry();
+      const hubData = {
+        port: document.getElementById('hub-form-port').value.trim(),
+        baudrate: parseInt(document.getElementById('hub-form-baud').value, 10),
+        bytesize: parseInt(document.getElementById('hub-form-bytesize').value, 10),
+        parity: document.getElementById('hub-form-parity').value,
+        stopbits: parseInt(document.getElementById('hub-form-stopbits').value, 10),
+        slave_id: parseInt(document.getElementById('hub-form-slave').value, 10),
+        scan_interval: parseInt(document.getElementById('hub-form-interval').value, 10),
+      };
+
+      try {
+        await apiCall('save_hub', {
+          entry_id: entry.entry_id,
+          hub: hubData
+        });
+        toast('Hub settings saved! Reconnecting to serial port…', 'ok');
+        closeModal('modal-edit-hub');
+        await refreshData();
+      } catch(e) {
+        toast('Failed to save hub settings: ' + e.message, 'err');
+      }
+    }
+
+    // ─── LIVE SWITCH & NUMBER INTERACTIONS ───────────────────────
+    async function toggleEntitySwitch(name, isOn) {
+      if (!_isLiveHA) {
+        toast(`${name} switched ${isOn ? 'ON' : 'OFF'} (simulated)`, 'ok');
+        return;
+      }
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+      try {
+        await _hass.callService('switch', isOn ? 'turn_on' : 'turn_off', { entity_id: `switch.${slug}` });
+        toast(`${name} turned ${isOn ? 'on' : 'off'}`, 'ok');
+        setTimeout(refreshData, 1000);
+      } catch(e) {
+        toast(`Toggle failed: ${e.message}`, 'err');
+      }
+    }
+
+    async function promptWriteNumber(entId, entName, currentVal) {
+      const newVal = prompt(`Enter new value for "${entName}":`, currentVal);
+      if (newVal === null) return;
+      const num = parseFloat(newVal);
+      if (isNaN(num)) { toast('Invalid number', 'err'); return; }
+
+      if (!_isLiveHA) {
+        toast(`${entName} set to ${num} (simulated)`, 'ok');
+        return;
+      }
+      const slug = entName.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+      try {
+        await _hass.callService('number', 'set_value', { entity_id: `number.${slug}`, value: num });
+        toast(`${entName} set to ${num}`, 'ok');
+        setTimeout(refreshData, 1000);
+      } catch(e) {
+        toast(`Failed to set value: ${e.message}`, 'err');
+      }
+    }
+
+    // ─── DIAGNOSTICS LIVE READ ──────────────────────────────────
+    async function doLiveRead() {
+      const entry = getCurrentEntry();
+      const slave = parseInt(document.getElementById('diag-slave').value, 10);
+      const address = parseInt(document.getElementById('diag-address').value, 10);
+      const regtype = document.getElementById('diag-regtype').value;
+      const dtype = document.getElementById('diag-dtype').value;
+
+      const resBox = document.getElementById('diag-result-box');
+      resBox.style.color = '#93c5fd';
+      resBox.textContent = `Reading ${regtype} @ address ${address} (slave ${slave})…`;
+
+      if (!_isLiveHA) {
+        setTimeout(() => {
+          resBox.style.color = '#34d399';
+          resBox.textContent = `✅ [Simulated] Read register ${address} (${regtype}, ${dtype}, slave=${slave}) = 230.4`;
+        }, 500);
+        return;
+      }
+
+      try {
+        await _hass.callService(DOMAIN, 'read_register', {
+          entry_id: entry.entry_id,
+          address: address,
+          register_type: regtype,
+          data_type: dtype,
+          slave_id: slave
+        });
+        resBox.style.color = '#34d399';
+        resBox.textContent = `✅ Read command dispatched! Result will fire as event modbus_usb_register_read. Check HA logbook or automations.`;
+      } catch(e) {
+        resBox.style.color = '#f87171';
+        resBox.textContent = `❌ Read failed: ${e.message}`;
+      }
+    }
+
+    // ─── TOAST NOTIFICATIONS ────────────────────────────────────
+    function toast(msg, type = 'inf') {
+      const container = document.getElementById('snackbar');
+      const el = document.createElement('div');
+      el.className = `toast ${type}`;
+      const icon = type === 'ok' ? '✅' : type === 'err' ? '❌' : 'ℹ️';
+      el.innerHTML = `<span>${icon}</span><span>${msg}</span>`;
+      container.appendChild(el);
+      setTimeout(() => el.remove(), 4200);
+    }
+
+    // Launch!
+    window.addEventListener('DOMContentLoaded', init);
+  </script>
 </body>
 </html>

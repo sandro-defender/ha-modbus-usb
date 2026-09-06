@@ -12,6 +12,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     CONF_ADDRESS,
+    CONF_DEVICES,
+    CONF_DEVICE_ID,
     CONF_ENTITIES,
     CONF_ENTITY_ID,
     CONF_ENTITY_TYPE,
@@ -19,10 +21,11 @@ from .const import (
     CONF_OFF_VALUE,
     CONF_ON_VALUE,
     CONF_REGISTER_TYPE,
+    CONF_SLAVE_ID,
     DOMAIN,
     REGISTER_TYPE_COIL,
 )
-from .coordinator import ModbusUsbCoordinator
+from .coordinator import ModbusUsbCoordinator, get_device_info
 
 
 async def async_setup_entry(
@@ -47,11 +50,19 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{ent[CONF_ENTITY_ID]}"
         self._attr_name = ent[CONF_NAME]
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title,
-            manufacturer="Modbus USB",
-        )
+        self._attr_device_info = get_device_info(entry, ent)
+
+    def _resolve_slave_id(self) -> int | None:
+        slave = self._ent.get(CONF_SLAVE_ID)
+        if slave is None and self._ent.get(CONF_DEVICE_ID):
+            devices = self._entry.options.get(CONF_DEVICES, [])
+            dev = next(
+                (d for d in devices if str(d.get("id")) == str(self._ent.get(CONF_DEVICE_ID))),
+                None,
+            )
+            if dev and dev.get(CONF_SLAVE_ID) is not None:
+                slave = dev.get(CONF_SLAVE_ID)
+        return int(slave) if slave is not None else None
 
     @property
     def is_on(self) -> bool | None:
@@ -72,9 +83,14 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
 
     async def _write(self, on: bool) -> None:
         address = self._ent[CONF_ADDRESS]
+        slave = self._resolve_slave_id()
         if self._ent[CONF_REGISTER_TYPE] == REGISTER_TYPE_COIL:
-            await self.hass.async_add_executor_job(self.coordinator.write_coil, address, on)
+            await self.hass.async_add_executor_job(
+                self.coordinator.write_coil, address, on, slave
+            )
         else:
             value = self._ent.get(CONF_ON_VALUE, 1) if on else self._ent.get(CONF_OFF_VALUE, 0)
-            await self.hass.async_add_executor_job(self.coordinator.write_register, address, value)
+            await self.hass.async_add_executor_job(
+                self.coordinator.write_register, address, value, slave
+            )
         await self.coordinator.async_request_refresh()

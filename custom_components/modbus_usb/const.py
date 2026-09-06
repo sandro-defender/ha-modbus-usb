@@ -30,6 +30,15 @@ PARITY_OPTIONS = {"N": "None", "E": "Even", "O": "Odd"}
 STOPBITS_OPTIONS = [1, 2]
 BYTESIZE_OPTIONS = [7, 8]
 
+# --- Device config keys (stored in options["devices"]) ---
+CONF_DEVICES = "devices"
+CONF_DEVICE_ID = "device_id"
+CONF_MODEL = "model"
+CONF_MANUFACTURER = "manufacturer"
+CONF_DESCRIPTION = "description"
+
+TEMPLATES_DIR_NAME = "modbus_usb_templates"
+
 # --- Per-entity config keys (stored in options["entities"]) ---
 CONF_ENTITIES = "entities"
 CONF_ENTITY_ID = "id"            # internal unique id (uuid-ish)

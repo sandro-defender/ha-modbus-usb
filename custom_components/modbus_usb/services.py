@@ -17,6 +17,7 @@ from .const import (
     CONF_ADDRESS,
     CONF_DATA_TYPE,
     CONF_REGISTER_TYPE,
+    CONF_SLAVE_ID,
     DATA_TYPES,
     DATA_TYPE_UINT16,
     DOMAIN,
@@ -47,6 +48,7 @@ READ_REGISTER_SCHEMA = vol.Schema(
             _ALL_REGISTER_TYPES
         ),
         vol.Optional(CONF_DATA_TYPE, default=DATA_TYPE_UINT16): vol.In(DATA_TYPES),
+        vol.Optional(CONF_SLAVE_ID): vol.All(vol.Coerce(int), vol.Range(min=1, max=247)),
     }
 )
 
@@ -58,6 +60,7 @@ WRITE_REGISTER_SCHEMA = vol.Schema(
             [REGISTER_TYPE_HOLDING, REGISTER_TYPE_COIL]
         ),
         vol.Required("value"): vol.Coerce(int),
+        vol.Optional(CONF_SLAVE_ID): vol.All(vol.Coerce(int), vol.Range(min=1, max=247)),
     }
 )
 
@@ -80,11 +83,12 @@ async def async_register_services(hass: HomeAssistant) -> None:
         address: int = call.data[CONF_ADDRESS]
         register_type: str = call.data[CONF_REGISTER_TYPE]
         data_type: str = call.data.get(CONF_DATA_TYPE, DATA_TYPE_UINT16)
+        slave: int | None = call.data.get(CONF_SLAVE_ID)
 
         coordinator = _get_coordinator(hass, entry_id)
         try:
             value = await hass.async_add_executor_job(
-                coordinator.read_register_raw, address, register_type, data_type
+                coordinator.read_register_raw, address, register_type, data_type, slave
             )
             hass.bus.async_fire(
                 EVENT_REGISTER_READ,
@@ -93,12 +97,17 @@ async def async_register_services(hass: HomeAssistant) -> None:
                     "address": address,
                     "register_type": register_type,
                     "data_type": data_type,
+                    "slave_id": slave or coordinator.slave_id,
                     "value": value,
                     "success": True,
                 },
             )
             _LOGGER.debug(
-                "Read register %s (%s) = %s", address, register_type, value
+                "Read register %s (%s) slave=%s = %s",
+                address,
+                register_type,
+                slave or coordinator.slave_id,
+                value,
             )
         except Exception as err:  # noqa: BLE001
             hass.bus.async_fire(
@@ -108,6 +117,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
                     "address": address,
                     "register_type": register_type,
                     "data_type": data_type,
+                    "slave_id": slave or coordinator.slave_id,
                     "value": None,
                     "success": False,
                     "error": str(err),
@@ -120,19 +130,26 @@ async def async_register_services(hass: HomeAssistant) -> None:
         address: int = call.data[CONF_ADDRESS]
         register_type: str = call.data[CONF_REGISTER_TYPE]
         value: int = call.data["value"]
+        slave: int | None = call.data.get(CONF_SLAVE_ID)
 
         coordinator = _get_coordinator(hass, entry_id)
         try:
             if register_type == REGISTER_TYPE_COIL:
                 await hass.async_add_executor_job(
-                    coordinator.write_coil, address, bool(value)
+                    coordinator.write_coil, address, bool(value), slave
                 )
             else:
                 await hass.async_add_executor_job(
-                    coordinator.write_register, address, value
+                    coordinator.write_register, address, value, slave
                 )
             await coordinator.async_request_refresh()
-            _LOGGER.debug("Wrote register %s (%s) = %s", address, register_type, value)
+            _LOGGER.debug(
+                "Wrote register %s (%s) slave=%s = %s",
+                address,
+                register_type,
+                slave or coordinator.slave_id,
+                value,
+            )
         except Exception as err:  # noqa: BLE001
             _LOGGER.error("Service write_register failed: %s", err)
 

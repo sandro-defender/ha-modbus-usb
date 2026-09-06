@@ -13,11 +13,13 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .const import (
     CONF_ADDRESS,
+    CONF_ASSUMED_STATE,
     CONF_DATA_TYPE,
     CONF_DEVICES,
     CONF_DEVICE_ID,
     CONF_ENTITIES,
     CONF_ENTITY_TYPE,
+    CONF_IMAGE,
     CONF_MANUFACTURER,
     CONF_MODEL,
     CONF_NAME,
@@ -83,6 +85,18 @@ def get_device_info(entry: ConfigEntry, ent: dict) -> DeviceInfo:
         manufacturer="Modbus USB",
         model="Modbus Serial Hub",
     )
+
+
+def get_entity_picture(entry: ConfigEntry, ent: dict) -> str | None:
+    """Return a device/template image URL for HA entity_picture, if set."""
+    picture = ent.get(CONF_IMAGE)
+    device_id = ent.get(CONF_DEVICE_ID)
+    if device_id:
+        devices = entry.options.get(CONF_DEVICES, [])
+        device = next((d for d in devices if str(d.get("id")) == str(device_id)), None)
+        if device and device.get(CONF_IMAGE):
+            picture = device.get(CONF_IMAGE)
+    return picture or None
 
 
 class ModbusUsbCoordinator(DataUpdateCoordinator):
@@ -156,6 +170,8 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         data: dict[str, Any] = {}
         for ent in entities:
             ent_id = ent["id"]
+            if ent.get(CONF_ASSUMED_STATE):
+                continue
             self.diag[DIAG_TOTAL_READS] += 1
             try:
                 data[ent_id] = self._read_one(ent, device_slave_map)
@@ -275,3 +291,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         if result.isError():
             raise UpdateFailed(str(result))
         return _decode_words(result.registers, data_type)
+
+
+# Changelog:
+# 2026-09-06 — Skip polling assumed_state entities; expose get_entity_picture from device image.
+# Date modified: 2026-09-06
+

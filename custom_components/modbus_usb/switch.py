@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     CONF_ADDRESS,
+    CONF_ASSUMED_STATE,
     CONF_DEVICES,
     CONF_DEVICE_ID,
     CONF_ENTITIES,
@@ -25,7 +26,7 @@ from .const import (
     DOMAIN,
     REGISTER_TYPE_COIL,
 )
-from .coordinator import ModbusUsbCoordinator, get_device_info
+from .coordinator import ModbusUsbCoordinator, get_device_info, get_entity_picture
 
 
 async def async_setup_entry(
@@ -51,6 +52,11 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
         self._attr_unique_id = f"{entry.entry_id}_{ent[CONF_ENTITY_ID]}"
         self._attr_name = ent[CONF_NAME]
         self._attr_device_info = get_device_info(entry, ent)
+        self._attr_assumed_state = bool(ent.get(CONF_ASSUMED_STATE, False))
+        self._last_command: bool | None = None
+        picture = get_entity_picture(entry, ent)
+        if picture:
+            self._attr_entity_picture = picture
 
     def _resolve_slave_id(self) -> int | None:
         slave = self._ent.get(CONF_SLAVE_ID)
@@ -66,6 +72,8 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
 
     @property
     def is_on(self) -> bool | None:
+        if self._attr_assumed_state:
+            return False if self._last_command is None else self._last_command
         if self.coordinator.data is None:
             return None
         value = self.coordinator.data.get(self._ent[CONF_ENTITY_ID])
@@ -93,4 +101,14 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
             await self.hass.async_add_executor_job(
                 self.coordinator.write_register, address, value, slave
             )
+        if self._attr_assumed_state:
+            self._last_command = on
+            self.async_write_ha_state()
+            return
         await self.coordinator.async_request_refresh()
+
+
+# Changelog:
+# 2026-09-06 — Assumed-state switches (no poll); ON/OFF register values; device image as entity_picture.
+# Date modified: 2026-09-06
+

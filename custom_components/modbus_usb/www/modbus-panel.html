@@ -405,8 +405,8 @@
       gap: 0.85rem;
     }
     .device-avatar {
-      width: 40px;
-      height: 40px;
+      width: 48px;
+      height: 48px;
       border-radius: 10px;
       background: linear-gradient(135deg, rgba(59,130,246,0.2), rgba(139,92,246,0.25));
       border: 1px solid rgba(99,102,241,0.3);
@@ -415,6 +415,12 @@
       justify-content: center;
       font-size: 1.2rem;
       flex-shrink: 0;
+      overflow: hidden;
+      object-fit: cover;
+    }
+    img.device-avatar {
+      padding: 0;
+      background: #0f172a;
     }
     .device-meta h3 {
       font-size: 1rem;
@@ -570,6 +576,15 @@
       border-color: rgba(99,102,241,0.4);
       transform: translateY(-2px);
       box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    }
+    .template-photo {
+      width: 100%;
+      height: 140px;
+      object-fit: cover;
+      border-radius: 12px;
+      margin-bottom: 0.9rem;
+      background: #0f172a;
+      border: 1px solid rgba(255,255,255,0.06);
     }
     .template-header {
       display: flex;
@@ -1945,7 +1960,8 @@ entities:
             slave_id: payload.slave_id || tpl.default_slave_id || 1,
             model: tpl.model,
             manufacturer: tpl.manufacturer,
-            description: tpl.description
+            description: tpl.description,
+            image: tpl.image || ''
           });
         }
         const offset = parseInt(payload.address_offset || 0, 10);
@@ -2179,11 +2195,15 @@ entities:
           `;
         }).join('');
 
+        const avatar = dev.image
+          ? `<img class="device-avatar" src="${dev.image}" alt="${dev.model || dev.name || 'Device'}">`
+          : `<div class="device-avatar">🎛</div>`;
+
         return `
           <div class="device-card" id="dev-card-${dev.id}">
             <div class="device-card-header">
               <div class="device-header-left">
-                <div class="device-avatar">🎛</div>
+                ${avatar}
                 <div class="device-meta">
                   <h3>
                     <span>${dev.name || 'Unnamed Device'}</span>
@@ -2251,6 +2271,7 @@ entities:
         return `
           <div class="template-card">
             <div>
+              ${tpl.image ? `<img class="template-photo" src="${tpl.image}" alt="${tpl.name || tpl.id}">` : ''}
               <div class="template-header">
                 <div class="template-title">
                   <h3>${tpl.name || tpl.id}</h3>

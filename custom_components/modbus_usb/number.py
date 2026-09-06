@@ -36,7 +36,7 @@ from .const import (
     DOMAIN,
     REGISTER_TYPE_HOLDING,
 )
-from .coordinator import ModbusUsbCoordinator, get_device_info
+from .coordinator import ModbusUsbCoordinator, get_device_info, get_entity_picture
 
 
 async def async_setup_entry(
@@ -72,6 +72,9 @@ class ModbusUsbNumber(CoordinatorEntity[ModbusUsbCoordinator], NumberEntity):
         self._attr_mode = NumberMode.SLIDER if mode_str == "slider" else NumberMode.BOX
         self._scale: float = float(ent.get(CONF_SCALE, 1))
         self._attr_device_info = get_device_info(entry, ent)
+        picture = get_entity_picture(entry, ent)
+        if picture:
+            self._attr_entity_picture = picture
 
     def _resolve_slave_id(self) -> int | None:
         slave = self._ent.get(CONF_SLAVE_ID)
@@ -116,3 +119,9 @@ class ModbusUsbNumber(CoordinatorEntity[ModbusUsbCoordinator], NumberEntity):
                 self.coordinator.write_registers_32bit, address, raw_int, data_type, slave
             )
         await self.coordinator.async_request_refresh()
+
+
+# Changelog:
+# 2026-09-06 — Entity picture from device/template image URL.
+# Date modified: 2026-09-06
+

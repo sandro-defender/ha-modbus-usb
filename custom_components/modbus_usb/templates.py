@@ -70,6 +70,7 @@ def _parse_template_file(filepath: str, filename: str) -> dict[str, Any] | None:
             "model": data.get("model", "Modbus Device"),
             "default_slave_id": int(data.get("default_slave_id", 1)),
             "description": data.get("description", ""),
+            "image": data.get("image") or data.get("picture") or "",
             "entities": data.get("entities", []),
             "raw_yaml": raw_content,
         }
@@ -170,3 +171,7 @@ def delete_template_sync(hass: HomeAssistant, filename: str) -> bool:
 async def async_delete_template(hass: HomeAssistant, filename: str) -> bool:
     """Asynchronously delete a template file."""
     return await hass.async_add_executor_job(delete_template_sync, hass, filename)
+
+# Changelog:
+# 2026-09-06 — Parse optional template image/picture URL for sidebar device photos.
+# Date modified: 2026-09-06

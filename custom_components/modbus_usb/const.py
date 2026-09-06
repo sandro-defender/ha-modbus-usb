@@ -36,6 +36,8 @@ CONF_DEVICE_ID = "device_id"
 CONF_MODEL = "model"
 CONF_MANUFACTURER = "manufacturer"
 CONF_DESCRIPTION = "description"
+CONF_IMAGE = "image"
+CONF_ASSUMED_STATE = "assumed_state"
 
 TEMPLATES_DIR_NAME = "modbus_usb_templates"
 
@@ -121,3 +123,7 @@ SERVICE_WRITE_REGISTER = "write_register"
 
 # Event raised after a service read completes
 EVENT_REGISTER_READ = f"{DOMAIN}_register_read"
+
+# Changelog:
+# 2026-09-06 — Added CONF_IMAGE and CONF_ASSUMED_STATE for device photos and write-only switches.
+# Date modified: 2026-09-06

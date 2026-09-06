@@ -40,6 +40,7 @@ from .const import (
     CONF_NAME,
     CONF_OFF_VALUE,
     CONF_ON_VALUE,
+    CONF_IMAGE,
     CONF_PARITY,
     CONF_PORT,
     CONF_REGISTER_TYPE,
@@ -431,6 +432,7 @@ async def ws_apply_template(
                 "model": target_tpl.get("model", "Modbus Device"),
                 "manufacturer": target_tpl.get("manufacturer", "Generic"),
                 "description": target_tpl.get("description", ""),
+                "image": target_tpl.get(CONF_IMAGE) or "",
             }
             devices.append(new_device)
         else:
@@ -438,6 +440,12 @@ async def ws_apply_template(
             existing_dev = next((d for d in devices if d.get("id") == device_id), None)
             if existing_dev and "slave_id" in existing_dev:
                 slave_id = existing_dev["slave_id"]
+            if existing_dev and target_tpl.get(CONF_IMAGE) and not existing_dev.get(CONF_IMAGE):
+                existing_dev = dict(existing_dev)
+                existing_dev[CONF_IMAGE] = target_tpl[CONF_IMAGE]
+                devices = [
+                    existing_dev if d.get("id") == device_id else d for d in devices
+                ]
 
         # Filter entities from template
         tpl_entities = target_tpl.get("entities", [])
@@ -574,3 +582,9 @@ async def async_register_api(hass: HomeAssistant) -> None:
         _LOGGER.warning("Could not register HTTP views (may already be registered): %s", err)
 
     _LOGGER.debug("Modbus USB WebSocket & REST API registered")
+
+
+# Changelog:
+# 2026-09-06 — Copy template image onto devices when applying eletechsup and other photo templates.
+# Date modified: 2026-09-06
+

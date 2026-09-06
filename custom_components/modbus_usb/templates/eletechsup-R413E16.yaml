@@ -1,0 +1,148 @@
+# eletechsup R413E16 — 16-channel RS-485 Modbus RTU I/O core
+# Protocol (FC06 write single holding register), matching the ESPHome payload:
+#   slave, 0x06, addr_hi=0x00, addr_lo=channel, value_hi=0x01/0x02, value_lo=0x00
+# Channel registers are 1–16 (not 0-based). ON = 256 (0x0100), OFF = 512 (0x0200).
+# Reads are skipped (assumed_state) because this board is command-oriented.
+#
+# Changelog:
+# 2026-09-06 — Initial template from ESPHome rs485 AC-01..AC-16 mapping.
+# Date modified: 2026-09-06
+
+id: eletechsup-R413E16
+name: eletechsup R413E16
+manufacturer: eletechsup
+model: R413E16
+default_slave_id: 1
+image: "https://imgs.search.brave.com/Mv_-MbM7yrtYml5FvfXdpI7A9t_Bgdh4aO-7A3BbTzk/rs:fit:860:0:0:0/g:ce/aHR0cHM6Ly9pLmVi/YXlpbWcuY29tL2lt/YWdlcy9nL05wQUFB/T1N3N2E5ZVNneG4v/cy1sNTAwLmpwZw"
+description: >
+  16-channel RS-485 Modbus RTU I/O core (A+/B-). Each AC channel is a holding
+  register switch: write 0x0100 to turn on, 0x0200 to turn off (function code 06).
+entities:
+  - name: AC-01
+    entity_type: switch
+    register_type: holding
+    address: 1
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    assumed_state: true
+  - name: AC-02
+    entity_type: switch
+    register_type: holding
+    address: 2
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    assumed_state: true
+  - name: AC-03
+    entity_type: switch
+    register_type: holding
+    address: 3
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    assumed_state: true
+  - name: AC-04
+    entity_type: switch
+    register_type: holding
+    address: 4
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    assumed_state: true
+  - name: AC-05
+    entity_type: switch
+    register_type: holding
+    address: 5
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    assumed_state: true
+  - name: AC-06
+    entity_type: switch
+    register_type: holding
+    address: 6
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    assumed_state: true
+  - name: AC-07
+    entity_type: switch
+    register_type: holding
+    address: 7
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    assumed_state: true
+  - name: AC-08
+    entity_type: switch
+    register_type: holding
+    address: 8
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    assumed_state: true
+  - name: AC-09
+    entity_type: switch
+    register_type: holding
+    address: 9
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    assumed_state: true
+  - name: AC-10
+    entity_type: switch
+    register_type: holding
+    address: 10
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    assumed_state: true
+  - name: AC-11
+    entity_type: switch
+    register_type: holding
+    address: 11
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    assumed_state: true
+  - name: AC-12
+    entity_type: switch
+    register_type: holding
+    address: 12
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    assumed_state: true
+  - name: AC-13
+    entity_type: switch
+    register_type: holding
+    address: 13
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    assumed_state: true
+  - name: AC-14
+    entity_type: switch
+    register_type: holding
+    address: 14
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    assumed_state: true
+  - name: AC-15
+    entity_type: switch
+    register_type: holding
+    address: 15
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    assumed_state: true
+  - name: AC-16
+    entity_type: switch
+    register_type: holding
+    address: 16
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    assumed_state: true

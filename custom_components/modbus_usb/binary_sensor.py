@@ -19,7 +19,7 @@ from .const import (
     CONF_NAME,
     DOMAIN,
 )
-from .coordinator import ModbusUsbCoordinator, get_device_info
+from .coordinator import ModbusUsbCoordinator, get_device_info, get_entity_picture
 
 
 async def async_setup_entry(
@@ -50,6 +50,9 @@ class ModbusUsbBinarySensor(CoordinatorEntity[ModbusUsbCoordinator], BinarySenso
         device_class = ent.get(CONF_DEVICE_CLASS)
         self._attr_device_class = None if device_class == "none" else device_class
         self._attr_device_info = get_device_info(entry, ent)
+        picture = get_entity_picture(entry, ent)
+        if picture:
+            self._attr_entity_picture = picture
 
     @property
     def is_on(self) -> bool | None:
@@ -60,3 +63,9 @@ class ModbusUsbBinarySensor(CoordinatorEntity[ModbusUsbCoordinator], BinarySenso
         if value is None:
             return None
         return bool(value)
+
+
+# Changelog:
+# 2026-09-06 — Entity picture from device/template image URL.
+# Date modified: 2026-09-06
+

@@ -18,7 +18,7 @@ from .const import (
     CONF_UNIT_OF_MEASUREMENT,
     DOMAIN,
 )
-from .coordinator import ModbusUsbCoordinator, get_device_info
+from .coordinator import ModbusUsbCoordinator, get_device_info, get_entity_picture
 
 
 async def async_setup_entry(
@@ -47,9 +47,18 @@ class ModbusUsbSensor(CoordinatorEntity[ModbusUsbCoordinator], SensorEntity):
         self._attr_device_class = ent.get(CONF_DEVICE_CLASS)
         self._attr_state_class = ent.get(CONF_STATE_CLASS)
         self._attr_device_info = get_device_info(entry, ent)
+        picture = get_entity_picture(entry, ent)
+        if picture:
+            self._attr_entity_picture = picture
 
     @property
     def native_value(self):
         if self.coordinator.data is None:
             return None
         return self.coordinator.data.get(self._ent[CONF_ENTITY_ID])
+
+
+# Changelog:
+# 2026-09-06 — Entity picture from device/template image URL.
+# Date modified: 2026-09-06
+

@@ -124,6 +124,21 @@ def test_read_uses_requested_slave_id() -> None:
     assert client.last_request == (20, 1, 9)
 
 
+def test_read_supports_current_pymodbus_device_id_keyword() -> None:
+    class ModernClient(_Client):
+        def read_holding_registers(
+            self, address: int, count: int, *, device_id: int
+        ) -> _Response:
+            self.last_device_id = device_id
+            return _Response([99])
+
+    client = ModernClient()
+    coordinator = _coordinator(client)
+
+    assert coordinator.read_register_raw(4, REGISTER_TYPE_HOLDING, DATA_TYPE_UINT16, 6) == 99
+    assert client.last_device_id == 6
+
+
 def test_serial_lock_prevents_overlapping_requests() -> None:
     class SlowClient(_Client):
         def __init__(self) -> None:

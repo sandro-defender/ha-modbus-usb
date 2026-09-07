@@ -148,6 +148,21 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         if not self.client.connect():
             raise UpdateFailed("Could not open the configured serial port")
 
+    def _call_modbus(self, method_name: str, *args: Any, slave: int) -> Any:
+        """Call Pymodbus using its current or legacy unit-ID keyword.
+
+        Pymodbus 3.8+ renamed ``slave`` to ``device_id``.  Supporting both
+        keeps the integration working with the manifest's older supported
+        versions as well as current Home Assistant installations.
+        """
+        method = getattr(self.client, method_name)
+        try:
+            return method(*args, device_id=slave)
+        except TypeError as err:
+            if "device_id" not in str(err):
+                raise
+            return method(*args, slave=slave)
+
     def _record_transaction(
         self,
         operation: str,
@@ -276,12 +291,14 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             with self._serial_lock:
                 self._ensure_connected()
                 if register_type == REGISTER_TYPE_COIL:
-                    result = self.client.read_coils(address, count, slave=target_slave)
+                    result = self._call_modbus("read_coils", address, count, slave=target_slave)
                     if result.isError():
                         raise UpdateFailed(str(result))
                     value = bool(result.bits[0])
                 elif register_type == REGISTER_TYPE_DISCRETE:
-                    result = self.client.read_discrete_inputs(address, count, slave=target_slave)
+                    result = self._call_modbus(
+                        "read_discrete_inputs", address, count, slave=target_slave
+                    )
                     if result.isError():
                         raise UpdateFailed(str(result))
                     value = bool(result.bits[0])
@@ -289,9 +306,13 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                     data_type = ent.get(CONF_DATA_TYPE, DATA_TYPE_UINT16)
                     count = DATA_TYPE_WORD_COUNT.get(data_type, 1)
                     if register_type == REGISTER_TYPE_HOLDING:
-                        result = self.client.read_holding_registers(address, count, slave=target_slave)
+                        result = self._call_modbus(
+                            "read_holding_registers", address, count, slave=target_slave
+                        )
                     elif register_type == REGISTER_TYPE_INPUT:
-                        result = self.client.read_input_registers(address, count, slave=target_slave)
+                        result = self._call_modbus(
+                            "read_input_registers", address, count, slave=target_slave
+                        )
                     else:
                         raise UpdateFailed(f"Unknown register type: {register_type}")
                     if result.isError():
@@ -319,7 +340,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         try:
             with self._serial_lock:
                 self._ensure_connected()
-                result = self.client.write_coil(address, value, slave=target_slave)
+                result = self._call_modbus("write_coil", address, value, slave=target_slave)
                 if result.isError():
                     raise UpdateFailed(str(result))
             self._record_transaction("write_coil", slave=target_slave, address=address, value=value,
@@ -336,7 +357,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         try:
             with self._serial_lock:
                 self._ensure_connected()
-                result = self.client.write_register(address, value, slave=target_slave)
+                result = self._call_modbus(
+                    "write_register", address, value, slave=target_slave
+                )
                 if result.isError():
                     raise UpdateFailed(str(result))
             self._record_transaction("write_holding", slave=target_slave, address=address, value=value,
@@ -362,7 +385,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         try:
             with self._serial_lock:
                 self._ensure_connected()
-                result = self.client.write_registers(address, [high, low], slave=target_slave)
+                result = self._call_modbus(
+                    "write_registers", address, [high, low], slave=target_slave
+                )
                 if result.isError():
                     raise UpdateFailed(str(result))
             self._record_transaction("write_holding_32bit", slave=target_slave, address=address,
@@ -397,6 +422,6 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
 
 
 # Changelog:
-# 2026-09-06 — Skip polling assumed_state entities; expose get_entity_picture from device image.
-# Date modified: 2026-09-06
+# 2026-09-08 — Support both Pymodbus device_id and legacy slave keywords.
+# Date modified: 2026-09-08
 

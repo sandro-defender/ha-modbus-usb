@@ -297,6 +297,26 @@ async def ws_delete_device(
             entities = [e for e in new_options.get(CONF_ENTITIES, []) if e.get(CONF_DEVICE_ID) != device_id]
             new_options[CONF_ENTITIES] = entities
 
+        # Removing configuration alone leaves an orphaned child in Home
+        # Assistant's device registry. Remove its entities first, then remove
+        # the child device identified by this hub and sidebar device ID.
+        if delete_entities:
+            from homeassistant.helpers import device_registry as dr
+            from homeassistant.helpers import entity_registry as er
+
+            device_registry = dr.async_get(hass)
+            registry_device = device_registry.async_get_device(
+                identifiers={(DOMAIN, f"{entry.entry_id}_{device_id}")}
+            )
+            if registry_device:
+                entity_registry = er.async_get(hass)
+                for registry_entity in er.async_entries_for_config_entry(
+                    entity_registry, entry.entry_id
+                ):
+                    if registry_entity.device_id == registry_device.id:
+                        entity_registry.async_remove(registry_entity.entity_id)
+                device_registry.async_remove_device(registry_device.id)
+
         hass.config_entries.async_update_entry(entry, options=new_options)
         connection.send_result(msg["id"], {"success": True})
     except Exception as err:

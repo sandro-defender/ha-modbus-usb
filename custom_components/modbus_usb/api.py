@@ -104,6 +104,21 @@ def _format_entry_data(hass: HomeAssistant, entry) -> dict[str, Any]:
         "health": {},
         "transactions": [],
     }
+    transactions = diagnostics["transactions"]
+    diagnostics["devices"] = []
+    for device in devices:
+        slave_id = int(device.get(CONF_SLAVE_ID, entry.data.get(CONF_SLAVE_ID, 1)))
+        latest = next(
+            (item for item in transactions if item.get("slave") == slave_id), None
+        )
+        diagnostics["devices"].append({
+            "device_id": device.get("id"),
+            "slave_id": slave_id,
+            "status": latest.get("status") if latest else "unknown",
+            "last_operation": latest.get("operation") if latest else None,
+            "last_seen": latest.get("timestamp") if latest else None,
+            "last_error": latest.get("error") if latest and latest.get("status") == "error" else None,
+        })
     return {
         "entry_id": entry.entry_id,
         "title": entry.title,

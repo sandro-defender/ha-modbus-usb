@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+
+[tool.coverage.run]
+source = ["custom_components/modbus_usb"]
+

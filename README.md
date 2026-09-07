@@ -259,6 +259,17 @@ automation:
 3. Create a GitHub **Release** whose tag matches (for example `v1.1.5`).
 4. HACS users get an **Update available** notice.
 
+## Development tests
+
+Install the development dependencies and run the regression suite before releasing changes:
+
+```bash
+python -m pip install -r requirements_test.txt
+python -m pytest
+```
+
+The tests cover Modbus diagnostics, serial request serialization, reconnect handling, slave IDs, and the bundled R413E16 template.
+
 ---
 
 ## Contributing

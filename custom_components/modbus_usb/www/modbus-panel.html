@@ -2194,6 +2194,12 @@ entities:
       container.innerHTML = devices.map(dev => {
         const devEntities = entities.filter(e => e.device_id === dev.id);
         const slaveId = dev.slave_id != null ? dev.slave_id : (entry.hub?.slave_id || 1);
+        const health = (entry.diagnostics?.devices || []).find(item => item.device_id === dev.id);
+        const healthBadge = !health || health.status === 'unknown'
+          ? '<span class="badge badge-slate">No bus activity</span>'
+          : health.status === 'error'
+            ? '<span class="badge badge-amber" title="Latest request failed">⚠ Communication error</span>'
+            : '<span class="badge badge-green" title="Latest request succeeded">● Responding</span>';
 
         const entitiesHtml = devEntities.length === 0 ? `
           <div style="padding:1.5rem; text-align:center; color:var(--text-dim); font-size:0.8rem; width:100%;">
@@ -2271,6 +2277,7 @@ entities:
                   <h3>
                     <span>${dev.name || 'Unnamed Device'}</span>
                     <span class="badge badge-purple mono">Slave ID: ${slaveId}</span>
+                    ${healthBadge}
                     ${dev.model ? `<span class="badge badge-slate">${dev.model}</span>` : ''}
                     ${dev.manufacturer ? `<span class="badge badge-slate">${dev.manufacturer}</span>` : ''}
                     <span class="badge badge-blue">${devEntities.length} entities</span>

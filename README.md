@@ -266,11 +266,11 @@ automation:
 ## Releasing updates
 
 1. Bump `"version"` in [`custom_components/modbus_usb/manifest.json`](custom_components/modbus_usb/manifest.json), then commit and push it to `main`.
-2. Create and push the matching version tag — for example, version `2.0.5` needs tag `v2.0.5`:
+2. Create and push the matching version tag — for example, version `2.0.6` needs tag `2.0.6` (a `v2.0.6` tag also works):
 
    ```bash
-   git tag v2.0.5
-   git push origin v2.0.5
+   git tag 2.0.6
+   git push origin 2.0.6
    ```
 
 3. GitHub Actions validates the tag and creates the GitHub Release with generated release notes automatically.

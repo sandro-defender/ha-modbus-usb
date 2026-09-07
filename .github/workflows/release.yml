@@ -3,7 +3,8 @@ name: Validate and release
 on:
   push:
     tags:
-      - "v*"
+      # Supports this repository's existing tags (2.0.5) and v-prefixed tags.
+      - "*"
 
 permissions:
   contents: write
@@ -34,9 +35,10 @@ jobs:
           manifest = json.loads(
               Path("custom_components/modbus_usb/manifest.json").read_text()
           )
-          expected = f"v{manifest['version']}"
+          expected = str(manifest["version"])
           actual = os.environ["RELEASE_TAG"]
-          if actual != expected:
+          normalized_tag = actual.removeprefix("v")
+          if normalized_tag != expected:
               raise SystemExit(
                   f"Tag {actual!r} does not match manifest version {expected!r}."
               )

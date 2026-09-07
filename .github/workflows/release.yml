@@ -5,6 +5,12 @@ on:
     tags:
       # Supports this repository's existing tags (2.0.5) and v-prefixed tags.
       - "*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing or new release tag (for example 2.0.7)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -16,16 +22,16 @@ jobs:
 
     steps:
       - name: Check out the tagged source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Confirm tag matches integration version
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           python - <<'PY'
           import json
@@ -49,14 +55,28 @@ jobs:
         run: python -m compileall -q custom_components/modbus_usb
 
       - name: Create GitHub Release
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         with:
           script: |
-            await github.rest.repos.createRelease({
+            const release = {
               owner: context.repo.owner,
               repo: context.repo.repo,
-              tag_name: context.ref.replace("refs/tags/", ""),
+              tag_name: process.env.RELEASE_TAG,
               target_commitish: context.sha,
-              name: context.ref.replace("refs/tags/", ""),
+              name: process.env.RELEASE_TAG,
               generate_release_notes: true,
-            });
+            };
+            try {
+              const existing = await github.rest.repos.getReleaseByTag(release);
+              await github.rest.repos.updateRelease({
+                ...release,
+                release_id: existing.data.id,
+              });
+              core.info(`Updated existing release for ${release.tag_name}`);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.repos.createRelease(release);
+              core.info(`Created release for ${release.tag_name}`);
+            }

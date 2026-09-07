@@ -148,7 +148,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         if not self.client.connect():
             raise UpdateFailed("Could not open the configured serial port")
 
-    def _call_modbus(self, method_name: str, *args: Any, slave: int) -> Any:
+    def _call_modbus(
+        self, method_name: str, *args: Any, slave: int, **kwargs: Any
+    ) -> Any:
         """Call Pymodbus using its current or legacy unit-ID keyword.
 
         Pymodbus 3.8+ renamed ``slave`` to ``device_id``.  Supporting both
@@ -157,11 +159,11 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         """
         method = getattr(self.client, method_name)
         try:
-            return method(*args, device_id=slave)
+            return method(*args, device_id=slave, **kwargs)
         except TypeError as err:
             if "device_id" not in str(err):
                 raise
-            return method(*args, slave=slave)
+            return method(*args, slave=slave, **kwargs)
 
     def _record_transaction(
         self,
@@ -291,13 +293,15 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             with self._serial_lock:
                 self._ensure_connected()
                 if register_type == REGISTER_TYPE_COIL:
-                    result = self._call_modbus("read_coils", address, count, slave=target_slave)
+                    result = self._call_modbus(
+                        "read_coils", address, count=count, slave=target_slave
+                    )
                     if result.isError():
                         raise UpdateFailed(str(result))
                     value = bool(result.bits[0])
                 elif register_type == REGISTER_TYPE_DISCRETE:
                     result = self._call_modbus(
-                        "read_discrete_inputs", address, count, slave=target_slave
+                        "read_discrete_inputs", address, count=count, slave=target_slave
                     )
                     if result.isError():
                         raise UpdateFailed(str(result))
@@ -307,11 +311,11 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                     count = DATA_TYPE_WORD_COUNT.get(data_type, 1)
                     if register_type == REGISTER_TYPE_HOLDING:
                         result = self._call_modbus(
-                            "read_holding_registers", address, count, slave=target_slave
+                            "read_holding_registers", address, count=count, slave=target_slave
                         )
                     elif register_type == REGISTER_TYPE_INPUT:
                         result = self._call_modbus(
-                            "read_input_registers", address, count, slave=target_slave
+                            "read_input_registers", address, count=count, slave=target_slave
                         )
                     else:
                         raise UpdateFailed(f"Unknown register type: {register_type}")

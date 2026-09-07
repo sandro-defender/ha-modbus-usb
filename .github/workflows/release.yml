@@ -1,0 +1,60 @@
+name: Validate and release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-release:
+    name: Validate integration and create release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Confirm tag matches integration version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          manifest = json.loads(
+              Path("custom_components/modbus_usb/manifest.json").read_text()
+          )
+          expected = f"v{manifest['version']}"
+          actual = os.environ["RELEASE_TAG"]
+          if actual != expected:
+              raise SystemExit(
+                  f"Tag {actual!r} does not match manifest version {expected!r}."
+              )
+          print(f"Validated release version {actual}")
+          PY
+
+      - name: Check Python source syntax
+        run: python -m compileall -q custom_components/modbus_usb
+
+      - name: Create GitHub Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: context.ref.replace("refs/tags/", ""),
+              target_commitish: context.sha,
+              name: context.ref.replace("refs/tags/", ""),
+              generate_release_notes: true,
+            });

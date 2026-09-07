@@ -192,6 +192,14 @@ Or: `docker run --device /dev/ttyUSB0:/dev/ttyUSB0 ...`
 
 Both services take `entry_id` (config entry ID from **Settings → Devices & Services → Modbus USB Controller**). Optional `slave_id` overrides the hub default.
 
+## Diagnostics and troubleshooting
+
+Open **Modbus USB → Diagnostics** to confirm the serial port is connected, inspect successful and failed reads, and run a direct register read. The sidebar keeps the most recent 200 decoded Modbus transactions (reads and writes) for the current Home Assistant session. It shows the slave ID, address, returned value or error, and response time; use **Copy** to include the log in a support request.
+
+The activity log is not a raw byte capture. For raw Pymodbus frame-level output, enable debug logging for `pymodbus` and `custom_components.modbus_usb` in Home Assistant's logger configuration.
+
+If the port is disconnected, check the adapter path, USB permissions/passthrough, A/B polarity, serial settings, bus termination, and that every device has a unique slave ID.
+
 ### `modbus_usb.read_register`
 
 Reads once and fires event `modbus_usb_register_read`.
@@ -270,3 +278,6 @@ Issues and pull requests: [github.com/sandro-defender/ha-modbus-usb](https://git
 ### 2026-09-06
 - Rewrote README: hub → device → entity model, sidebar-first setup, bundled templates, services, USB passthrough, Apache 2.0 badge (was incorrectly listed as MIT).
 - Date modified: 2026-09-06
+
+### 2026-09-08
+- Added reliable, serialized RS-485 diagnostics with connection health, activity filtering, log export, and direct read results.

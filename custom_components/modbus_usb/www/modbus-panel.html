@@ -86,6 +86,18 @@
     .badge-green { background: rgba(16,185,129,0.15); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.3); }
     .badge-amber { background: rgba(245,158,11,0.15); color: #fcd34d; border: 1px solid rgba(245,158,11,0.3); }
     .badge-slate { background: rgba(148,163,184,0.12); color: #cbd5e1; border: 1px solid rgba(148,163,184,0.25); }
+    .diag-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(155px, 1fr)); gap:0.7rem; }
+    .diag-metric { padding:0.8rem; border:1px solid rgba(255,255,255,0.07); border-radius:10px; background:rgba(255,255,255,0.025); }
+    .diag-metric .label { color:var(--text-dim); font-size:0.66rem; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; }
+    .diag-metric .value { color:#f8fafc; font-family:var(--font-mono); font-size:1rem; font-weight:700; margin-top:0.28rem; overflow-wrap:anywhere; }
+    .serial-status { display:flex; align-items:center; gap:0.55rem; font-size:0.9rem; font-weight:700; }
+    .serial-status .dot { width:9px; height:9px; border-radius:50%; background:#ef4444; box-shadow:0 0 9px rgba(239,68,68,0.65); }
+    .serial-status.ok .dot { background:#34d399; box-shadow:0 0 9px rgba(52,211,153,0.65); }
+    .diag-log { width:100%; border-collapse:collapse; font-family:var(--font-mono); font-size:0.74rem; }
+    .diag-log th { color:var(--text-dim); font-size:0.65rem; text-align:left; text-transform:uppercase; letter-spacing:0.05em; padding:0.55rem 0.5rem; border-bottom:1px solid rgba(255,255,255,0.12); }
+    .diag-log td { color:#cbd5e1; padding:0.55rem 0.5rem; border-bottom:1px solid rgba(255,255,255,0.05); vertical-align:top; }
+    .diag-log tr.error td { background:rgba(239,68,68,0.06); color:#fca5a5; }
+    .diag-log-wrap { overflow:auto; max-height:420px; border:1px solid rgba(255,255,255,0.06); border-radius:10px; }
 
     /* ── Header ────────────────────────────────────────────────── */
     .header {
@@ -1145,6 +1157,18 @@
       <div class="card">
         <div class="card-header">
           <div>
+            <div class="card-title">📡 RS-485 Connection Health</div>
+            <div class="card-subtitle">Live serial-port status and the latest polling results</div>
+          </div>
+          <div id="diag-connection-status" class="serial-status"><span class="dot"></span><span>Checking connection…</span></div>
+        </div>
+        <div class="diag-grid" id="diag-health-grid"></div>
+        <div id="diag-last-error" class="text-sm" style="display:none; margin-top:0.9rem; padding:0.8rem; border-radius:8px; background:rgba(239,68,68,0.1); color:#fca5a5; font-family:var(--font-mono);"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
             <div class="card-title">🔬 Live Modbus Read / Write</div>
             <div class="card-subtitle">Send direct RTU requests over the USB adapter</div>
           </div>
@@ -1188,6 +1212,31 @@
 
         <div id="diag-result-box" style="margin-top:1rem; padding:0.85rem; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.06); font-family:var(--font-mono); font-size:0.8rem; color:#94a3b8;">
           Enter parameters and click "Read Register" to query the serial bus.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">📜 RS-485 Activity &amp; Error Log</div>
+            <div class="card-subtitle">The newest 200 Modbus reads and writes recorded since this integration was loaded</div>
+          </div>
+          <div class="flex gap-1 items-center">
+            <select class="form-select" id="diag-log-filter" onchange="renderDiagnosticsTab()" style="min-width:105px; padding:0.38rem 0.55rem;">
+              <option value="all">All activity</option>
+              <option value="read">Reads</option>
+              <option value="write">Writes</option>
+              <option value="error">Errors</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" onclick="copyDiagnosticLog()">⧉ Copy</button>
+            <button class="btn btn-secondary btn-sm" onclick="clearDiagnosticLog()">⌫ Clear</button>
+          </div>
+        </div>
+        <div class="diag-log-wrap">
+          <table class="diag-log">
+            <thead><tr><th>Time</th><th>Request</th><th>Slave</th><th>Address</th><th>Value / Response</th><th>Time</th></tr></thead>
+            <tbody id="diag-log-body"><tr><td colspan="6" class="text-muted" style="text-align:center; padding:1.2rem;">Waiting for RS-485 activity…</td></tr></tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -1870,14 +1919,19 @@ entities:
 
       await refreshData();
       setInterval(refreshData, 15000);
+      setInterval(() => {
+        if (document.getElementById('pane-diag')?.classList.contains('active')) refreshData();
+      }, 5000);
     }
 
     // ─── Backend API Client ─────────────────────────────────────
     async function apiCall(type, payload = {}) {
+      let backendError = null;
       if (_isLiveHA && _hass && _hass.callWS) {
         try {
           return await _hass.callWS({ type: `modbus_usb/${type}`, ...payload });
         } catch(e) {
+          backendError = e;
           console.warn(`[Modbus API] WS ${type} failed, trying REST fallback:`, e);
         }
       }
@@ -1889,9 +1943,14 @@ entities:
           if (type === 'save_template') return await _hass.callApi('POST', 'modbus_usb/templates', payload);
           if (type === 'delete_template') return await _hass.callApi('DELETE', `modbus_usb/templates?filename=${payload.filename}`);
         } catch(e) {
+          backendError = e;
           console.warn(`[Modbus API] REST fallback failed:`, e);
         }
       }
+
+      // Mock values are only for the standalone preview. Never fabricate a
+      // successful serial response when Home Assistant is running live.
+      if (_isLiveHA) throw backendError || new Error(`Modbus API '${type}' is unavailable`);
 
       // Standalone Mock fallback
       return handleMockCall(type, payload);
@@ -1902,6 +1961,9 @@ entities:
 
       if (type === 'get_data') {
         return { entries: MOCK_DATA.entries, templates: MOCK_DATA.templates };
+      }
+      if (type === 'diagnostic_read') {
+        return { value: 230.4 };
       }
       if (type === 'save_device') {
         const dev = { ...payload.device };
@@ -2011,6 +2073,7 @@ entities:
         renderDashboardTab();
         renderEntitiesTab();
         renderHubTab();
+        renderDiagnosticsTab();
       } catch(e) {
         console.error('[Modbus USB] Refresh failed:', e);
         toast('Failed to load data: ' + e.message, 'err');
@@ -2488,6 +2551,106 @@ entities:
           <div class="mono" style="font-size:0.95rem; font-weight:700; color:#f1f5f9; margin-top:3px;">${val}</div>
         </div>
       `).join('');
+    }
+
+    // ─── TAB 6: SERIAL DIAGNOSTICS ──────────────────────────────
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>'"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#039;', '"':'&quot;' })[c]);
+    }
+
+    function formatLogTime(timestamp) {
+      if (!timestamp) return '—';
+      const date = new Date(timestamp);
+      return Number.isNaN(date.getTime()) ? timestamp : date.toLocaleTimeString();
+    }
+
+    function renderDiagnosticsTab() {
+      const entry = getCurrentEntry();
+      const diag = entry?.diagnostics || {};
+      const health = diag.health || {};
+      const connected = Boolean(diag.connected);
+      const status = document.getElementById('diag-connection-status');
+      status.className = `serial-status ${connected ? 'ok' : ''}`;
+      status.innerHTML = `<span class="dot"></span><span>${connected ? 'Serial port connected' : 'Serial port unavailable'}</span>`;
+
+      const total = Number(health.total_reads || 0);
+      const failed = Number(health.failed_reads || 0);
+      const successRate = total ? `${Math.max(0, ((total - failed) / total * 100)).toFixed(1)}%` : '—';
+      const fields = [
+        ['Connection', connected ? 'Connected' : 'Disconnected'],
+        ['Successful reads', Math.max(0, total - failed)],
+        ['Failed reads', failed],
+        ['Success rate', successRate],
+        ['Consecutive failures', health.consecutive_failures || 0],
+        ['Last good response', health.last_success ? formatLogTime(health.last_success) : '—'],
+      ];
+      document.getElementById('diag-health-grid').innerHTML = fields.map(([label, value]) => `
+        <div class="diag-metric"><div class="label">${label}</div><div class="value">${escapeHtml(value)}</div></div>
+      `).join('');
+
+      const errorBox = document.getElementById('diag-last-error');
+      if (health.last_error) {
+        errorBox.style.display = 'block';
+        errorBox.textContent = `Latest error: ${health.last_error}`;
+      } else {
+        errorBox.style.display = 'none';
+      }
+
+      const filter = document.getElementById('diag-log-filter')?.value || 'all';
+      const allTransactions = diag.transactions || [];
+      const transactions = allTransactions.filter(item =>
+        filter === 'all' ||
+        (filter === 'error' && item.status === 'error') ||
+        (filter === 'read' && String(item.operation || '').startsWith('read_')) ||
+        (filter === 'write' && String(item.operation || '').startsWith('write_'))
+      );
+      const body = document.getElementById('diag-log-body');
+      if (!transactions.length) {
+        body.innerHTML = '<tr><td colspan="6" class="text-muted" style="text-align:center; padding:1.2rem;">No RS-485 requests have been recorded yet.</td></tr>';
+        return;
+      }
+      body.innerHTML = transactions.map(item => {
+        const response = item.status === 'error' ? `ERROR: ${item.error || 'Unknown error'}` : (item.result ?? item.value ?? 'Accepted');
+        return `<tr class="${item.status === 'error' ? 'error' : ''}">
+          <td>${escapeHtml(formatLogTime(item.timestamp))}</td>
+          <td>${escapeHtml(item.operation)}</td>
+          <td>${escapeHtml(item.slave)}</td>
+          <td>${escapeHtml(item.address)}${item.count > 1 ? ` (${escapeHtml(item.count)} words)` : ''}</td>
+          <td>${escapeHtml(response)}</td>
+          <td>${item.duration_ms == null ? '—' : `${escapeHtml(item.duration_ms)} ms`}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    async function copyDiagnosticLog() {
+      const entry = getCurrentEntry();
+      const filter = document.getElementById('diag-log-filter')?.value || 'all';
+      const rows = (entry?.diagnostics?.transactions || []).filter(item =>
+        filter === 'all' || (filter === 'error' && item.status === 'error') ||
+        (filter === 'read' && String(item.operation || '').startsWith('read_')) ||
+        (filter === 'write' && String(item.operation || '').startsWith('write_'))
+      );
+      const text = rows.map(item => [item.timestamp, item.status.toUpperCase(), item.operation,
+        `slave=${item.slave}`, `address=${item.address}`, item.error || item.result || item.value || '',
+        item.duration_ms == null ? '' : `${item.duration_ms}ms`].join(' | ')).join('\n');
+      try {
+        await navigator.clipboard.writeText(text || 'No RS-485 activity recorded.');
+        toast('Diagnostic log copied', 'ok');
+      } catch (e) {
+        toast('Could not copy the diagnostic log', 'err');
+      }
+    }
+
+    async function clearDiagnosticLog() {
+      const entry = getCurrentEntry();
+      if (!entry) return;
+      try {
+        await apiCall('clear_diagnostic_log', { entry_id: entry.entry_id });
+        toast('RS-485 activity log cleared', 'ok');
+        await refreshData();
+      } catch (e) {
+        toast(`Could not clear the diagnostic log: ${e.message}`, 'err');
+      }
     }
 
     // ─── TAB SWITCHING ──────────────────────────────────────────
@@ -3152,7 +3315,7 @@ entities:
       }
 
       try {
-        await _hass.callService(DOMAIN, 'read_register', {
+        const result = await apiCall('diagnostic_read', {
           entry_id: entry.entry_id,
           address: address,
           register_type: regtype,
@@ -3160,7 +3323,8 @@ entities:
           slave_id: slave
         });
         resBox.style.color = '#34d399';
-        resBox.textContent = `✅ Read command dispatched! Result will fire as event modbus_usb_register_read. Check HA logbook or automations.`;
+        resBox.textContent = `✅ Response received: ${result.value} (${regtype} ${address}, slave ${slave})`;
+        setTimeout(refreshData, 200);
       } catch(e) {
         resBox.style.color = '#f87171';
         resBox.textContent = `❌ Read failed: ${e.message}`;

@@ -179,7 +179,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         coordinator: ModbusUsbCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
-        await hass.async_add_executor_job(coordinator.client.close)
+        await hass.async_add_executor_job(coordinator.close)
 
     # If no more entries, unregister services
     if not hass.data.get(DOMAIN):

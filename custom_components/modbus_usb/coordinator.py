@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import logging
 import struct
+from collections import deque
 from datetime import datetime, timedelta
+from threading import Lock
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -130,6 +132,69 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             DIAG_LAST_ERROR: None,
             DIAG_LAST_SUCCESS: None,
         }
+        # A concise rolling wire-level activity history for the sidebar.  Pymodbus
+        # does not retain raw RTU bytes reliably across serial implementations, so
+        # log every decoded Modbus request and its response instead.
+        self.transaction_log: deque[dict[str, Any]] = deque(maxlen=200)
+        # Modbus RTU is request/response based: concurrent access to one serial
+        # adapter can pair a response with the wrong request. Every I/O operation
+        # must therefore own this lock for its entire transaction.
+        self._serial_lock = Lock()
+
+    def _ensure_connected(self) -> None:
+        """Open the serial adapter or raise a useful error before a request."""
+        if self.client.connected:
+            return
+        if not self.client.connect():
+            raise UpdateFailed("Could not open the configured serial port")
+
+    def _record_transaction(
+        self,
+        operation: str,
+        *,
+        slave: int,
+        address: int,
+        count: int = 1,
+        value: Any = None,
+        result: Any = None,
+        error: Exception | str | None = None,
+        duration_ms: float | None = None,
+    ) -> None:
+        """Keep a rolling, UI-safe record of every RS-485 operation."""
+        item: dict[str, Any] = {
+            "timestamp": datetime.now().astimezone().isoformat(),
+            "operation": operation,
+            "slave": slave,
+            "address": address,
+            "count": count,
+            "value": value,
+            "result": result,
+            "status": "error" if error else "ok",
+        }
+        if duration_ms is not None:
+            item["duration_ms"] = round(duration_ms, 1)
+        if error:
+            item["error"] = str(error)
+        self.transaction_log.appendleft(item)
+
+    def get_diagnostics(self) -> dict[str, Any]:
+        """Return a serial-health snapshot and rolling RS-485 transaction log."""
+        return {
+            "connected": bool(getattr(self.client, "connected", False)),
+            "entry_id": self.entry_id,
+            "default_slave_id": self.slave_id,
+            "health": dict(self.diag),
+            "transactions": list(self.transaction_log),
+        }
+
+    def clear_transaction_log(self) -> None:
+        """Clear only the rolling activity log; preserve health counters."""
+        self.transaction_log.clear()
+
+    def close(self) -> None:
+        """Close the serial client only after any in-flight transaction finishes."""
+        with self._serial_lock:
+            self.client.close()
 
     def _get_entities(self) -> list[dict]:
         entry = self.hass.config_entries.async_get_entry(self.entry_id)
@@ -163,9 +228,6 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
     def _read_all(
         self, entities: list[dict], device_slave_map: dict[str, int] | None = None
     ) -> dict[str, Any]:
-        if not self.client.connected:
-            self.client.connect()
-
         device_slave_map = device_slave_map or {}
         data: dict[str, Any] = {}
         for ent in entities:
@@ -197,61 +259,87 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             slave = self.slave_id
         target_slave = int(slave)
 
-        if register_type == REGISTER_TYPE_COIL:
-            result = self.client.read_coils(address, 1, slave=target_slave)
-            if result.isError():
-                raise UpdateFailed(str(result))
-            return bool(result.bits[0])
-
-        if register_type == REGISTER_TYPE_DISCRETE:
-            result = self.client.read_discrete_inputs(address, 1, slave=target_slave)
-            if result.isError():
-                raise UpdateFailed(str(result))
-            return bool(result.bits[0])
-
-        data_type = ent.get(CONF_DATA_TYPE, DATA_TYPE_UINT16)
-        count = DATA_TYPE_WORD_COUNT.get(data_type, 1)
-        scale = ent.get(CONF_SCALE, 1)
-
-        if register_type == REGISTER_TYPE_HOLDING:
-            result = self.client.read_holding_registers(address, count, slave=target_slave)
-        elif register_type == REGISTER_TYPE_INPUT:
-            result = self.client.read_input_registers(address, count, slave=target_slave)
-        else:
-            raise UpdateFailed(f"Unknown register type: {register_type}")
-
-        if result.isError():
-            raise UpdateFailed(str(result))
-
-        value = _decode_words(result.registers, data_type)
-        if scale not in (1, None):
-            value = value * scale
-        return value
+        started = datetime.now()
+        operation = f"read_{register_type}"
+        count = 1
+        try:
+            with self._serial_lock:
+                self._ensure_connected()
+                if register_type == REGISTER_TYPE_COIL:
+                    result = self.client.read_coils(address, count, slave=target_slave)
+                    if result.isError():
+                        raise UpdateFailed(str(result))
+                    value = bool(result.bits[0])
+                elif register_type == REGISTER_TYPE_DISCRETE:
+                    result = self.client.read_discrete_inputs(address, count, slave=target_slave)
+                    if result.isError():
+                        raise UpdateFailed(str(result))
+                    value = bool(result.bits[0])
+                else:
+                    data_type = ent.get(CONF_DATA_TYPE, DATA_TYPE_UINT16)
+                    count = DATA_TYPE_WORD_COUNT.get(data_type, 1)
+                    if register_type == REGISTER_TYPE_HOLDING:
+                        result = self.client.read_holding_registers(address, count, slave=target_slave)
+                    elif register_type == REGISTER_TYPE_INPUT:
+                        result = self.client.read_input_registers(address, count, slave=target_slave)
+                    else:
+                        raise UpdateFailed(f"Unknown register type: {register_type}")
+                    if result.isError():
+                        raise UpdateFailed(str(result))
+                    value = _decode_words(result.registers, data_type)
+                    scale = ent.get(CONF_SCALE, 1)
+                    if scale not in (1, None):
+                        value = value * scale
+            self._record_transaction(
+                operation, slave=target_slave, address=address, count=count, result=value,
+                duration_ms=(datetime.now() - started).total_seconds() * 1000,
+            )
+            return value
+        except Exception as err:
+            self._record_transaction(
+                operation, slave=target_slave, address=address, count=count, error=err,
+                duration_ms=(datetime.now() - started).total_seconds() * 1000,
+            )
+            raise
 
     def write_coil(self, address: int, value: bool, slave: int | None = None) -> None:
         """Write a coil value (used by switches). Runs synchronously - call via executor."""
-        if not self.client.connected:
-            self.client.connect()
         target_slave = int(slave if slave is not None else self.slave_id)
-        result = self.client.write_coil(address, value, slave=target_slave)
-        if result.isError():
-            raise UpdateFailed(str(result))
+        started = datetime.now()
+        try:
+            with self._serial_lock:
+                self._ensure_connected()
+                result = self.client.write_coil(address, value, slave=target_slave)
+                if result.isError():
+                    raise UpdateFailed(str(result))
+            self._record_transaction("write_coil", slave=target_slave, address=address, value=value,
+                                     result="accepted", duration_ms=(datetime.now() - started).total_seconds() * 1000)
+        except Exception as err:
+            self._record_transaction("write_coil", slave=target_slave, address=address, value=value, error=err,
+                                     duration_ms=(datetime.now() - started).total_seconds() * 1000)
+            raise
 
     def write_register(self, address: int, value: int, slave: int | None = None) -> None:
         """Write a single holding register (used by switches modeled as registers)."""
-        if not self.client.connected:
-            self.client.connect()
         target_slave = int(slave if slave is not None else self.slave_id)
-        result = self.client.write_register(address, value, slave=target_slave)
-        if result.isError():
-            raise UpdateFailed(str(result))
+        started = datetime.now()
+        try:
+            with self._serial_lock:
+                self._ensure_connected()
+                result = self.client.write_register(address, value, slave=target_slave)
+                if result.isError():
+                    raise UpdateFailed(str(result))
+            self._record_transaction("write_holding", slave=target_slave, address=address, value=value,
+                                     result="accepted", duration_ms=(datetime.now() - started).total_seconds() * 1000)
+        except Exception as err:
+            self._record_transaction("write_holding", slave=target_slave, address=address, value=value, error=err,
+                                     duration_ms=(datetime.now() - started).total_seconds() * 1000)
+            raise
 
     def write_registers_32bit(
         self, address: int, value: int, data_type: str, slave: int | None = None
     ) -> None:
         """Write two consecutive holding registers for 32-bit data types."""
-        if not self.client.connected:
-            self.client.connect()
         target_slave = int(slave if slave is not None else self.slave_id)
         if data_type in ("int32",):
             raw = struct.pack(">i", value)
@@ -260,37 +348,42 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         else:  # uint32
             raw = struct.pack(">I", value)
         high, low = struct.unpack(">HH", raw)
-        result = self.client.write_registers(address, [high, low], slave=target_slave)
-        if result.isError():
-            raise UpdateFailed(str(result))
+        started = datetime.now()
+        try:
+            with self._serial_lock:
+                self._ensure_connected()
+                result = self.client.write_registers(address, [high, low], slave=target_slave)
+                if result.isError():
+                    raise UpdateFailed(str(result))
+            self._record_transaction("write_holding_32bit", slave=target_slave, address=address,
+                                     count=2, value=value, result="accepted",
+                                     duration_ms=(datetime.now() - started).total_seconds() * 1000)
+        except Exception as err:
+            self._record_transaction("write_holding_32bit", slave=target_slave, address=address,
+                                     count=2, value=value, error=err,
+                                     duration_ms=(datetime.now() - started).total_seconds() * 1000)
+            raise
 
     def read_register_raw(
         self, address: int, register_type: str, data_type: str, slave: int | None = None
     ) -> Any:
         """Perform a one-shot read of a register for the diagnostics/service call."""
-        if not self.client.connected:
-            self.client.connect()
-        target_slave = int(slave if slave is not None else self.slave_id)
-        count = DATA_TYPE_WORD_COUNT.get(data_type, 1)
-        if register_type == REGISTER_TYPE_COIL:
-            result = self.client.read_coils(address, 1, slave=target_slave)
-            if result.isError():
-                raise UpdateFailed(str(result))
-            return bool(result.bits[0])
-        if register_type == REGISTER_TYPE_DISCRETE:
-            result = self.client.read_discrete_inputs(address, 1, slave=target_slave)
-            if result.isError():
-                raise UpdateFailed(str(result))
-            return bool(result.bits[0])
-        if register_type == REGISTER_TYPE_HOLDING:
-            result = self.client.read_holding_registers(address, count, slave=target_slave)
-        elif register_type == REGISTER_TYPE_INPUT:
-            result = self.client.read_input_registers(address, count, slave=target_slave)
-        else:
-            raise UpdateFailed(f"Unknown register type: {register_type}")
-        if result.isError():
-            raise UpdateFailed(str(result))
-        return _decode_words(result.registers, data_type)
+        self.diag[DIAG_TOTAL_READS] += 1
+        try:
+            value = self._read_one({
+                CONF_REGISTER_TYPE: register_type,
+                CONF_ADDRESS: address,
+                CONF_DATA_TYPE: data_type,
+                CONF_SLAVE_ID: slave if slave is not None else self.slave_id,
+            })
+            self.diag[DIAG_CONSECUTIVE_FAILURES] = 0
+            self.diag[DIAG_LAST_SUCCESS] = datetime.now().isoformat()
+            return value
+        except Exception as err:
+            self.diag[DIAG_FAILED_READS] += 1
+            self.diag[DIAG_CONSECUTIVE_FAILURES] += 1
+            self.diag[DIAG_LAST_ERROR] = str(err)
+            raise
 
 
 # Changelog:

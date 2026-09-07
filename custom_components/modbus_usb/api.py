@@ -70,7 +70,7 @@ def _get_entry(hass: HomeAssistant, entry_id: str):
     return entry
 
 
-def _format_entry_data(entry) -> dict[str, Any]:
+def _format_entry_data(hass: HomeAssistant, entry) -> dict[str, Any]:
     """Serialize config entry for UI consumption."""
     options = dict(entry.options or {})
     devices = list(options.get(CONF_DEVICES, []))
@@ -97,6 +97,13 @@ def _format_entry_data(entry) -> dict[str, Any]:
             if not ent.get(CONF_DEVICE_ID):
                 ent[CONF_DEVICE_ID] = default_dev_id
 
+    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    diagnostics = coordinator.get_diagnostics() if coordinator else {
+        "connected": False,
+        "entry_id": entry.entry_id,
+        "health": {},
+        "transactions": [],
+    }
     return {
         "entry_id": entry.entry_id,
         "title": entry.title,
@@ -111,6 +118,7 @@ def _format_entry_data(entry) -> dict[str, Any]:
         },
         "devices": devices,
         "entities": entities,
+        "diagnostics": diagnostics,
     }
 
 
@@ -129,7 +137,7 @@ async def ws_get_data(
     """Return all hubs, separated devices, entities, and templates."""
     try:
         entries = hass.config_entries.async_entries(DOMAIN)
-        entries_data = [_format_entry_data(e) for e in entries]
+        entries_data = [_format_entry_data(hass, e) for e in entries]
         templates = await async_load_templates(hass)
         connection.send_result(
             msg["id"],
@@ -141,6 +149,47 @@ async def ws_get_data(
     except Exception as err:
         _LOGGER.error("ws_get_data failed: %s", err, exc_info=True)
         connection.send_error(msg["id"], "error", str(err))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "modbus_usb/diagnostic_read",
+    vol.Required("entry_id"): cv.string,
+    vol.Required("address"): vol.Coerce(int),
+    vol.Required("register_type"): vol.In(["holding", "input", "coil", "discrete"]),
+    vol.Required("data_type"): vol.In(["uint16", "int16", "uint32", "int32", "float32"]),
+    vol.Required("slave_id"): vol.All(vol.Coerce(int), vol.Range(min=1, max=247)),
+})
+@websocket_api.async_response
+async def ws_diagnostic_read(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Read one register and return its decoded result directly to the panel."""
+    try:
+        coordinator = hass.data[DOMAIN][msg["entry_id"]]
+        value = await hass.async_add_executor_job(
+            coordinator.read_register_raw,
+            msg["address"], msg["register_type"], msg["data_type"], msg["slave_id"],
+        )
+        connection.send_result(msg["id"], {"value": value})
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("Diagnostic read failed: %s", err)
+        connection.send_error(msg["id"], "read_failed", str(err))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "modbus_usb/clear_diagnostic_log",
+    vol.Required("entry_id"): cv.string,
+})
+@websocket_api.async_response
+async def ws_clear_diagnostic_log(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Clear the sidebar's in-memory RS-485 activity log."""
+    try:
+        hass.data[DOMAIN][msg["entry_id"]].clear_transaction_log()
+        connection.send_result(msg["id"], {"success": True})
+    except (KeyError, AttributeError) as err:
+        connection.send_error(msg["id"], "not_found", str(err))
 
 
 @websocket_api.websocket_command({
@@ -506,7 +555,7 @@ class ModbusUsbConfigView(HomeAssistantView):
         """GET /api/modbus_usb/config -> list all entries, devices, entities."""
         hass: HomeAssistant = request.app["hass"]
         entries = hass.config_entries.async_entries(DOMAIN)
-        entries_data = [_format_entry_data(e) for e in entries]
+        entries_data = [_format_entry_data(hass, e) for e in entries]
         templates = await async_load_templates(hass)
         return self.json({"entries": entries_data, "templates": templates})
 
@@ -564,6 +613,8 @@ async def async_register_api(hass: HomeAssistant) -> None:
 
     # Register WebSocket handlers
     websocket_api.async_register_command(hass, ws_get_data)
+    websocket_api.async_register_command(hass, ws_diagnostic_read)
+    websocket_api.async_register_command(hass, ws_clear_diagnostic_log)
     websocket_api.async_register_command(hass, ws_save_device)
     websocket_api.async_register_command(hass, ws_delete_device)
     websocket_api.async_register_command(hass, ws_save_entity)
@@ -587,4 +638,3 @@ async def async_register_api(hass: HomeAssistant) -> None:
 # Changelog:
 # 2026-09-06 — Copy template image onto devices when applying eletechsup and other photo templates.
 # Date modified: 2026-09-06
-

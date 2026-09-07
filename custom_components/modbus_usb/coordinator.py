@@ -16,6 +16,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import (
     CONF_ADDRESS,
     CONF_ASSUMED_STATE,
+    CONF_BAUDRATE,
+    CONF_BYTESIZE,
     CONF_DATA_TYPE,
     CONF_DEVICES,
     CONF_DEVICE_ID,
@@ -25,9 +27,12 @@ from .const import (
     CONF_MANUFACTURER,
     CONF_MODEL,
     CONF_NAME,
+    CONF_PARITY,
+    CONF_PORT,
     CONF_REGISTER_TYPE,
     CONF_SCALE,
     CONF_SLAVE_ID,
+    CONF_STOPBITS,
     DATA_TYPE_FLOAT32,
     DATA_TYPE_INT16,
     DATA_TYPE_INT32,
@@ -111,6 +116,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         slave_id: int,
         scan_interval: int,
         entry_id: str,
+        serial_config: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(
             hass,
@@ -121,6 +127,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         self.client = client
         self.slave_id = slave_id
         self.entry_id = entry_id
+        self.serial_config = serial_config or {}
         # entities list is read fresh from config_entry.options each refresh so
         # the options flow (add/edit/remove) takes effect without reload in most cases
         self.hass = hass
@@ -148,8 +155,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         if not self.client.connect():
             raise UpdateFailed("Could not open the configured serial port")
 
-    def _call_modbus(
-        self, method_name: str, *args: Any, slave: int, **kwargs: Any
+    @staticmethod
+    def _call_modbus_on_client(
+        client: Any, method_name: str, *args: Any, slave: int, **kwargs: Any
     ) -> Any:
         """Call Pymodbus using its current or legacy unit-ID keyword.
 
@@ -157,13 +165,84 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         keeps the integration working with the manifest's older supported
         versions as well as current Home Assistant installations.
         """
-        method = getattr(self.client, method_name)
+        method = getattr(client, method_name)
         try:
             return method(*args, device_id=slave, **kwargs)
         except TypeError as err:
             if "device_id" not in str(err):
                 raise
             return method(*args, slave=slave, **kwargs)
+
+    def _call_modbus(
+        self, method_name: str, *args: Any, slave: int, **kwargs: Any
+    ) -> Any:
+        """Call a method on this hub's configured serial client."""
+        return self._call_modbus_on_client(
+            self.client, method_name, *args, slave=slave, **kwargs
+        )
+
+    def scan_bus(
+        self, baudrates: list[int], start_slave: int = 1, end_slave: int = 20
+    ) -> dict[str, Any]:
+        """Probe a bounded RS-485 range and report devices that answer.
+
+        The primary client is temporarily closed while an isolated, short-timeout
+        client tests each baud rate. Any valid Modbus exception response still
+        counts as a detected device: it proves the slave and serial settings.
+        """
+        from pymodbus.client import ModbusSerialClient
+
+        start_slave = max(1, min(247, int(start_slave)))
+        end_slave = max(start_slave, min(247, int(end_slave)))
+        valid_bauds = sorted({int(rate) for rate in baudrates if int(rate) > 0})
+        if not valid_bauds:
+            raise ValueError("Select at least one baud rate to scan")
+
+        found: list[dict[str, Any]] = []
+        probed = 0
+        with self._serial_lock:
+            self.client.close()
+            try:
+                for baudrate in valid_bauds:
+                    probe = ModbusSerialClient(
+                        port=self.serial_config[CONF_PORT],
+                        baudrate=baudrate,
+                        bytesize=self.serial_config[CONF_BYTESIZE],
+                        parity=self.serial_config[CONF_PARITY],
+                        stopbits=self.serial_config[CONF_STOPBITS],
+                        timeout=0.2,
+                        retries=0,
+                    )
+                    try:
+                        if not probe.connect():
+                            continue
+                        for slave in range(start_slave, end_slave + 1):
+                            probed += 1
+                            try:
+                                result = self._call_modbus_on_client(
+                                    probe, "read_holding_registers", 0,
+                                    count=1, slave=slave,
+                                )
+                                message = str(result)
+                                no_response = "no response received" in message.lower()
+                                if not no_response:
+                                    response_kind = "register response" if not result.isError() else "exception response"
+                                    found.append({
+                                        "slave_id": slave,
+                                        "baudrate": baudrate,
+                                        "response": response_kind,
+                                    })
+                                    self._record_transaction(
+                                        "scan_found", slave=slave, address=0,
+                                        result=f"{baudrate} baud — {response_kind}",
+                                    )
+                            except Exception:  # A timeout is expected for unused IDs.
+                                continue
+                    finally:
+                        probe.close()
+            finally:
+                self.client.connect()
+        return {"found": found, "probed": probed, "start_slave": start_slave, "end_slave": end_slave}
 
     def _record_transaction(
         self,

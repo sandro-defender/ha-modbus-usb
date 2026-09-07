@@ -1099,6 +1099,34 @@
       <div class="card">
         <div class="card-header">
           <div>
+            <div class="card-title">🔎 Find RS-485 Devices</div>
+            <div class="card-subtitle">Probes holding register 0 across slave IDs. Normal polling pauses during the scan.</div>
+          </div>
+        </div>
+        <div class="form-grid-3">
+          <div class="form-group">
+            <label class="form-label">Baud rates</label>
+            <input class="form-input mono" id="scan-baudrates" value="9600,19200,38400" placeholder="9600,19200" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Start slave ID</label>
+            <input class="form-input mono" id="scan-start-slave" type="number" value="1" min="1" max="247" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">End slave ID</label>
+            <input class="form-input mono" id="scan-end-slave" type="number" value="20" min="1" max="247" />
+          </div>
+        </div>
+        <div class="flex items-center gap-1">
+          <button class="btn btn-primary" id="btn-scan-bus" onclick="scanRs485Bus()">🔎 Scan RS-485 Bus</button>
+          <span class="text-muted text-sm">Start with IDs 1–20. A full 1–247 scan can take several minutes.</span>
+        </div>
+        <div id="scan-result-box" style="display:none; margin-top:1rem; padding:0.85rem; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.06); font-family:var(--font-mono); font-size:0.8rem;"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
             <div class="card-title">📋 All Modbus Entities</div>
             <div class="card-subtitle">Complete registry of sensors, switches, binary sensors, and numbers</div>
           </div>
@@ -1965,6 +1993,9 @@ entities:
       if (type === 'diagnostic_read') {
         return { value: 230.4 };
       }
+      if (type === 'scan_bus') {
+        return { found: [{ slave_id: 1, baudrate: 9600, response: 'register response' }], probed: 20 };
+      }
       if (type === 'save_device') {
         const dev = { ...payload.device };
         if (!dev.id) dev.id = 'dev_' + Math.random().toString(36).substring(2, 9);
@@ -2641,10 +2672,31 @@ entities:
         `slave=${item.slave}`, `address=${item.address}`, item.error || item.result || item.value || '',
         item.duration_ms == null ? '' : `${item.duration_ms}ms`].join(' | ')).join('\n');
       try {
-        await navigator.clipboard.writeText(text || 'No RS-485 activity recorded.');
+        const content = text || 'No RS-485 activity recorded.';
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(content);
+        } else {
+          const textarea = document.createElement('textarea');
+          textarea.value = content;
+          textarea.setAttribute('readonly', '');
+          textarea.style.cssText = 'position:fixed; opacity:0; pointer-events:none;';
+          document.body.appendChild(textarea);
+          textarea.select();
+          const copied = document.execCommand('copy');
+          textarea.remove();
+          if (!copied) throw new Error('Browser denied clipboard access');
+        }
         toast('Diagnostic log copied', 'ok');
       } catch (e) {
-        toast('Could not copy the diagnostic log', 'err');
+        const textarea = document.createElement('textarea');
+        textarea.value = text || 'No RS-485 activity recorded.';
+        textarea.setAttribute('readonly', '');
+        textarea.style.cssText = 'position:fixed; opacity:0; pointer-events:none;';
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copied = document.execCommand('copy');
+        textarea.remove();
+        toast(copied ? 'Diagnostic log copied' : 'Could not copy the diagnostic log', copied ? 'ok' : 'err');
       }
     }
 
@@ -3335,6 +3387,42 @@ entities:
       } catch(e) {
         resBox.style.color = '#f87171';
         resBox.textContent = `❌ Read failed: ${e.message}`;
+      }
+    }
+
+    async function scanRs485Bus() {
+      const entry = getCurrentEntry();
+      const baudrates = document.getElementById('scan-baudrates').value.split(',')
+        .map(value => parseInt(value.trim(), 10)).filter(Number.isFinite);
+      const startSlave = parseInt(document.getElementById('scan-start-slave').value, 10);
+      const endSlave = parseInt(document.getElementById('scan-end-slave').value, 10);
+      const button = document.getElementById('btn-scan-bus');
+      const box = document.getElementById('scan-result-box');
+      if (!entry || !baudrates.length || !Number.isFinite(startSlave) || !Number.isFinite(endSlave)) {
+        toast('Enter valid baud rates and slave IDs', 'err');
+        return;
+      }
+      button.disabled = true;
+      button.textContent = '⌛ Scanning…';
+      box.style.display = 'block';
+      box.style.color = '#93c5fd';
+      box.textContent = `Scanning slave IDs ${startSlave}–${endSlave} at ${baudrates.join(', ')} baud…`;
+      try {
+        const result = await apiCall('scan_bus', {
+          entry_id: entry.entry_id, baudrates,
+          start_slave: startSlave, end_slave: endSlave,
+        });
+        box.style.color = result.found?.length ? '#34d399' : '#fcd34d';
+        box.textContent = result.found?.length
+          ? `Found: ${result.found.map(item => `slave ${item.slave_id} at ${item.baudrate} baud (${item.response})`).join('; ')}`
+          : `No responding devices found after ${result.probed || 0} probes. Check A/B wires, power, baud rate, and slave ID.`;
+        await refreshData();
+      } catch (error) {
+        box.style.color = '#f87171';
+        box.textContent = `Scan failed: ${error.message}`;
+      } finally {
+        button.disabled = false;
+        button.textContent = '🔎 Scan RS-485 Bus';
       }
     }
 

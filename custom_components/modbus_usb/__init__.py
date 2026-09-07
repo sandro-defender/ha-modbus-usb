@@ -80,7 +80,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
             frontend_url_path="modbus-usb",
             # Change this asset version when the standalone sidebar HTML changes.
             # It prevents an already-open browser from retaining an old panel.
-            config={"url": "/modbus_usb_panel/modbus-panel.html?v=2.0.3"},
+            config={"url": "/modbus_usb_panel/modbus-panel.html?v=2.0.6"},
             require_admin=False,
         )
         _LOGGER.debug("Modbus USB sidebar panel registered")
@@ -117,6 +117,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         slave_id=entry.data[CONF_SLAVE_ID],
         scan_interval=scan_interval,
         entry_id=entry.entry_id,
+        serial_config={
+            CONF_PORT: entry.data[CONF_PORT],
+            CONF_BAUDRATE: entry.data[CONF_BAUDRATE],
+            CONF_BYTESIZE: entry.data[CONF_BYTESIZE],
+            CONF_PARITY: entry.data[CONF_PARITY],
+            CONF_STOPBITS: entry.data[CONF_STOPBITS],
+        },
     )
 
     # If the first refresh fails (e.g. raises ConfigEntryNotReady because the

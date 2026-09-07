@@ -208,6 +208,30 @@ async def ws_clear_diagnostic_log(
 
 
 @websocket_api.websocket_command({
+    vol.Required("type"): "modbus_usb/scan_bus",
+    vol.Required("entry_id"): cv.string,
+    vol.Required("baudrates"): [vol.All(vol.Coerce(int), vol.Range(min=1200, max=115200))],
+    vol.Optional("start_slave", default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=247)),
+    vol.Optional("end_slave", default=20): vol.All(vol.Coerce(int), vol.Range(min=1, max=247)),
+})
+@websocket_api.async_response
+async def ws_scan_bus(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Probe a bounded range of Modbus slave IDs and serial speeds."""
+    try:
+        coordinator = hass.data[DOMAIN][msg["entry_id"]]
+        result = await hass.async_add_executor_job(
+            coordinator.scan_bus,
+            msg["baudrates"], msg["start_slave"], msg["end_slave"],
+        )
+        connection.send_result(msg["id"], result)
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("RS-485 bus scan failed: %s", err)
+        connection.send_error(msg["id"], "scan_failed", str(err))
+
+
+@websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/save_device",
     vol.Required("entry_id"): cv.string,
     vol.Required("device"): dict,
@@ -630,6 +654,7 @@ async def async_register_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_get_data)
     websocket_api.async_register_command(hass, ws_diagnostic_read)
     websocket_api.async_register_command(hass, ws_clear_diagnostic_log)
+    websocket_api.async_register_command(hass, ws_scan_bus)
     websocket_api.async_register_command(hass, ws_save_device)
     websocket_api.async_register_command(hass, ws_delete_device)
     websocket_api.async_register_command(hass, ws_save_entity)

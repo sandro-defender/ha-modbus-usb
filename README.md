@@ -196,6 +196,8 @@ Both services take `entry_id` (config entry ID from **Settings → Devices & Ser
 
 Open **Modbus USB → Diagnostics** to confirm the serial port is connected, inspect successful and failed reads, and run a direct register read. The sidebar keeps the most recent 200 decoded Modbus transactions (reads and writes) for the current Home Assistant session. It shows the slave ID, address, returned value or error, and response time; use **Copy** to include the log in a support request.
 
+Use **Find RS-485 Devices** when the slave ID or baud rate is unknown. Start with IDs `1–20` and common speeds such as `9600,19200,38400`; expand to `1–247` only if needed, because a full scan can take several minutes. The scanner pauses normal Modbus traffic while it probes and restores the configured connection when finished. A detected *exception response* still confirms that a device answered at that slave ID and baud rate.
+
 The activity log is not a raw byte capture. For raw Pymodbus frame-level output, enable debug logging for `pymodbus` and `custom_components.modbus_usb` in Home Assistant's logger configuration.
 
 ```yaml

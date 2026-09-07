@@ -176,6 +176,16 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         if error:
             item["error"] = str(error)
         self.transaction_log.appendleft(item)
+        if error:
+            _LOGGER.warning(
+                "RS-485 %s failed: slave=%s address=%s error=%s",
+                operation, slave, address, error,
+            )
+        else:
+            _LOGGER.debug(
+                "RS-485 %s: slave=%s address=%s value=%s result=%s duration=%.1fms",
+                operation, slave, address, value, result, duration_ms or 0,
+            )
 
     def get_diagnostics(self) -> dict[str, Any]:
         """Return a serial-health snapshot and rolling RS-485 transaction log."""

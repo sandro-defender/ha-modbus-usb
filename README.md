@@ -198,6 +198,15 @@ Open **Modbus USB → Diagnostics** to confirm the serial port is connected, ins
 
 The activity log is not a raw byte capture. For raw Pymodbus frame-level output, enable debug logging for `pymodbus` and `custom_components.modbus_usb` in Home Assistant's logger configuration.
 
+```yaml
+# configuration.yaml — temporary diagnostics logging
+logger:
+  default: warning
+  logs:
+    custom_components.modbus_usb: debug
+    pymodbus: debug
+```
+
 If the port is disconnected, check the adapter path, USB permissions/passthrough, A/B polarity, serial settings, bus termination, and that every device has a unique slave ID.
 
 ### `modbus_usb.read_register`

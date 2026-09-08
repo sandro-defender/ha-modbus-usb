@@ -38,6 +38,7 @@
       min-height: 100vh;
       overflow-x: hidden;
       line-height: 1.5;
+      touch-action: manipulation;
     }
 
     .skip-link {
@@ -150,11 +151,11 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 1.35rem;
       box-shadow: 0 0 24px rgba(59,130,246,0.4);
       animation: pulseGlow 3.5s ease-in-out infinite;
       flex-shrink: 0;
     }
+    .header-icon svg { width: 24px; height: 24px; stroke: currentColor; }
     @keyframes pulseGlow {
       0%, 100% { box-shadow: 0 0 20px rgba(59,130,246,0.35); }
       50% { box-shadow: 0 0 35px rgba(99,102,241,0.65), 0 0 60px rgba(139,92,246,0.25); }
@@ -335,7 +336,9 @@
       gap: 0.45rem;
       white-space: nowrap;
       font-family: inherit;
+      min-height: 44px;
     }
+    .nav-icon { width: 17px; height: 17px; flex: 0 0 auto; stroke: currentColor; stroke-width: 1.9; fill: none; stroke-linecap: round; stroke-linejoin: round; }
     .nav-tab:hover { color: var(--text-main); background: rgba(255,255,255,0.04); }
     .nav-tab.active {
       background: linear-gradient(135deg, rgba(59,130,246,0.22), rgba(139,92,246,0.16));
@@ -355,6 +358,7 @@
     .tab-pane { display: none; }
     .tab-pane.active { display: block; animation: tabFadeIn 0.25s ease-out; }
     .tab-pane[hidden] { display: none !important; }
+    .tab-pane :focus { scroll-margin-top: 7rem; }
     @keyframes tabFadeIn {
       from { opacity: 0; transform: translateY(6px); }
       to { opacity: 1; transform: translateY(0); }
@@ -1042,7 +1046,7 @@
       .app { padding: 0 0.7rem 1.25rem; }
       .header { padding: 0.75rem 0; margin-bottom: 0.8rem; gap: 0.65rem; }
       .header-left { gap: 0.6rem; min-width: 0; }
-      .header-icon { width: 38px; height: 38px; border-radius: 10px; font-size: 1.15rem; }
+      .header-icon { width: 38px; height: 38px; border-radius: 10px; }
       .header-title h1 { font-size: 1.08rem; }
       .header-title p { font-size: 0.68rem; line-height: 1.3; }
       .header-right { width: 100%; gap: 0.5rem; }
@@ -1061,8 +1065,8 @@
       .diag-read-write-actions .form-group { min-width: 0; margin: 0; }
       .diag-read-write-actions .diag-action-button { margin: 0; min-width: 0; }
       .diag-read-write-actions .btn { width: 100%; }
-      .btn { min-height: 38px; justify-content: center; }
-      .btn-sm { min-height: 34px; }
+      .btn { min-height: 44px; justify-content: center; }
+      .btn-sm { min-height: 44px; }
       .device-card { border-radius: 12px; }
       .device-card-header { padding: 0.85rem; align-items: stretch; }
       .device-header-left { align-items: flex-start; gap: 0.65rem; }
@@ -1106,7 +1110,9 @@
     <!-- Header -->
     <header class="header">
       <div class="header-left">
-        <div class="header-icon">🔌</div>
+        <div class="header-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M8 7v4a4 4 0 0 0 8 0V7M10 4v4M14 4v4M12 15v5M8 20h8" /></svg>
+        </div>
         <div class="header-title">
           <h1>Modbus USB Controller</h1>
           <p id="header-subtitle">
@@ -1142,22 +1148,28 @@
     <!-- Navigation Tabs -->
     <nav class="nav-tabs" role="tablist">
       <button class="nav-tab active" id="tab-btn-devices" role="tab" aria-selected="true" aria-controls="pane-devices" tabindex="0" onclick="switchTab('devices')">
-        🎛 Devices <span class="tab-count" id="count-devices">0</span>
+        <svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16M9 4v6M15 14v6" /></svg>
+        Devices <span class="tab-count" id="count-devices">0</span>
       </button>
       <button class="nav-tab" id="tab-btn-templates" role="tab" aria-selected="false" aria-controls="pane-templates" tabindex="-1" onclick="switchTab('templates')">
-        📑 Device Templates <span class="tab-count" id="count-templates">0</span>
+        <svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9zM14 3v6h6M8 13h8M8 17h6" /></svg>
+        Device Templates <span class="tab-count" id="count-templates">0</span>
       </button>
       <button class="nav-tab" id="tab-btn-dashboard" role="tab" aria-selected="false" aria-controls="pane-dashboard" tabindex="-1" onclick="switchTab('dashboard')">
-        📊 Live Dashboard
+        <svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></svg>
+        Live Dashboard
       </button>
       <button class="nav-tab" id="tab-btn-entities" role="tab" aria-selected="false" aria-controls="pane-entities" tabindex="-1" onclick="switchTab('entities')">
-        📋 All Entities <span class="tab-count" id="count-entities">0</span>
+        <svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" /></svg>
+        All Entities <span class="tab-count" id="count-entities">0</span>
       </button>
       <button class="nav-tab" id="tab-btn-hub" role="tab" aria-selected="false" aria-controls="pane-hub" tabindex="-1" onclick="switchTab('hub')">
-        🔗 Hub &amp; Serial
+        <svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.07.07l2-2A5 5 0 0 0 12 4l-1.15 1.15M14 11a5 5 0 0 0-7.07-.07l-2 2A5 5 0 0 0 12 20l1.15-1.15" /></svg>
+        Hub &amp; Serial
       </button>
       <button class="nav-tab" id="tab-btn-diag" role="tab" aria-selected="false" aria-controls="pane-diag" tabindex="-1" onclick="switchTab('diag')">
-        🔬 Diagnostics
+        <svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M9 3h6M12 3v7l4.5 7.5A2.5 2.5 0 0 1 14.35 21h-4.7a2.5 2.5 0 0 1-2.15-3.5L12 10M9 16h6" /></svg>
+        Diagnostics
       </button>
     </nav>
 

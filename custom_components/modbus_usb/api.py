@@ -351,15 +351,11 @@ async def ws_save_device(
 
         existing_idx = next((i for i, d in enumerate(devices) if d.get("id") == device_id), None)
         if existing_idx is not None:
-            previous_slave_id = devices[existing_idx].get(CONF_SLAVE_ID)
             devices[existing_idx] = device
-            # A sidebar device owns the address of its attached entities.  The
-            # template initially copies this value into each entity, so keep
-            # them in sync when the user changes the device's slave ID later.
-            if (
-                device.get(CONF_SLAVE_ID) is not None
-                and device.get(CONF_SLAVE_ID) != previous_slave_id
-            ):
+            # A sidebar device owns the address of its attached entities. The
+            # template copies this value into each entity on creation, so sync
+            # every save too: it repairs old installations with mixed IDs.
+            if device.get(CONF_SLAVE_ID) is not None:
                 entities = [
                     {
                         **entity,

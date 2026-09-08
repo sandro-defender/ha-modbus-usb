@@ -67,6 +67,28 @@ from .templates import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _list_serial_ports() -> list[dict[str, str]]:
+    """Return serial ports visible to the Home Assistant host."""
+    try:
+        from serial.tools import list_ports
+    except ImportError:
+        _LOGGER.warning("USB port scanning is unavailable because pyserial is missing")
+        return []
+
+    ports: list[dict[str, str]] = []
+    for port in list_ports.comports():
+        details = " · ".join(
+            value for value in (port.manufacturer, port.product, port.hwid)
+            if value and value != "n/a"
+        )
+        ports.append({
+            "port": port.device,
+            "description": port.description or "Serial device",
+            "details": details,
+        })
+    return sorted(ports, key=lambda item: item["port"])
+
+
 def _get_entry(hass: HomeAssistant, entry_id: str):
     """Retrieve config entry by ID or raise an error."""
     entry = hass.config_entries.async_get_entry(entry_id)
@@ -445,6 +467,22 @@ async def ws_scan_bus(
     except Exception as err:  # noqa: BLE001
         _LOGGER.warning("RS-485 bus scan failed: %s", err)
         connection.send_error(msg["id"], "scan_failed", str(err))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "modbus_usb/scan_usb_ports",
+})
+@websocket_api.async_response
+async def ws_scan_usb_ports(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """List USB and other serial adapters available to Home Assistant."""
+    try:
+        ports = await hass.async_add_executor_job(_list_serial_ports)
+        connection.send_result(msg["id"], {"ports": ports})
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("Serial-port scan failed: %s", err)
+        connection.send_error(msg["id"], "port_scan_failed", str(err))
 
 
 @websocket_api.websocket_command({
@@ -919,6 +957,7 @@ async def async_register_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_test_device_entities)
     websocket_api.async_register_command(hass, ws_clear_diagnostic_log)
     websocket_api.async_register_command(hass, ws_scan_bus)
+    websocket_api.async_register_command(hass, ws_scan_usb_ports)
     websocket_api.async_register_command(hass, ws_save_device)
     websocket_api.async_register_command(hass, ws_delete_device)
     websocket_api.async_register_command(hass, ws_save_entity)

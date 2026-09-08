@@ -9,7 +9,9 @@ Provides complete sidebar UI management for:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 import uuid
 from typing import Any
 
@@ -255,6 +257,25 @@ def _entity_slave_id(entry, entity: dict[str, Any]) -> int:
     return int(slave_id if slave_id is not None else entry.data.get(CONF_SLAVE_ID, 1))
 
 
+async def _async_write_configured_switch(
+    hass: HomeAssistant, entry, entity: dict[str, Any], state: bool
+) -> int:
+    """Write one configured switch and return its resolved slave ID."""
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    slave_id = _entity_slave_id(entry, entity)
+    address = int(entity[CONF_ADDRESS])
+    if entity.get(CONF_REGISTER_TYPE) == REGISTER_TYPE_COIL:
+        await hass.async_add_executor_job(
+            coordinator.write_coil, address, state, slave_id
+        )
+    else:
+        value = entity.get(CONF_ON_VALUE, 1) if state else entity.get(CONF_OFF_VALUE, 0)
+        await hass.async_add_executor_job(
+            coordinator.write_register, address, int(value), slave_id
+        )
+    return slave_id
+
+
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/write_entity",
     vol.Required("entry_id"): cv.string,
@@ -280,22 +301,109 @@ async def ws_write_entity(
         if entity.get(CONF_ENTITY_TYPE) != "switch":
             raise ValueError("Only switch entities can be written")
 
-        coordinator = hass.data[DOMAIN][entry.entry_id]
-        slave_id = _entity_slave_id(entry, entity)
-        address = int(entity[CONF_ADDRESS])
-        if entity.get(CONF_REGISTER_TYPE) == REGISTER_TYPE_COIL:
-            await hass.async_add_executor_job(
-                coordinator.write_coil, address, msg["state"], slave_id
-            )
-        else:
-            value = entity.get(CONF_ON_VALUE, 1) if msg["state"] else entity.get(CONF_OFF_VALUE, 0)
-            await hass.async_add_executor_job(
-                coordinator.write_register, address, int(value), slave_id
-            )
+        slave_id = await _async_write_configured_switch(
+            hass, entry, entity, msg["state"]
+        )
         connection.send_result(msg["id"], {"success": True, "slave_id": slave_id})
     except Exception as err:  # noqa: BLE001
         _LOGGER.warning("Configured switch write failed: %s", err)
         connection.send_error(msg["id"], "write_failed", str(err))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "modbus_usb/test_device_entities",
+    vol.Required("entry_id"): cv.string,
+    vol.Required("device_id"): cv.string,
+})
+@websocket_api.async_response
+async def ws_test_device_entities(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Test all configured entities; safely cycle switches and read the rest."""
+    try:
+        entry = _get_entry(hass, msg["entry_id"])
+        device = next(
+            (item for item in entry.options.get(CONF_DEVICES, [])
+             if item.get(CONF_ENTITY_ID) == msg["device_id"]),
+            None,
+        )
+        if device is None:
+            raise ValueError("Configured device was not found")
+
+        entities = [
+            item for item in entry.options.get(CONF_ENTITIES, [])
+            if item.get(CONF_DEVICE_ID) == msg["device_id"]
+        ]
+        if not entities:
+            raise ValueError("This device has no configured entities to test")
+
+        started = time.monotonic()
+        results: list[dict[str, Any]] = []
+        for entity in entities:
+            result: dict[str, Any] = {
+                "name": entity.get(CONF_NAME, entity.get(CONF_ENTITY_ID, "Switch")),
+                "address": entity.get(CONF_ADDRESS),
+                "register_type": entity.get(CONF_REGISTER_TYPE),
+                "entity_type": entity.get(CONF_ENTITY_TYPE),
+            }
+            if entity.get(CONF_ENTITY_TYPE) != "switch":
+                try:
+                    slave_id = _entity_slave_id(entry, entity)
+                    coordinator = hass.data[DOMAIN][entry.entry_id]
+                    value = await hass.async_add_executor_job(
+                        coordinator.read_entity_value, entity, slave_id
+                    )
+                    result["slave_id"] = slave_id
+                    result["read"] = {"success": True, "value": value}
+                except Exception as err:  # noqa: BLE001
+                    result["read"] = {"success": False, "error": str(err)}
+                results.append(result)
+                await asyncio.sleep(0.1)
+                continue
+
+            result["on"] = {"success": False}
+            result["off"] = {"success": False}
+            try:
+                result["slave_id"] = await _async_write_configured_switch(
+                    hass, entry, entity, True
+                )
+                result["on"] = {"success": True, "message": "acknowledged"}
+            except Exception as err:  # noqa: BLE001
+                result["on"] = {"success": False, "error": str(err)}
+
+            # Keep each output on briefly, then always attempt the safe OFF
+            # command even if the ON request failed.
+            await asyncio.sleep(0.35)
+            try:
+                result["slave_id"] = await _async_write_configured_switch(
+                    hass, entry, entity, False
+                )
+                result["off"] = {"success": True, "message": "acknowledged"}
+            except Exception as err:  # noqa: BLE001
+                result["off"] = {"success": False, "error": str(err)}
+            results.append(result)
+            await asyncio.sleep(0.15)
+
+        successful_steps = sum(
+            int(step["read"].get("success", False))
+            if "read" in step
+            else sum(int(step[phase].get("success", False)) for phase in ("on", "off"))
+            for step in results
+        )
+        total_steps = sum(1 if "read" in step else 2 for step in results)
+        connection.send_result(msg["id"], {
+            "device_name": device.get(CONF_NAME, msg["device_id"]),
+            "entity_count": len(results),
+            "switch_count": sum(item.get("entity_type") == "switch" for item in results),
+            "read_count": sum(item.get("entity_type") != "switch" for item in results),
+            "successful_steps": successful_steps,
+            "failed_steps": total_steps - successful_steps,
+            "duration_ms": round((time.monotonic() - started) * 1000, 1),
+            "results": results,
+        })
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("Device entity test failed: %s", err)
+        connection.send_error(msg["id"], "device_test_failed", str(err))
 
 
 @websocket_api.websocket_command({
@@ -808,6 +916,7 @@ async def async_register_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_diagnostic_read)
     websocket_api.async_register_command(hass, ws_diagnostic_write)
     websocket_api.async_register_command(hass, ws_write_entity)
+    websocket_api.async_register_command(hass, ws_test_device_entities)
     websocket_api.async_register_command(hass, ws_clear_diagnostic_log)
     websocket_api.async_register_command(hass, ws_scan_bus)
     websocket_api.async_register_command(hass, ws_save_device)

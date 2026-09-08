@@ -474,6 +474,12 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             )
             raise
 
+    def read_entity_value(self, entity: dict[str, Any], slave: int) -> Any:
+        """Read one configured entity for a user-requested device test."""
+        test_entity = dict(entity)
+        test_entity[CONF_SLAVE_ID] = slave
+        return self._read_one(test_entity)
+
     def write_coil(self, address: int, value: bool, slave: int | None = None) -> None:
         """Write a coil value (used by switches). Runs synchronously - call via executor."""
         target_slave = int(slave if slave is not None else self.slave_id)

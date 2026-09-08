@@ -461,6 +461,18 @@
       grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
       gap: 0.75rem;
     }
+    .device-test-report {
+      margin: 0 1.25rem 1rem;
+      padding: 0.85rem;
+      border: 1px solid rgba(59,130,246,0.3);
+      border-radius: 10px;
+      background: rgba(30,41,59,0.42);
+      font-size: 0.75rem;
+    }
+    .device-test-report summary { cursor: pointer; color: #e2e8f0; font-weight: 700; }
+    .device-test-report ul { margin: 0.65rem 0 0; padding-left: 1.1rem; display: grid; gap: 0.35rem; }
+    .device-test-ok { color: #6ee7b7; }
+    .device-test-fail { color: #fca5a5; }
     .device-entity-item {
       background: rgba(255,255,255,0.025);
       border: 1px solid rgba(255,255,255,0.05);
@@ -991,6 +1003,7 @@
       .device-header-actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 0.45rem; }
       .device-header-actions .btn { width: 100%; padding-inline: 0.45rem; }
       .device-entities-list { padding: 0.7rem; grid-template-columns: 1fr; gap: 0.55rem; }
+      .device-test-report { margin: 0 0.7rem 0.7rem; }
       .device-entity-item { padding: 0.65rem; }
       .ent-right { gap: 0.35rem; }
       .template-grid { grid-template-columns: 1fr; gap: 0.85rem; }
@@ -1762,6 +1775,7 @@
     let _templates = [];
     let _statesCache = {};
     let _dashboardFilter = 'all';
+    const _deviceTestReports = {};
 
     // Standalone fallback mock data for testing/preview outside Home Assistant
     const MOCK_DATA = {
@@ -2060,6 +2074,17 @@ entities:
       if (type === 'scan_bus') {
         return { found: [{ slave_id: 1, baudrate: 9600, response: 'register response' }], probed: 20 };
       }
+      if (type === 'test_device_entities') {
+        const device = entry.devices.find(d => d.id === payload.device_id);
+        const deviceEntities = entry.entities.filter(e => e.device_id === payload.device_id);
+        const switches = deviceEntities.filter(e => e.entity_type === 'switch');
+        return { device_name: device?.name || 'Device', entity_count: deviceEntities.length,
+          switch_count: switches.length, read_count: deviceEntities.length - switches.length,
+          successful_steps: deviceEntities.length + switches.length, failed_steps: 0, duration_ms: deviceEntities.length * 500,
+          results: deviceEntities.map(e => e.entity_type === 'switch'
+            ? { name: e.name, address: e.address, register_type: e.register_type, entity_type: 'switch', on: { success: true, message: 'acknowledged' }, off: { success: true, message: 'acknowledged' } }
+            : { name: e.name, address: e.address, register_type: e.register_type, entity_type: e.entity_type, read: { success: true, value: 'sample value' } }) };
+      }
       if (type === 'save_device') {
         const dev = { ...payload.device };
         if (!dev.id) dev.id = 'dev_' + Math.random().toString(36).substring(2, 9);
@@ -2288,6 +2313,7 @@ entities:
 
       container.innerHTML = devices.map(dev => {
         const devEntities = entities.filter(e => e.device_id === dev.id);
+        const switchCount = devEntities.filter(e => e.entity_type === 'switch').length;
         const slaveId = dev.slave_id != null ? dev.slave_id : (entry.hub?.slave_id || 1);
         const health = (entry.diagnostics?.devices || []).find(item => item.device_id === dev.id);
         const healthBadge = !health || health.status === 'unknown'
@@ -2392,6 +2418,7 @@ entities:
                 <button class="btn btn-primary btn-sm" onclick="openAddEntityModal('${dev.id}')" title="Add a custom entity to this device">
                   ➕ Add Entity
                 </button>
+                ${devEntities.length ? `<button class="btn btn-secondary btn-sm" id="device-test-${dev.id}" onclick="runDeviceEntityTest('${dev.id}')" title="Read all configured entities and cycle switches one at a time">🧪 Test device</button>` : ''}
                 <button class="btn btn-ghost btn-sm" onclick="openEditDeviceModal('${dev.id}')" title="Rename or edit slave ID">
                   ✏ Edit
                 </button>
@@ -2404,9 +2431,58 @@ entities:
             <div class="device-entities-list">
               ${entitiesHtml}
             </div>
+            ${_deviceTestReports[dev.id] ? renderDeviceTestReport(_deviceTestReports[dev.id]) : ''}
           </div>
         `;
       }).join('');
+    }
+
+    function renderDeviceTestReport(report) {
+      const summaryClass = report.failed_steps ? 'device-test-fail' : 'device-test-ok';
+      const rows = (report.results || []).map(item => {
+        if (item.read) {
+          const read = item.read.success ? `Read value: ${item.read.value}` : `Read failed: ${item.read.error || 'unknown error'}`;
+          return `<li class="${item.read.success ? 'device-test-ok' : 'device-test-fail'}"><strong>${escapeHtml(item.name)}</strong> — ${escapeHtml(read)}</li>`;
+        }
+        const on = item.on?.success ? 'ON acknowledged' : `ON failed: ${item.on?.error || 'unknown error'}`;
+        const off = item.off?.success ? 'OFF acknowledged' : `OFF failed: ${item.off?.error || 'unknown error'}`;
+        const rowClass = item.on?.success && item.off?.success ? 'device-test-ok' : 'device-test-fail';
+        return `<li class="${rowClass}"><strong>${escapeHtml(item.name)}</strong> — ${escapeHtml(on)}; ${escapeHtml(off)}</li>`;
+      }).join('');
+      return `<details class="device-test-report" open>
+        <summary class="${summaryClass}">Device test report — ${report.successful_steps}/${report.successful_steps + report.failed_steps} requests successful${report.failed_steps ? `, ${report.failed_steps} failed` : ''} (${Math.round(report.duration_ms)} ms)</summary>
+        <p style="margin-top:0.55rem; color:var(--text-muted);">Readings test configured sensors, binary sensors, and numbers. Switches turn on briefly, then off. An acknowledgement confirms Modbus communication, not the physical relay position.</p>
+        <ul>${rows}</ul>
+      </details>`;
+    }
+
+    async function runDeviceEntityTest(deviceId) {
+      const entry = getCurrentEntry();
+      const device = (entry?.devices || []).find(item => item.id === deviceId);
+      const deviceEntities = (entry?.entities || []).filter(item => item.device_id === deviceId);
+      const switches = deviceEntities.filter(item => item.entity_type === 'switch');
+      if (!entry || !device || deviceEntities.length === 0) {
+        toast('This device has no configured entities to test', 'err');
+        return;
+      }
+      const switchWarning = switches.length ? `\n\n${switches.length} switch${switches.length === 1 ? '' : 'es'} will turn ON briefly, then OFF. This can activate connected equipment.` : '';
+      const warning = `Test all ${deviceEntities.length} configured entities on ${device.name}?\n\nSensors, binary sensors, and numbers will be read once.${switchWarning}`;
+      if (!confirm(warning)) return;
+
+      const button = document.getElementById(`device-test-${deviceId}`);
+      if (button) { button.disabled = true; button.textContent = '⏳ Testing…'; }
+      try {
+        const report = await apiCall('test_device_entities', {
+          entry_id: entry.entry_id,
+          device_id: deviceId,
+        });
+        _deviceTestReports[deviceId] = report;
+        renderDevicesTab();
+        toast(report.failed_steps ? 'Device test finished with errors' : 'Device test completed', report.failed_steps ? 'err' : 'ok');
+      } catch (err) {
+        toast('Device test failed: ' + err.message, 'err');
+        if (button) { button.disabled = false; button.textContent = '🧪 Test device'; }
+      }
     }
 
     // ─── TAB 2: RENDER TEMPLATES ────────────────────────────────

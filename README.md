@@ -51,7 +51,7 @@ Multiple meters, relays, and sensors can share the same RS-485 cable. Each devic
 Open **Modbus USB** in the Home Assistant sidebar after the integration is loaded.
 
 - **Devices** — Add, edit, and remove slaves. Apply a template or add entities on a specific device.
-- **Templates** — YAML files in `config/modbus_usb_templates/`. Create, edit, duplicate, and delete from the panel. Empty folder is seeded with bundled starters.
+- **Templates** — YAML files in `config/modbus_usb_templates/`. Create, edit, duplicate, and delete from the panel. Bundled templates stay read-only until you choose **Save to HA**.
 - **Dashboard** — Live tiles, switch toggles, number controls, device chips, counts (total / by type / unavailable), refresh ~15 s.
 - **Entities** — Full table (device, type, register, address, data type, scale, unit) with inline edit / delete.
 - **Hub** — Serial settings and poll interval (1–3600 s) without walking the options-flow wizard.
@@ -68,7 +68,7 @@ Open **Modbus USB** in the Home Assistant sidebar after the integration is loade
 
 ## Bundled templates
 
-Bundled templates are available in the **Templates** tab but are not copied into `config/modbus_usb_templates/` automatically. Use **Download** to save a YAML file locally, or edit/save it in the panel when you want to create your own copy. Treat templates as starting points — verify addresses against your datasheet.
+Bundled templates are available in the **Templates** tab but are not copied into `config/modbus_usb_templates/` automatically. Choose **Save to HA** when you want to store a template inside Home Assistant; it then becomes editable. Treat templates as starting points — verify addresses against your datasheet.
 
 | File | Device | Entities |
 | --- | --- | --- |

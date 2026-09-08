@@ -38,7 +38,9 @@ def ensure_templates_dir(hass: HomeAssistant) -> str:
     return user_dir
 
 
-def _parse_template_file(filepath: str, filename: str) -> dict[str, Any] | None:
+def _parse_template_file(
+    filepath: str, filename: str, source: str = "user"
+) -> dict[str, Any] | None:
     """Parse a single YAML template file."""
     try:
         with open(filepath, "r", encoding="utf-8") as f:
@@ -51,6 +53,7 @@ def _parse_template_file(filepath: str, filename: str) -> dict[str, Any] | None:
         return {
             "id": template_id,
             "filename": filename,
+            "source": source,
             "name": data.get("name", template_id),
             "manufacturer": data.get("manufacturer", "Generic"),
             "model": data.get("model", "Modbus Device"),
@@ -85,7 +88,7 @@ def load_templates_sync(hass: HomeAssistant) -> list[dict[str, Any]]:
         for fname in sorted(os.listdir(user_dir)):
             if fname.endswith((".yaml", ".yml")):
                 fpath = os.path.join(user_dir, fname)
-                tpl = _parse_template_file(fpath, fname)
+                tpl = _parse_template_file(fpath, fname, "user")
                 if tpl:
                     templates.append(tpl)
                     seen_ids.add(tpl["id"])
@@ -98,7 +101,7 @@ def load_templates_sync(hass: HomeAssistant) -> list[dict[str, Any]]:
             if fname.endswith((".yaml", ".yml")):
                 tid = os.path.splitext(fname)[0]
                 fpath = os.path.join(BUNDLED_TEMPLATES_DIR, fname)
-                bundled_tpl = _parse_template_file(fpath, fname)
+                bundled_tpl = _parse_template_file(fpath, fname, "bundled")
                 if not bundled_tpl:
                     continue
                 if tid not in seen_ids:

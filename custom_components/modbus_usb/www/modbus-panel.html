@@ -572,6 +572,7 @@
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
       gap: 1.25rem;
+      min-width: 0;
     }
     .template-card {
       background: var(--bg-card);
@@ -581,6 +582,8 @@
       display: flex;
       flex-direction: column;
       justify-content: space-between;
+      min-width: 0;
+      overflow: hidden;
       backdrop-filter: blur(16px);
       transition: all 0.22s;
     }
@@ -647,10 +650,12 @@
       display: flex;
       align-items: center;
       gap: 0.5rem;
+      flex-wrap: wrap;
       margin-top: auto;
       padding-top: 0.75rem;
       border-top: 1px solid rgba(255,255,255,0.06);
     }
+    .template-actions .btn { min-width: 0; }
 
     /* ── DASHBOARD ENTITY TILES ─────────────────────────────────── */
     .filter-bar {
@@ -993,8 +998,8 @@
       .template-photo { height: 120px; }
       .template-header { gap: 0.5rem; }
       .template-title h3 { font-size: 0.9rem; overflow-wrap: anywhere; }
-      .template-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.45rem; }
-      .template-actions .btn { width: 100%; padding-inline: 0.35rem; }
+      .template-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45rem; }
+      .template-actions .btn { width: 100%; min-width: 0; padding-inline: 0.35rem; white-space: normal; overflow-wrap: anywhere; }
       .table-wrapper { margin: 0 -0.25rem; border-radius: 9px; }
       .table-wrapper table { min-width: 680px; }
       .diag-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
@@ -2361,6 +2366,7 @@ entities:
           ? `<a href="${dev.info_url}" target="_blank" rel="noopener noreferrer" title="Open device information">${avatarImage}</a>`
           : avatarImage;
 
+        const isSavedInHa = tpl.source === 'user';
         return `
           <div class="device-card" id="dev-card-${dev.id}">
             <div class="device-card-header">
@@ -2460,40 +2466,35 @@ entities:
               <button class="btn btn-primary btn-sm" onclick="useTemplateToCreateDevice('${tpl.filename}')" title="Create a new device using this template">
                 🚀 Use Template
               </button>
-              <button class="btn btn-secondary btn-sm" onclick="openTemplateEditorModal('${tpl.filename}')" title="Edit YAML file">
-                ✏ Edit YAML
-              </button>
-              <button class="btn btn-ghost btn-sm" onclick="downloadTemplate('${tpl.filename}')" title="Download this YAML template">
-                ⇩ Download
-              </button>
+              ${isSavedInHa
+                ? `<button class="btn btn-secondary btn-sm" onclick="openTemplateEditorModal('${tpl.filename}')" title="Edit the copy saved in Home Assistant">✏ Edit YAML</button>`
+                : `<button class="btn btn-secondary btn-sm" onclick="saveTemplateToHomeAssistant('${tpl.filename}')" title="Save this template to Home Assistant">⇩ Save to HA</button>`}
               <button class="btn btn-ghost btn-sm" onclick="duplicateTemplate('${tpl.filename}')" title="Duplicate template">
                 📋 Duplicate
               </button>
-              <button class="btn btn-danger btn-sm" onclick="confirmDeleteTemplate('${tpl.filename}')" title="Delete YAML file">
-                🗑
-              </button>
+              ${isSavedInHa ? `<button class="btn btn-danger btn-sm" onclick="confirmDeleteTemplate('${tpl.filename}')" title="Delete the saved YAML file">🗑 Delete</button>` : ''}
             </div>
           </div>
         `;
       }).join('');
     }
 
-    function downloadTemplate(filename) {
+    async function saveTemplateToHomeAssistant(filename) {
       const template = _templates.find(item => item.filename === filename);
       if (!template?.raw_yaml) {
-        toast('Template content is not available for download', 'err');
+        toast('Template content is not available to save', 'err');
         return;
       }
-      const blob = new Blob([template.raw_yaml], { type: 'application/x-yaml;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = template.filename || 'modbus-template.yaml';
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-      toast(`Downloaded ${link.download}`, 'ok');
+      try {
+        await apiCall('save_template', {
+          filename: template.filename,
+          content: template.raw_yaml
+        });
+        toast(`Saved ${template.filename} in Home Assistant`, 'ok');
+        await refreshData();
+      } catch (e) {
+        toast('Failed to save template: ' + e.message, 'err');
+      }
     }
 
     // ─── TAB 3: RENDER DASHBOARD ────────────────────────────────

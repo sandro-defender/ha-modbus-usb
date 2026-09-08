@@ -14,6 +14,7 @@ id: eletechsup-R413E16
 name: eletechsup R413E16
 manufacturer: eletechsup
 model: R413E16
+tested: true
 default_slave_id: 1
 image: "/modbus_usb_panel/images/eletechsup-r413e16.jpg"
 info_url: "https://eletechsup.com/products/r413e16-rs485-relay-16ch-multifunction-npn-pnp-io-control-core-board-modbus-rtu-eletechsup-oem-odm?_pos=21&_sid=7b35d3777&_ss=r"

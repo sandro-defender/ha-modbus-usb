@@ -2437,6 +2437,10 @@ entities:
         `).join('');
 
         const extraCount = entCount > 5 ? `<div style="text-align:center; font-size:0.68rem; color:var(--text-dim); padding-top:2px;">+ ${entCount - 5} more entities</div>` : '';
+        const isSavedInHa = tpl.source === 'user';
+        const validationBadge = tpl.tested
+          ? '<span class="badge badge-green" title="Confirmed working with this integration">✓ Tested & confirmed</span>'
+          : '<span class="badge badge-amber" title="Not yet confirmed with this integration">○ Not yet tested</span>';
 
         return `
           <div class="template-card">
@@ -2448,6 +2452,7 @@ entities:
                   <div class="template-filename">${tpl.filename}</div>
                 </div>
                 <div class="flex gap-1" style="flex-direction:column; align-items:flex-end;">
+                  ${validationBadge}
                   <span class="badge badge-purple mono">Default Slave: ${tpl.default_slave_id || 1}</span>
                   <span class="badge badge-blue">${entCount} entities</span>
                 </div>

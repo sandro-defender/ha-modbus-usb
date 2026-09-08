@@ -57,6 +57,7 @@ def _parse_template_file(
             "name": data.get("name", template_id),
             "manufacturer": data.get("manufacturer", "Generic"),
             "model": data.get("model", "Modbus Device"),
+            "tested": bool(data.get("tested", False)),
             "default_slave_id": int(data.get("default_slave_id", 1)),
             "description": data.get("description", ""),
             "image": data.get("image") or data.get("picture") or "",
@@ -114,6 +115,8 @@ def load_templates_sync(hass: HomeAssistant) -> list[dict[str, Any]]:
                     for field in ("image", "info_url"):
                         if not user_tpl.get(field) and bundled_tpl.get(field):
                             user_tpl[field] = bundled_tpl[field]
+                    if bundled_tpl.get("tested"):
+                        user_tpl["tested"] = True
 
     return templates
 

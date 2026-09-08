@@ -964,13 +964,17 @@
       .hub-select-wrapper { flex: 1; min-width: 0; }
       .hub-select { width: 100%; min-width: 0; }
       .status-badge { padding: 0.35rem 0.55rem; font-size: 0.67rem; }
-      .nav-tabs { margin: 0 -0.1rem 1rem; padding: 0.25rem; gap: 0.25rem; scroll-snap-type: x proximity; }
-      .nav-tab { flex: 0 0 auto; min-width: 96px; font-size: 0.7rem; padding: 0.55rem 0.55rem; scroll-snap-align: start; }
+      .nav-tabs { margin: 0 -0.1rem 1rem; padding: 0.25rem; gap: 0.25rem; flex-wrap: wrap; overflow: visible; }
+      .nav-tab { flex: 1 1 calc(33.333% - 0.25rem); min-width: 0; font-size: 0.7rem; padding: 0.55rem 0.3rem; }
       .nav-tab .tab-count { padding: 0.08rem 0.35rem; }
       .card { padding: 0.9rem; border-radius: 12px; margin-bottom: 0.85rem; }
       .card-title { font-size: 0.92rem; }
       .card-subtitle { font-size: 0.7rem; }
       .form-grid-2, .form-grid-3 { grid-template-columns: 1fr; }
+      .diag-read-write-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: 0.65rem; }
+      .diag-read-write-actions .form-group { min-width: 0; margin: 0; }
+      .diag-read-write-actions .diag-action-button { margin: 0; min-width: 0; }
+      .diag-read-write-actions .btn { width: 100%; }
       .btn { min-height: 38px; justify-content: center; }
       .btn-sm { min-height: 34px; }
       .device-card { border-radius: 12px; }
@@ -999,6 +1003,10 @@
       .modal-backdrop { padding: 0.5rem; align-items: flex-end; }
       .modal-box, .modal-box.modal-lg { width: 100%; max-width: none; max-height: 92vh; border-radius: 16px 16px 10px 10px; }
       .modal-body { max-height: calc(92vh - 130px); overflow-y: auto; }
+    }
+    @media (max-width: 390px) {
+      .nav-tab { flex-basis: calc(50% - 0.25rem); }
+      .diag-read-write-actions { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -1266,8 +1274,8 @@
             </select>
           </div>
         </div>
-        <div class="flex items-center gap-1">
-          <div class="form-group" style="margin-bottom:0; min-width:140px;">
+        <div class="diag-read-write-actions">
+          <div class="form-group">
             <label class="form-label">Data Type</label>
             <select class="form-select" id="diag-dtype">
               <option value="uint16">uint16 (1 word)</option>
@@ -1277,14 +1285,14 @@
               <option value="float32">float32 (2 words)</option>
             </select>
           </div>
-          <div style="margin-top:1.3rem;">
+          <div class="diag-action-button">
             <button class="btn btn-primary" id="btn-diag-read" onclick="doLiveRead()">▶ Read Register</button>
           </div>
-          <div class="form-group" style="margin:0 0 0 0.7rem; min-width:120px;">
+          <div class="form-group">
             <label class="form-label">Write Value</label>
             <input class="form-input mono" type="number" id="diag-write-value" value="1" />
           </div>
-          <div style="margin-top:1.3rem;">
+          <div class="diag-action-button">
             <button class="btn btn-secondary" id="btn-diag-write" onclick="doLiveWrite()">✎ Write Value</button>
           </div>
         </div>

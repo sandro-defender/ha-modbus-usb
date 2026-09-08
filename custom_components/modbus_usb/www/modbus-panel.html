@@ -1099,34 +1099,6 @@
       <div class="card">
         <div class="card-header">
           <div>
-            <div class="card-title">🔎 Find RS-485 Devices</div>
-            <div class="card-subtitle">Probes holding register 0 across slave IDs. Normal polling pauses during the scan.</div>
-          </div>
-        </div>
-        <div class="form-grid-3">
-          <div class="form-group">
-            <label class="form-label">Baud rates</label>
-            <input class="form-input mono" id="scan-baudrates" value="9600,19200,38400" placeholder="9600,19200" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">Start slave ID</label>
-            <input class="form-input mono" id="scan-start-slave" type="number" value="1" min="1" max="247" />
-          </div>
-          <div class="form-group">
-            <label class="form-label">End slave ID</label>
-            <input class="form-input mono" id="scan-end-slave" type="number" value="20" min="1" max="247" />
-          </div>
-        </div>
-        <div class="flex items-center gap-1">
-          <button class="btn btn-primary" id="btn-scan-bus" onclick="scanRs485Bus()">🔎 Scan RS-485 Bus</button>
-          <span class="text-muted text-sm">Start with IDs 1–20. A full 1–247 scan can take several minutes.</span>
-        </div>
-        <div id="scan-result-box" style="display:none; margin-top:1rem; padding:0.85rem; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.06); font-family:var(--font-mono); font-size:0.8rem;"></div>
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <div>
             <div class="card-title">📋 All Modbus Entities</div>
             <div class="card-subtitle">Complete registry of sensors, switches, binary sensors, and numbers</div>
           </div>
@@ -1192,6 +1164,38 @@
         </div>
         <div class="diag-grid" id="diag-health-grid"></div>
         <div id="diag-last-error" class="text-sm" style="display:none; margin-top:0.9rem; padding:0.8rem; border-radius:8px; background:rgba(239,68,68,0.1); color:#fca5a5; font-family:var(--font-mono);"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">🔎 Find RS-485 Devices</div>
+            <div class="card-subtitle">Probes holding register 0 across slave IDs. Normal polling pauses during the scan.</div>
+          </div>
+        </div>
+        <div class="form-grid-3">
+          <div class="form-group">
+            <label class="form-label">Baud rates</label>
+            <input class="form-input mono" id="scan-baudrates" value="9600,19200,38400" placeholder="9600,19200" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Start slave ID</label>
+            <input class="form-input mono" id="scan-start-slave" type="number" value="1" min="1" max="247" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">End slave ID</label>
+            <input class="form-input mono" id="scan-end-slave" type="number" value="20" min="1" max="247" />
+          </div>
+        </div>
+        <div class="flex items-center gap-1">
+          <button class="btn btn-primary" id="btn-scan-bus" onclick="scanRs485Bus()">🔎 Scan RS-485 Bus</button>
+          <span class="text-muted text-sm">Start with IDs 1–20. A full 1–247 scan can take several minutes.</span>
+        </div>
+        <div id="scan-result-box" style="display:none; margin-top:1rem; padding:0.85rem; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.06); font-family:var(--font-mono); font-size:0.8rem;"></div>
+        <div id="scan-progress-wrap" style="display:none; margin-top:0.7rem;">
+          <div class="flex justify-between text-sm text-muted"><span id="scan-progress-text">Preparing scan…</span><span id="scan-progress-percent">0%</span></div>
+          <div style="height:8px; margin-top:0.35rem; overflow:hidden; border-radius:99px; background:rgba(255,255,255,0.08);"><div id="scan-progress-bar" style="width:0%; height:100%; background:linear-gradient(90deg,#3b82f6,#34d399); transition:width .2s ease;"></div></div>
+        </div>
       </div>
 
       <div class="card">
@@ -2605,6 +2609,7 @@ entities:
     function renderDiagnosticsTab() {
       const entry = getCurrentEntry();
       const diag = entry?.diagnostics || {};
+      renderScanProgress(diag.scan || {});
       const health = diag.health || {};
       const connected = Boolean(diag.connected);
       const status = document.getElementById('diag-connection-status');
@@ -2658,6 +2663,34 @@ entities:
           <td>${item.duration_ms == null ? '—' : `${escapeHtml(item.duration_ms)} ms`}</td>
         </tr>`;
       }).join('');
+    }
+
+    function renderScanProgress(scan) {
+      const wrap = document.getElementById('scan-progress-wrap');
+      if (!wrap) return;
+      const total = Number(scan.total || 0);
+      const completed = Number(scan.completed || 0);
+      const percent = total ? Math.min(100, Math.round(completed / total * 100)) : 0;
+      if (!scan.active && !total) {
+        wrap.style.display = 'none';
+        return;
+      }
+      wrap.style.display = 'block';
+      document.getElementById('scan-progress-bar').style.width = `${percent}%`;
+      document.getElementById('scan-progress-percent').textContent = `${percent}%`;
+      document.getElementById('scan-progress-text').textContent = scan.active
+        ? `Scanning ${completed} of ${total} probes — ${scan.found || 0} device${scan.found === 1 ? '' : 's'} found`
+        : `Scan complete — ${completed} probes, ${scan.found || 0} device${scan.found === 1 ? '' : 's'} found`;
+    }
+
+    async function refreshScanProgress() {
+      try {
+        const data = await apiCall('get_data');
+        _entries = data.entries || _entries;
+        renderDiagnosticsTab();
+      } catch (e) {
+        // The completed scan call will surface the error in its result box.
+      }
     }
 
     async function copyDiagnosticLog() {
@@ -3407,6 +3440,7 @@ entities:
       box.style.display = 'block';
       box.style.color = '#93c5fd';
       box.textContent = `Scanning slave IDs ${startSlave}–${endSlave} at ${baudrates.join(', ')} baud…`;
+      const progressTimer = setInterval(refreshScanProgress, 500);
       try {
         const result = await apiCall('scan_bus', {
           entry_id: entry.entry_id, baudrates,
@@ -3421,6 +3455,8 @@ entities:
         box.style.color = '#f87171';
         box.textContent = `Scan failed: ${error.message}`;
       } finally {
+        clearInterval(progressTimer);
+        await refreshScanProgress();
         button.disabled = false;
         button.textContent = '🔎 Scan RS-485 Bus';
       }

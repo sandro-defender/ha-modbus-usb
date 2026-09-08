@@ -12,6 +12,8 @@ from .const import (
     CONF_BAUDRATE,
     CONF_BYTESIZE,
     CONF_DEVICES,
+    CONF_DEVICE_ID,
+    CONF_ENTITIES,
     CONF_MANUFACTURER,
     CONF_MODEL,
     CONF_NAME,
@@ -80,7 +82,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
             frontend_url_path="modbus-usb",
             # Change this asset version when the standalone sidebar HTML changes.
             # It prevents an already-open browser from retaining an old panel.
-            config={"url": "/modbus_usb_panel/modbus-panel.html?v=2.0.7"},
+            config={"url": "/modbus_usb_panel/modbus-panel.html?v=2.0.8"},
             require_admin=False,
         )
         _LOGGER.debug("Modbus USB sidebar panel registered")
@@ -195,3 +197,48 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await async_unregister_services(hass)
 
     return unload_ok
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, config_entry: ConfigEntry, device_entry
+) -> bool:
+    """Remove one child Modbus device from Home Assistant's device page.
+
+    The hub itself belongs to the config entry and is removed only by removing
+    the integration. Child devices use a hub-prefixed identifier, so they can
+    be safely removed from the HA device UI one at a time.
+    """
+    prefix = f"{config_entry.entry_id}_"
+    child_identifier = next(
+        (
+            identifier
+            for identifier in device_entry.identifiers
+            if identifier[0] == DOMAIN and identifier[1].startswith(prefix)
+        ),
+        None,
+    )
+    if child_identifier is None:
+        return False
+
+    child_id = child_identifier[1][len(prefix):]
+    new_options = dict(config_entry.options or {})
+    new_options[CONF_DEVICES] = [
+        device for device in new_options.get(CONF_DEVICES, [])
+        if str(device.get("id")) != child_id
+    ]
+    new_options[CONF_ENTITIES] = [
+        entity for entity in new_options.get(CONF_ENTITIES, [])
+        if str(entity.get(CONF_DEVICE_ID)) != child_id
+    ]
+
+    from homeassistant.helpers import entity_registry as er
+
+    entity_registry = er.async_get(hass)
+    for registry_entity in er.async_entries_for_config_entry(
+        entity_registry, config_entry.entry_id
+    ):
+        if registry_entity.device_id == device_entry.id:
+            entity_registry.async_remove(registry_entity.entity_id)
+
+    hass.config_entries.async_update_entry(config_entry, options=new_options)
+    return True

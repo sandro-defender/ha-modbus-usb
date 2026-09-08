@@ -143,6 +143,12 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         # does not retain raw RTU bytes reliably across serial implementations, so
         # log every decoded Modbus request and its response instead.
         self.transaction_log: deque[dict[str, Any]] = deque(maxlen=200)
+        self.scan_progress: dict[str, Any] = {
+            "active": False,
+            "completed": 0,
+            "total": 0,
+            "found": 0,
+        }
         # Modbus RTU is request/response based: concurrent access to one serial
         # adapter can pair a response with the wrong request. Every I/O operation
         # must therefore own this lock for its entire transaction.
@@ -200,6 +206,13 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
 
         found: list[dict[str, Any]] = []
         probed = 0
+        total = len(valid_bauds) * (end_slave - start_slave + 1)
+        self.scan_progress = {
+            "active": True,
+            "completed": 0,
+            "total": total,
+            "found": 0,
+        }
         with self._serial_lock:
             self.client.close()
             try:
@@ -218,6 +231,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                             continue
                         for slave in range(start_slave, end_slave + 1):
                             probed += 1
+                            self.scan_progress["completed"] = probed
                             try:
                                 result = self._call_modbus_on_client(
                                     probe, "read_holding_registers", 0,
@@ -232,6 +246,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                                         "baudrate": baudrate,
                                         "response": response_kind,
                                     })
+                                    self.scan_progress["found"] = len(found)
                                     self._record_transaction(
                                         "scan_found", slave=slave, address=0,
                                         result=f"{baudrate} baud — {response_kind}",
@@ -242,6 +257,8 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                         probe.close()
             finally:
                 self.client.connect()
+                self.scan_progress["active"] = False
+                self.scan_progress["completed"] = probed
         return {"found": found, "probed": probed, "start_slave": start_slave, "end_slave": end_slave}
 
     def _record_transaction(
@@ -291,6 +308,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             "default_slave_id": self.slave_id,
             "health": dict(self.diag),
             "transactions": list(self.transaction_log),
+            "scan": dict(self.scan_progress),
         }
 
     def clear_transaction_log(self) -> None:

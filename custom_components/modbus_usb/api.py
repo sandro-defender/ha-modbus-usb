@@ -19,6 +19,7 @@ from homeassistant.components import websocket_api
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 
 from .const import (
     CONF_ADDRESS,
@@ -75,8 +76,8 @@ def _get_entry(hass: HomeAssistant, entry_id: str):
 def _format_entry_data(hass: HomeAssistant, entry) -> dict[str, Any]:
     """Serialize config entry for UI consumption."""
     options = dict(entry.options or {})
-    devices = list(options.get(CONF_DEVICES, []))
-    entities = list(options.get(CONF_ENTITIES, []))
+    devices = [dict(device) for device in options.get(CONF_DEVICES, [])]
+    entities = [dict(entity) for entity in options.get(CONF_ENTITIES, [])]
 
     # Auto-synthesize a default device if entities exist without device_id
     has_unassigned = any(not e.get(CONF_DEVICE_ID) for e in entities)
@@ -107,6 +108,22 @@ def _format_entry_data(hass: HomeAssistant, entry) -> dict[str, Any]:
         "transactions": [],
     }
     transactions = diagnostics["transactions"]
+    entity_registry = er.async_get(hass)
+    entity_domains = {
+        "sensor": "sensor",
+        "switch": "switch",
+        "binary_sensor": "binary_sensor",
+        "number": "number",
+    }
+    for entity in entities:
+        domain = entity_domains.get(entity.get(CONF_ENTITY_TYPE))
+        entity_id = entity.get(CONF_ENTITY_ID)
+        if domain and entity_id:
+            ha_entity_id = entity_registry.async_get_entity_id(
+                domain, DOMAIN, f"{entry.entry_id}_{entity_id}"
+            )
+            if ha_entity_id:
+                entity["ha_entity_id"] = ha_entity_id
     diagnostics["devices"] = []
     for device in devices:
         slave_id = int(device.get(CONF_SLAVE_ID, entry.data.get(CONF_SLAVE_ID, 1)))

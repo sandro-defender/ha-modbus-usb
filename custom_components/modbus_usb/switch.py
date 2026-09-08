@@ -18,6 +18,7 @@ from .const import (
     CONF_ENTITIES,
     CONF_ENTITY_ID,
     CONF_ENTITY_TYPE,
+    CONF_MODEL,
     CONF_NAME,
     CONF_OFF_VALUE,
     CONF_ON_VALUE,
@@ -52,7 +53,19 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
         self._attr_unique_id = f"{entry.entry_id}_{ent[CONF_ENTITY_ID]}"
         self._attr_name = ent[CONF_NAME]
         self._attr_device_info = get_device_info(entry, ent)
-        self._attr_assumed_state = bool(ent.get(CONF_ASSUMED_STATE, False))
+        device = next(
+            (
+                item for item in entry.options.get(CONF_DEVICES, [])
+                if item.get(CONF_ENTITY_ID) == ent.get(CONF_DEVICE_ID)
+            ),
+            None,
+        )
+        # R413E16 is a command-only output core. Keep compatibility with
+        # entities saved by older panel versions that lost assumed_state.
+        is_r413e16 = bool(
+            device and str(device.get(CONF_MODEL, "")).upper() == "R413E16"
+        )
+        self._attr_assumed_state = bool(ent.get(CONF_ASSUMED_STATE, False)) or is_r413e16
         self._last_command: bool | None = None
         picture = get_entity_picture(entry, ent)
         if picture:

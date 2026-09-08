@@ -3416,11 +3416,17 @@ entities:
         return;
       }
       try {
-        await apiCall('write_entity', {
-          entry_id: entry.entry_id,
-          entity_id: entityId,
-          state: isOn,
-        });
+        if (entity?.ha_entity_id) {
+          await _hass.callService('switch', isOn ? 'turn_on' : 'turn_off', {
+            entity_id: entity.ha_entity_id,
+          });
+        } else {
+          await apiCall('write_entity', {
+            entry_id: entry.entry_id,
+            entity_id: entityId,
+            state: isOn,
+          });
+        }
         toast(`${name} turned ${isOn ? 'on' : 'off'}`, 'ok');
         setTimeout(refreshData, 250);
       } catch(e) {

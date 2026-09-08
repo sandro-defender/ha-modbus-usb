@@ -4,6 +4,18 @@ manufacturer: SHT20
 model: XY-MD02
 default_slave_id: 1
 description: RS485 Modbus RTU temperature and humidity environmental sensor
+# Safe identification checks: raw temperature and humidity ranges.
+fingerprint:
+  - register_type: input
+    address: 1
+    data_type: int16
+    min_value: -400
+    max_value: 1250
+  - register_type: input
+    address: 2
+    data_type: uint16
+    min_value: 0
+    max_value: 1000
 entities:
   - name: Temperature
     entity_type: sensor

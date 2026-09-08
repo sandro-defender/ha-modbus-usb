@@ -1240,6 +1240,13 @@
           <div style="margin-top:1.3rem;">
             <button class="btn btn-primary" id="btn-diag-read" onclick="doLiveRead()">▶ Read Register</button>
           </div>
+          <div class="form-group" style="margin:0 0 0 0.7rem; min-width:120px;">
+            <label class="form-label">Write Value</label>
+            <input class="form-input mono" type="number" id="diag-write-value" value="1" />
+          </div>
+          <div style="margin-top:1.3rem;">
+            <button class="btn btn-secondary" id="btn-diag-write" onclick="doLiveWrite()">✎ Write Value</button>
+          </div>
         </div>
 
         <div id="diag-result-box" style="margin-top:1rem; padding:0.85rem; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.06); font-family:var(--font-mono); font-size:0.8rem; color:#94a3b8;">
@@ -2256,7 +2263,7 @@ entities:
             const isOn = val === 'on';
             controlHtml = `
               <label class="switch-toggle" title="Toggle switch">
-                <input type="checkbox" ${isOn ? 'checked' : ''} onchange="toggleEntitySwitch('${ent.name}', this.checked)">
+                <input type="checkbox" ${isOn ? 'checked' : ''} onchange="toggleEntitySwitch('${ent.id}', this.checked)">
                 <span class="switch-slider"></span>
               </label>
             `;
@@ -2490,7 +2497,7 @@ entities:
           valHtml = `
             <div style="margin: 0.5rem 0;">
               <label class="switch-toggle">
-                <input type="checkbox" ${isOn ? 'checked' : ''} onchange="toggleEntitySwitch('${ent.name}', this.checked)">
+                <input type="checkbox" ${isOn ? 'checked' : ''} onchange="toggleEntitySwitch('${ent.id}', this.checked)">
                 <span class="switch-slider"></span>
               </label>
               <span style="font-size:0.8rem; font-weight:700; margin-left:0.5rem; color:${isOn ? '#34d399' : '#94a3b8'}">${isOn ? 'ON' : 'OFF'}</span>
@@ -3351,16 +3358,22 @@ entities:
     }
 
     // ─── LIVE SWITCH & NUMBER INTERACTIONS ───────────────────────
-    async function toggleEntitySwitch(name, isOn) {
+    async function toggleEntitySwitch(entityId, isOn) {
+      const entry = getCurrentEntry();
+      const entity = entry?.entities?.find(item => item.id === entityId);
+      const name = entity?.name || 'Switch';
       if (!_isLiveHA) {
         toast(`${name} switched ${isOn ? 'ON' : 'OFF'} (simulated)`, 'ok');
         return;
       }
-      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
       try {
-        await _hass.callService('switch', isOn ? 'turn_on' : 'turn_off', { entity_id: `switch.${slug}` });
+        await apiCall('write_entity', {
+          entry_id: entry.entry_id,
+          entity_id: entityId,
+          state: isOn,
+        });
         toast(`${name} turned ${isOn ? 'on' : 'off'}`, 'ok');
-        setTimeout(refreshData, 1000);
+        setTimeout(refreshData, 250);
       } catch(e) {
         toast(`Toggle failed: ${e.message}`, 'err');
       }
@@ -3423,6 +3436,43 @@ entities:
       }
     }
 
+    async function doLiveWrite() {
+      const entry = getCurrentEntry();
+      const slave = parseInt(document.getElementById('diag-slave').value, 10);
+      const address = parseInt(document.getElementById('diag-address').value, 10);
+      const regtype = document.getElementById('diag-regtype').value;
+      const value = parseInt(document.getElementById('diag-write-value').value, 10);
+      const resBox = document.getElementById('diag-result-box');
+      if (!['holding', 'coil'].includes(regtype)) {
+        resBox.style.color = '#f87171';
+        resBox.textContent = '❌ Writes are available only for Holding Register or Coil.';
+        return;
+      }
+      if (![slave, address, value].every(Number.isFinite)) {
+        resBox.style.color = '#f87171';
+        resBox.textContent = '❌ Enter a valid slave ID, address, and write value.';
+        return;
+      }
+      resBox.style.color = '#93c5fd';
+      resBox.textContent = `Writing ${value} to ${regtype} ${address} (slave ${slave})…`;
+      if (!_isLiveHA) {
+        resBox.style.color = '#34d399';
+        resBox.textContent = `✅ [Simulated] Wrote ${value} to ${regtype} ${address} (slave ${slave})`;
+        return;
+      }
+      try {
+        await apiCall('diagnostic_write', {
+          entry_id: entry.entry_id, address, register_type: regtype, value, slave_id: slave,
+        });
+        resBox.style.color = '#34d399';
+        resBox.textContent = `✅ Write sent: ${value} → ${regtype} ${address} (slave ${slave})`;
+        setTimeout(refreshData, 200);
+      } catch (error) {
+        resBox.style.color = '#f87171';
+        resBox.textContent = `❌ Write failed: ${error.message}`;
+      }
+    }
+
     async function scanRs485Bus() {
       const entry = getCurrentEntry();
       const baudrates = document.getElementById('scan-baudrates').value.split(',')
@@ -3448,7 +3498,12 @@ entities:
         });
         box.style.color = result.found?.length ? '#34d399' : '#fcd34d';
         box.textContent = result.found?.length
-          ? `Found: ${result.found.map(item => `slave ${item.slave_id} at ${item.baudrate} baud (${item.response})`).join('; ')}`
+          ? `Found: ${result.found.map(item => {
+              const suggestion = item.suggestions?.length
+                ? ` — suggested template: ${item.suggestions.join(', ')}`
+                : '';
+              return `slave ${item.slave_id} at ${item.baudrate} baud (${item.response})${suggestion}`;
+            }).join('; ')}`
           : `No responding devices found after ${result.probed || 0} probes. Check A/B wires, power, baud rate, and slave ID.`;
         await refreshData();
       } catch (error) {

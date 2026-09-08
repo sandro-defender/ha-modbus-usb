@@ -26,7 +26,11 @@ def get_user_templates_dir(hass: HomeAssistant) -> str:
 
 
 def ensure_templates_dir(hass: HomeAssistant) -> str:
-    """Ensure the user templates directory exists, seeding it with starter templates if empty."""
+    """Ensure the user templates directory exists and add missing starter files.
+
+    Existing files are always left untouched, so a user's edited template is
+    never replaced during an integration update.
+    """
     user_dir = get_user_templates_dir(hass)
     if not os.path.exists(user_dir):
         try:
@@ -36,16 +40,17 @@ def ensure_templates_dir(hass: HomeAssistant) -> str:
             _LOGGER.warning("Could not create templates directory %s: %s", user_dir, err)
             return user_dir
 
-    # If empty, copy bundled templates
+    # Copy new bundled starter templates without overwriting user edits.  This
+    # also lets existing installations receive newly added board templates.
     try:
-        existing = [f for f in os.listdir(user_dir) if f.endswith((".yaml", ".yml"))]
-        if not existing and os.path.isdir(BUNDLED_TEMPLATES_DIR):
+        if os.path.isdir(BUNDLED_TEMPLATES_DIR):
             for fname in os.listdir(BUNDLED_TEMPLATES_DIR):
                 if fname.endswith((".yaml", ".yml")):
                     src = os.path.join(BUNDLED_TEMPLATES_DIR, fname)
                     dst = os.path.join(user_dir, fname)
-                    shutil.copy2(src, dst)
-            _LOGGER.info("Seeded initial Modbus USB templates into %s", user_dir)
+                    if not os.path.exists(dst):
+                        shutil.copy2(src, dst)
+                        _LOGGER.info("Added starter template %s", fname)
     except Exception as err:
         _LOGGER.warning("Error seeding templates into %s: %s", user_dir, err)
 
@@ -71,6 +76,7 @@ def _parse_template_file(filepath: str, filename: str) -> dict[str, Any] | None:
             "default_slave_id": int(data.get("default_slave_id", 1)),
             "description": data.get("description", ""),
             "image": data.get("image") or data.get("picture") or "",
+            "fingerprint": data.get("fingerprint", []),
             "entities": data.get("entities", []),
             "raw_yaml": raw_content,
         }

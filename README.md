@@ -76,6 +76,7 @@ Copied into `config/modbus_usb_templates/` on first run if that folder has no YA
 | `dds238.yaml` | Hiking DDS238-2 ZN/S | Energy, V, I, P, Q, PF, frequency |
 | `xy_md02.yaml` | XY-MD02 (temp / humidity) | Temperature, humidity |
 | `relay_8ch.yaml` | 8-ch Modbus relay | 8 coil switches + 2 discrete inputs |
+| `eletechsup-R413E16.yaml` | eletechsup R413E16 | 16 command switches (holding registers 1–16) |
 | `generic_meter.yaml` | Generic RTU device | Sensor, number, switch, binary sensor |
 
 Template files look like this:
@@ -98,6 +99,44 @@ entities:
     device_class: temperature
     state_class: measurement
 ```
+
+### Creating a board template
+
+The simplest reliable source is the board's Modbus register map. In the **Templates** tab, duplicate `generic_meter.yaml`, then change the device details and add one entity for every register or coil you need. A template can contain sensors, switches, binary sensors, and numbers.
+
+For a holding-register relay that needs special command values, use this pattern:
+
+```yaml
+id: my_relay
+name: My RS-485 Relay
+manufacturer: My Manufacturer
+model: My Relay Model
+default_slave_id: 1
+entities:
+  - name: Relay 1
+    entity_type: switch
+    register_type: holding
+    address: 1
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    assumed_state: true
+```
+
+`assumed_state: true` is for command-only boards that cannot safely report their current state. For normal coils, omit the custom values and use `register_type: coil`.
+
+Templates can optionally include a read-only `fingerprint`. After **Find RS-485 Devices** finds a responding slave, the panel suggests a template only when every fingerprint value is within its expected range:
+
+```yaml
+fingerprint:
+  - register_type: input
+    address: 0
+    data_type: float32
+    min_value: 80
+    max_value: 300
+```
+
+This is a helpful hint, not proof of the model—different devices can return similar values. Do not add a fingerprint that writes to the device. Command-only boards such as the R413E16 are deliberately not auto-suggested because a safe scan cannot identify them.
 
 ---
 

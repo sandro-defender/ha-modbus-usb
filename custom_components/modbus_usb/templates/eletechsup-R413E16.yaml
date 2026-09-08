@@ -5,7 +5,7 @@
 # Reads are skipped (assumed_state) because this board is command-oriented.
 #
 # Changelog:
-# 2026-09-06 — Initial template from ESPHome rs485 AC-01..AC-16 mapping.
+# 2026-09-06 — Initial template from ESPHome rs485 CH-01..CH-16 mapping.
 # Date modified: 2026-09-06
 
 id: eletechsup-R413E16
@@ -18,7 +18,7 @@ description: >
   16-channel RS-485 Modbus RTU I/O core (A+/B-). Each AC channel is a holding
   register switch: write 0x0100 to turn on, 0x0200 to turn off (function code 06).
 entities:
-  - name: AC-01
+  - name: CH-01
     entity_type: switch
     register_type: holding
     address: 1
@@ -26,7 +26,7 @@ entities:
     on_value: 256
     off_value: 512
     assumed_state: true
-  - name: AC-02
+  - name: CH-02
     entity_type: switch
     register_type: holding
     address: 2
@@ -34,7 +34,7 @@ entities:
     on_value: 256
     off_value: 512
     assumed_state: true
-  - name: AC-03
+  - name: CH-03
     entity_type: switch
     register_type: holding
     address: 3
@@ -42,7 +42,7 @@ entities:
     on_value: 256
     off_value: 512
     assumed_state: true
-  - name: AC-04
+  - name: CH-04
     entity_type: switch
     register_type: holding
     address: 4
@@ -50,7 +50,7 @@ entities:
     on_value: 256
     off_value: 512
     assumed_state: true
-  - name: AC-05
+  - name: CH-05
     entity_type: switch
     register_type: holding
     address: 5
@@ -58,7 +58,7 @@ entities:
     on_value: 256
     off_value: 512
     assumed_state: true
-  - name: AC-06
+  - name: CH-06
     entity_type: switch
     register_type: holding
     address: 6
@@ -66,7 +66,7 @@ entities:
     on_value: 256
     off_value: 512
     assumed_state: true
-  - name: AC-07
+  - name: CH-07
     entity_type: switch
     register_type: holding
     address: 7
@@ -74,7 +74,7 @@ entities:
     on_value: 256
     off_value: 512
     assumed_state: true
-  - name: AC-08
+  - name: CH-08
     entity_type: switch
     register_type: holding
     address: 8
@@ -82,7 +82,7 @@ entities:
     on_value: 256
     off_value: 512
     assumed_state: true
-  - name: AC-09
+  - name: CH-09
     entity_type: switch
     register_type: holding
     address: 9
@@ -90,7 +90,7 @@ entities:
     on_value: 256
     off_value: 512
     assumed_state: true
-  - name: AC-10
+  - name: CH-10
     entity_type: switch
     register_type: holding
     address: 10
@@ -98,7 +98,7 @@ entities:
     on_value: 256
     off_value: 512
     assumed_state: true
-  - name: AC-11
+  - name: CH-11
     entity_type: switch
     register_type: holding
     address: 11
@@ -106,7 +106,7 @@ entities:
     on_value: 256
     off_value: 512
     assumed_state: true
-  - name: AC-12
+  - name: CH-12
     entity_type: switch
     register_type: holding
     address: 12
@@ -114,7 +114,7 @@ entities:
     on_value: 256
     off_value: 512
     assumed_state: true
-  - name: AC-13
+  - name: CH-13
     entity_type: switch
     register_type: holding
     address: 13
@@ -122,7 +122,7 @@ entities:
     on_value: 256
     off_value: 512
     assumed_state: true
-  - name: AC-14
+  - name: CH-14
     entity_type: switch
     register_type: holding
     address: 14
@@ -130,7 +130,7 @@ entities:
     on_value: 256
     off_value: 512
     assumed_state: true
-  - name: AC-15
+  - name: CH-15
     entity_type: switch
     register_type: holding
     address: 15
@@ -138,7 +138,7 @@ entities:
     on_value: 256
     off_value: 512
     assumed_state: true
-  - name: AC-16
+  - name: CH-16
     entity_type: switch
     register_type: holding
     address: 16

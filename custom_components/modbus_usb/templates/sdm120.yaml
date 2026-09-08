@@ -4,6 +4,18 @@ manufacturer: Eastron
 model: SDM120
 default_slave_id: 1
 description: Single-phase DIN rail energy meter with Modbus RTU communication
+# Safe identification checks: input-register voltage and frequency in normal ranges.
+fingerprint:
+  - register_type: input
+    address: 0
+    data_type: float32
+    min_value: 80
+    max_value: 300
+  - register_type: input
+    address: 70
+    data_type: float32
+    min_value: 45
+    max_value: 65
 entities:
   - name: Voltage
     entity_type: sensor

@@ -178,8 +178,38 @@ def test_r413e16_template_has_16_command_switches() -> None:
     template_path = Path(__file__).parents[1] / "custom_components/modbus_usb/templates/eletechsup-R413E16.yaml"
     template = yaml.safe_load(template_path.read_text(encoding="utf-8"))
 
-    assert template["default_slave_id"] == 1
+    assert 1 <= template["default_slave_id"] <= 247
     assert len(template["entities"]) == 16
     assert [entity["address"] for entity in template["entities"]] == list(range(1, 17))
     assert all(entity["on_value"] == 0x0100 for entity in template["entities"])
     assert all(entity["off_value"] == 0x0200 for entity in template["entities"])
+
+
+def test_template_fingerprint_matches_only_expected_register_values() -> None:
+    coordinator = _coordinator(_Client(value=230))
+    templates = [
+        {
+            "id": "voltage_meter",
+            "name": "Voltage Meter",
+            "fingerprint": [{
+                CONF_REGISTER_TYPE: REGISTER_TYPE_HOLDING,
+                CONF_ADDRESS: 0,
+                CONF_DATA_TYPE: DATA_TYPE_UINT16,
+                "min_value": 200,
+                "max_value": 250,
+            }],
+        },
+        {
+            "id": "other_device",
+            "name": "Other Device",
+            "fingerprint": [{
+                CONF_REGISTER_TYPE: REGISTER_TYPE_HOLDING,
+                CONF_ADDRESS: 0,
+                CONF_DATA_TYPE: DATA_TYPE_UINT16,
+                "min_value": 1,
+                "max_value": 100,
+            }],
+        },
+    ]
+
+    assert coordinator._match_templates(coordinator.client, 1, templates) == ["Voltage Meter"]

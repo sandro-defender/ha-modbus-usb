@@ -188,7 +188,8 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         )
 
     def scan_bus(
-        self, baudrates: list[int], start_slave: int = 1, end_slave: int = 20
+        self, baudrates: list[int], start_slave: int = 1, end_slave: int = 20,
+        templates: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Probe a bounded RS-485 range and report devices that answer.
 
@@ -241,10 +242,14 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                                 no_response = "no response received" in message.lower()
                                 if not no_response:
                                     response_kind = "register response" if not result.isError() else "exception response"
+                                    suggestions = self._match_templates(
+                                        probe, slave, templates or []
+                                    )
                                     found.append({
                                         "slave_id": slave,
                                         "baudrate": baudrate,
                                         "response": response_kind,
+                                        "suggestions": suggestions,
                                     })
                                     self.scan_progress["found"] = len(found)
                                     self._record_transaction(
@@ -260,6 +265,41 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 self.scan_progress["active"] = False
                 self.scan_progress["completed"] = probed
         return {"found": found, "probed": probed, "start_slave": start_slave, "end_slave": end_slave}
+
+    def _match_templates(
+        self, client: Any, slave: int, templates: list[dict[str, Any]]
+    ) -> list[str]:
+        """Return templates whose optional read-only fingerprints all match."""
+        matches: list[str] = []
+        for template in templates:
+            fingerprint = template.get("fingerprint") or []
+            if not fingerprint:
+                continue
+            try:
+                for probe in fingerprint:
+                    register_type = probe[CONF_REGISTER_TYPE]
+                    address = int(probe[CONF_ADDRESS])
+                    data_type = probe.get(CONF_DATA_TYPE, DATA_TYPE_UINT16)
+                    count = DATA_TYPE_WORD_COUNT.get(data_type, 1)
+                    if register_type == REGISTER_TYPE_HOLDING:
+                        result = self._call_modbus_on_client(
+                            client, "read_holding_registers", address, count=count, slave=slave
+                        )
+                    elif register_type == REGISTER_TYPE_INPUT:
+                        result = self._call_modbus_on_client(
+                            client, "read_input_registers", address, count=count, slave=slave
+                        )
+                    else:
+                        raise ValueError("Fingerprint register type must be holding or input")
+                    if result.isError():
+                        raise UpdateFailed(str(result))
+                    value = _decode_words(result.registers, data_type)
+                    if not float(probe["min_value"]) <= value <= float(probe["max_value"]):
+                        raise ValueError("Value outside expected range")
+                matches.append(template.get("name", template.get("id", "Unknown template")))
+            except Exception:  # A mismatch is normal; do not present a weak match.
+                continue
+        return matches
 
     def _record_transaction(
         self,

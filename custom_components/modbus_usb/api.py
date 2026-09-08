@@ -52,6 +52,7 @@ from .const import (
     CONF_STOPBITS,
     CONF_UNIT_OF_MEASUREMENT,
     DOMAIN,
+    REGISTER_TYPE_COIL,
 )
 from .templates import (
     async_delete_template,
@@ -192,6 +193,94 @@ async def ws_diagnostic_read(
 
 
 @websocket_api.websocket_command({
+    vol.Required("type"): "modbus_usb/diagnostic_write",
+    vol.Required("entry_id"): cv.string,
+    vol.Required("address"): vol.Coerce(int),
+    vol.Required("register_type"): vol.In(["holding", "coil"]),
+    vol.Required("value"): vol.Coerce(int),
+    vol.Required("slave_id"): vol.All(vol.Coerce(int), vol.Range(min=1, max=247)),
+})
+@websocket_api.async_response
+async def ws_diagnostic_write(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Write one coil or holding register directly from Diagnostics."""
+    try:
+        coordinator = hass.data[DOMAIN][msg["entry_id"]]
+        if msg["register_type"] == REGISTER_TYPE_COIL:
+            await hass.async_add_executor_job(
+                coordinator.write_coil, msg["address"], bool(msg["value"]), msg["slave_id"]
+            )
+        else:
+            await hass.async_add_executor_job(
+                coordinator.write_register, msg["address"], msg["value"], msg["slave_id"]
+            )
+        connection.send_result(msg["id"], {"success": True})
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("Diagnostic write failed: %s", err)
+        connection.send_error(msg["id"], "write_failed", str(err))
+
+
+def _entity_slave_id(entry, entity: dict[str, Any]) -> int:
+    """Resolve an entity's explicit or owning device's Modbus slave ID."""
+    slave_id = entity.get(CONF_SLAVE_ID)
+    if slave_id is None and entity.get(CONF_DEVICE_ID):
+        device = next(
+            (
+                device for device in entry.options.get(CONF_DEVICES, [])
+                if device.get("id") == entity.get(CONF_DEVICE_ID)
+            ),
+            None,
+        )
+        if device:
+            slave_id = device.get(CONF_SLAVE_ID)
+    return int(slave_id if slave_id is not None else entry.data.get(CONF_SLAVE_ID, 1))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "modbus_usb/write_entity",
+    vol.Required("entry_id"): cv.string,
+    vol.Required("entity_id"): cv.string,
+    vol.Required("state"): bool,
+})
+@websocket_api.async_response
+async def ws_write_entity(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Write a configured switch without guessing its Home Assistant entity ID."""
+    try:
+        entry = _get_entry(hass, msg["entry_id"])
+        entity = next(
+            (
+                item for item in entry.options.get(CONF_ENTITIES, [])
+                if item.get(CONF_ENTITY_ID) == msg["entity_id"]
+            ),
+            None,
+        )
+        if entity is None:
+            raise ValueError("Configured entity was not found")
+        if entity.get(CONF_ENTITY_TYPE) != "switch":
+            raise ValueError("Only switch entities can be written")
+
+        coordinator = hass.data[DOMAIN][entry.entry_id]
+        slave_id = _entity_slave_id(entry, entity)
+        address = int(entity[CONF_ADDRESS])
+        if entity.get(CONF_REGISTER_TYPE) == REGISTER_TYPE_COIL:
+            await hass.async_add_executor_job(
+                coordinator.write_coil, address, msg["state"], slave_id
+            )
+        else:
+            value = entity.get(CONF_ON_VALUE, 1) if msg["state"] else entity.get(CONF_OFF_VALUE, 0)
+            await hass.async_add_executor_job(
+                coordinator.write_register, address, int(value), slave_id
+            )
+        connection.send_result(msg["id"], {"success": True, "slave_id": slave_id})
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("Configured switch write failed: %s", err)
+        connection.send_error(msg["id"], "write_failed", str(err))
+
+
+@websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/clear_diagnostic_log",
     vol.Required("entry_id"): cv.string,
 })
@@ -221,9 +310,10 @@ async def ws_scan_bus(
     """Probe a bounded range of Modbus slave IDs and serial speeds."""
     try:
         coordinator = hass.data[DOMAIN][msg["entry_id"]]
+        templates = await async_load_templates(hass)
         result = await hass.async_add_executor_job(
             coordinator.scan_bus,
-            msg["baudrates"], msg["start_slave"], msg["end_slave"],
+            msg["baudrates"], msg["start_slave"], msg["end_slave"], templates,
         )
         connection.send_result(msg["id"], result)
     except Exception as err:  # noqa: BLE001
@@ -257,14 +347,33 @@ async def ws_save_device(
 
         new_options = dict(entry.options or {})
         devices = list(new_options.get(CONF_DEVICES, []))
+        entities = list(new_options.get(CONF_ENTITIES, []))
 
         existing_idx = next((i for i, d in enumerate(devices) if d.get("id") == device_id), None)
         if existing_idx is not None:
+            previous_slave_id = devices[existing_idx].get(CONF_SLAVE_ID)
             devices[existing_idx] = device
+            # A sidebar device owns the address of its attached entities.  The
+            # template initially copies this value into each entity, so keep
+            # them in sync when the user changes the device's slave ID later.
+            if (
+                device.get(CONF_SLAVE_ID) is not None
+                and device.get(CONF_SLAVE_ID) != previous_slave_id
+            ):
+                entities = [
+                    {
+                        **entity,
+                        CONF_SLAVE_ID: device[CONF_SLAVE_ID],
+                    }
+                    if entity.get(CONF_DEVICE_ID) == device_id
+                    else entity
+                    for entity in entities
+                ]
         else:
             devices.append(device)
 
         new_options[CONF_DEVICES] = devices
+        new_options[CONF_ENTITIES] = entities
         hass.config_entries.async_update_entry(entry, options=new_options)
 
         connection.send_result(msg["id"], {"success": True, "device": device})
@@ -673,6 +782,8 @@ async def async_register_api(hass: HomeAssistant) -> None:
     # Register WebSocket handlers
     websocket_api.async_register_command(hass, ws_get_data)
     websocket_api.async_register_command(hass, ws_diagnostic_read)
+    websocket_api.async_register_command(hass, ws_diagnostic_write)
+    websocket_api.async_register_command(hass, ws_write_entity)
     websocket_api.async_register_command(hass, ws_clear_diagnostic_log)
     websocket_api.async_register_command(hass, ws_scan_bus)
     websocket_api.async_register_command(hass, ws_save_device)

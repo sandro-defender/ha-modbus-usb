@@ -1,0 +1,130 @@
+# Eastron SDM630 — three-phase Modbus RTU energy meter
+#
+# Starter map derived from the Apache-2.0 licensed Home Assistant configuration:
+# https://github.com/ticapix/home-assistant_sdm630/blob/master/sdm630_addresses.yaml
+# This template has NOT been tested with this integration or verified on hardware.
+# Check the register map and serial settings for your SDM630 revision before use.
+
+id: eastron-SDM630
+name: Eastron SDM630 Energy Meter
+manufacturer: Eastron
+model: SDM630
+default_slave_id: 1
+tested: false
+source_url: "https://github.com/ticapix/home-assistant_sdm630"
+description: >
+  Community-sourced starter template for the three-phase SDM630 Modbus RTU meter.
+  Not yet tested with Modbus USB Controller; verify values against your meter.
+entities:
+  - name: Phase 1 Voltage
+    entity_type: sensor
+    register_type: input
+    address: 0
+    data_type: float32
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+  - name: Phase 2 Voltage
+    entity_type: sensor
+    register_type: input
+    address: 2
+    data_type: float32
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+  - name: Phase 3 Voltage
+    entity_type: sensor
+    register_type: input
+    address: 4
+    data_type: float32
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+  - name: Phase 1 Current
+    entity_type: sensor
+    register_type: input
+    address: 6
+    data_type: float32
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+  - name: Phase 2 Current
+    entity_type: sensor
+    register_type: input
+    address: 8
+    data_type: float32
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+  - name: Phase 3 Current
+    entity_type: sensor
+    register_type: input
+    address: 10
+    data_type: float32
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+  - name: Phase 1 Active Power
+    entity_type: sensor
+    register_type: input
+    address: 12
+    data_type: float32
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+  - name: Phase 2 Active Power
+    entity_type: sensor
+    register_type: input
+    address: 14
+    data_type: float32
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+  - name: Phase 3 Active Power
+    entity_type: sensor
+    register_type: input
+    address: 16
+    data_type: float32
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+  - name: Total Active Power
+    entity_type: sensor
+    register_type: input
+    address: 52
+    data_type: float32
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+  - name: Total Power Factor
+    entity_type: sensor
+    register_type: input
+    address: 62
+    data_type: float32
+    unit_of_measurement: ""
+    device_class: power_factor
+    state_class: measurement
+  - name: Frequency
+    entity_type: sensor
+    register_type: input
+    address: 70
+    data_type: float32
+    unit_of_measurement: "Hz"
+    device_class: frequency
+    state_class: measurement
+  - name: Import Energy
+    entity_type: sensor
+    register_type: input
+    address: 72
+    data_type: float32
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+  - name: Export Energy
+    entity_type: sensor
+    register_type: input
+    address: 74
+    data_type: float32
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing

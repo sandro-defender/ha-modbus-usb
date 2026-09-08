@@ -82,7 +82,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
             frontend_url_path="modbus-usb",
             # Change this asset version when the standalone sidebar HTML changes.
             # It prevents an already-open browser from retaining an old panel.
-            config={"url": "/modbus_usb_panel/modbus-panel.html?v=2.1.15"},
+            config={"url": "/modbus_usb_panel/modbus-panel.html?v=2.1.18"},
             require_admin=False,
         )
         _LOGGER.debug("Modbus USB sidebar panel registered")

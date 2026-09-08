@@ -1,0 +1,71 @@
+# Eastron SDM230 — single-phase Modbus RTU energy meter
+# Source: https://github.com/dmatscheko/modbus_connect (MIT License)
+# This template has NOT been tested with this integration or verified on hardware.
+
+id: eastron-SDM230
+name: Eastron SDM230 Energy Meter
+manufacturer: Eastron
+model: SDM230
+default_slave_id: 1
+tested: false
+source_url: "https://github.com/dmatscheko/modbus_connect/blob/main/custom_components/modbus_connect/device_configs/eastron-sdm230.yaml"
+description: >
+  Community-sourced starter template for the single-phase SDM230 Modbus RTU meter.
+  Not yet tested with Modbus USB Controller; verify values against your meter.
+entities:
+  - name: Voltage
+    entity_type: sensor
+    register_type: input
+    address: 0
+    data_type: float32
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+  - name: Current
+    entity_type: sensor
+    register_type: input
+    address: 6
+    data_type: float32
+    unit_of_measurement: "A"
+    device_class: current
+    state_class: measurement
+  - name: Active Power
+    entity_type: sensor
+    register_type: input
+    address: 12
+    data_type: float32
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+  - name: Apparent Power
+    entity_type: sensor
+    register_type: input
+    address: 18
+    data_type: float32
+    unit_of_measurement: "VA"
+    device_class: apparent_power
+    state_class: measurement
+  - name: Reactive Power
+    entity_type: sensor
+    register_type: input
+    address: 24
+    data_type: float32
+    unit_of_measurement: "var"
+    device_class: reactive_power
+    state_class: measurement
+  - name: Power Factor
+    entity_type: sensor
+    register_type: input
+    address: 30
+    data_type: float32
+    unit_of_measurement: ""
+    device_class: power_factor
+    state_class: measurement
+  - name: Frequency
+    entity_type: sensor
+    register_type: input
+    address: 70
+    data_type: float32
+    unit_of_measurement: "Hz"
+    device_class: frequency
+    state_class: measurement

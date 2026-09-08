@@ -77,6 +77,8 @@ Bundled templates are available immediately, but are not automatically copied in
 
 All other bundled templates are clearly marked **Not yet tested**. They are useful starting points based on published register maps, but please verify them with your own device before relying on them in automations.
 
+Community templates imported from GitHub currently include the **Eastron SDM230**, **Eastron SDM630**, **Waveshare Modbus RTU Relay (D)**, **eletechsup N4ROD08**, and **eletechsup NT18B07**. They remain untested here.
+
 ## Diagnostics when something does not work
 
 Open **Modbus USB → Diagnostics**. It shows whether the serial connection is available, recent successful commands, timeouts, and errors.

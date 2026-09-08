@@ -1,0 +1,79 @@
+# eletechsup NT18B07 — 7-channel RS-485 NTC temperature sensor
+# Community register-map source:
+# https://github.com/r-renato/drp-modbus-boards
+# This template has NOT been tested with this integration or verified on hardware.
+
+id: eletechsup-NT18B07
+name: eletechsup NT18B07 Temperature Board
+manufacturer: eletechsup
+model: NT18B07
+default_slave_id: 1
+tested: false
+source_url: "https://github.com/r-renato/drp-modbus-boards"
+description: >
+  Community-sourced seven-channel NTC temperature template. Holding registers
+  0–6 are read as values scaled by 0.1 °C. Not yet tested here.
+entities:
+  - name: Temperature 1
+    entity_type: sensor
+    register_type: holding
+    address: 0
+    data_type: uint16
+    scale: 0.1
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+  - name: Temperature 2
+    entity_type: sensor
+    register_type: holding
+    address: 1
+    data_type: uint16
+    scale: 0.1
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+  - name: Temperature 3
+    entity_type: sensor
+    register_type: holding
+    address: 2
+    data_type: uint16
+    scale: 0.1
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+  - name: Temperature 4
+    entity_type: sensor
+    register_type: holding
+    address: 3
+    data_type: uint16
+    scale: 0.1
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+  - name: Temperature 5
+    entity_type: sensor
+    register_type: holding
+    address: 4
+    data_type: uint16
+    scale: 0.1
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+  - name: Temperature 6
+    entity_type: sensor
+    register_type: holding
+    address: 5
+    data_type: uint16
+    scale: 0.1
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+  - name: Temperature 7
+    entity_type: sensor
+    register_type: holding
+    address: 6
+    data_type: uint16
+    scale: 0.1
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement

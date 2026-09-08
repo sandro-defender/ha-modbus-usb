@@ -1,0 +1,72 @@
+# eletechsup N4ROD08 — 8-channel RS-485 Modbus RTU relay board
+# Community register-map source:
+# https://github.com/r-renato/drp-modbus-boards
+# This template has NOT been tested with this integration or verified on hardware.
+
+id: eletechsup-N4ROD08
+name: eletechsup N4ROD08 Relay Board
+manufacturer: eletechsup
+model: N4ROD08
+default_slave_id: 1
+tested: false
+source_url: "https://github.com/r-renato/drp-modbus-boards"
+description: >
+  Community-sourced eight-channel RS-485 relay template. It uses holding
+  registers 0–7 with 0x0100 ON and 0x0200 OFF commands. Not yet tested here.
+entities:
+  - name: CH-01
+    entity_type: switch
+    register_type: holding
+    address: 0
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+  - name: CH-02
+    entity_type: switch
+    register_type: holding
+    address: 1
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+  - name: CH-03
+    entity_type: switch
+    register_type: holding
+    address: 2
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+  - name: CH-04
+    entity_type: switch
+    register_type: holding
+    address: 3
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+  - name: CH-05
+    entity_type: switch
+    register_type: holding
+    address: 4
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+  - name: CH-06
+    entity_type: switch
+    register_type: holding
+    address: 5
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+  - name: CH-07
+    entity_type: switch
+    register_type: holding
+    address: 6
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+  - name: CH-08
+    entity_type: switch
+    register_type: holding
+    address: 7
+    data_type: uint16
+    on_value: 256
+    off_value: 512

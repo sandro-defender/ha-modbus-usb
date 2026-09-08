@@ -1,0 +1,55 @@
+# Waveshare Modbus RTU Relay (D) — 8-channel relay board
+# Source: https://github.com/dmatscheko/modbus_connect (MIT License)
+# This template has NOT been tested with this integration or verified on hardware.
+
+id: waveshare-Modbus-RTU-Relay-D
+name: Waveshare Modbus RTU Relay (D)
+manufacturer: Waveshare
+model: Modbus RTU Relay (D)
+default_slave_id: 1
+tested: false
+source_url: "https://github.com/dmatscheko/modbus_connect/blob/main/custom_components/modbus_connect/device_configs/waveshare-modbus-rtu-relay-d.yaml"
+description: >
+  Community-sourced starter template for the eight-channel Waveshare Modbus RTU
+  Relay (D). Not yet tested with Modbus USB Controller; verify your board revision.
+entities:
+  - name: Relay 1
+    entity_type: switch
+    register_type: coil
+    address: 0
+    data_type: bool
+  - name: Relay 2
+    entity_type: switch
+    register_type: coil
+    address: 1
+    data_type: bool
+  - name: Relay 3
+    entity_type: switch
+    register_type: coil
+    address: 2
+    data_type: bool
+  - name: Relay 4
+    entity_type: switch
+    register_type: coil
+    address: 3
+    data_type: bool
+  - name: Relay 5
+    entity_type: switch
+    register_type: coil
+    address: 4
+    data_type: bool
+  - name: Relay 6
+    entity_type: switch
+    register_type: coil
+    address: 5
+    data_type: bool
+  - name: Relay 7
+    entity_type: switch
+    register_type: coil
+    address: 6
+    data_type: bool
+  - name: Relay 8
+    entity_type: switch
+    register_type: coil
+    address: 7
+    data_type: bool

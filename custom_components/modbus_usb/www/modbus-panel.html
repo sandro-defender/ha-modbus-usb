@@ -28,6 +28,7 @@
       --text-muted: #94a3b8;
       --text-dim: #64748b;
       --font-mono: 'JetBrains Mono', monospace;
+      --focus-ring: 0 0 0 3px rgba(96, 165, 250, 0.32);
     }
 
     body {
@@ -37,6 +38,27 @@
       min-height: 100vh;
       overflow-x: hidden;
       line-height: 1.5;
+    }
+
+    .skip-link {
+      position: fixed;
+      top: 0.75rem;
+      left: 0.75rem;
+      z-index: 20;
+      padding: 0.55rem 0.8rem;
+      border-radius: 8px;
+      background: #eff6ff;
+      color: #172554;
+      font-size: 0.8rem;
+      font-weight: 700;
+      transform: translateY(-180%);
+      transition: transform 0.18s ease;
+    }
+    .skip-link:focus { transform: translateY(0); }
+
+    button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible {
+      outline: none;
+      box-shadow: var(--focus-ring);
     }
 
     body::before {
@@ -54,7 +76,7 @@
     .app {
       position: relative;
       z-index: 1;
-      max-width: 1360px;
+      max-width: 1480px;
       margin: 0 auto;
       padding: 0 1.5rem 2.5rem;
     }
@@ -109,6 +131,11 @@
       margin-bottom: 1.25rem;
       flex-wrap: wrap;
       gap: 1rem;
+      position: sticky;
+      top: 0;
+      z-index: 8;
+      background: linear-gradient(180deg, rgba(7,11,20,0.97) 72%, rgba(7,11,20,0));
+      backdrop-filter: blur(16px);
     }
     .header-left {
       display: flex;
@@ -154,6 +181,14 @@
       align-items: center;
       gap: 0.75rem;
       flex-wrap: wrap;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding-left: 0.7rem;
+      border-left: 1px solid var(--border-subtle);
     }
 
     .hub-select-wrapper {
@@ -278,7 +313,7 @@
       margin-bottom: 1.5rem;
       background: rgba(255,255,255,0.03);
       border-radius: 12px;
-      padding: 0.35rem;
+      padding: 0.4rem;
       border: 1px solid var(--border-subtle);
       overflow-x: auto;
     }
@@ -293,7 +328,7 @@
       border: none;
       background: transparent;
       color: var(--text-dim);
-      transition: all 0.22s;
+      transition: color 0.22s, background 0.22s, border-color 0.22s, transform 0.22s;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -308,6 +343,7 @@
       border: 1px solid rgba(59,130,246,0.3);
       box-shadow: 0 2px 10px rgba(59,130,246,0.2);
     }
+    .nav-tab.active .tab-count { background: rgba(147, 197, 253, 0.16); }
     .nav-tab .tab-count {
       background: rgba(255,255,255,0.1);
       padding: 0.1rem 0.45rem;
@@ -318,6 +354,7 @@
     /* ── Tab Panes ──────────────────────────────────────────────── */
     .tab-pane { display: none; }
     .tab-pane.active { display: block; animation: tabFadeIn 0.25s ease-out; }
+    .tab-pane[hidden] { display: none !important; }
     @keyframes tabFadeIn {
       from { opacity: 0; transform: translateY(6px); }
       to { opacity: 1; transform: translateY(0); }
@@ -331,10 +368,11 @@
       padding: 1.25rem;
       backdrop-filter: blur(16px);
       -webkit-backdrop-filter: blur(16px);
-      transition: border-color 0.2s, box-shadow 0.2s;
+      box-shadow: 0 16px 36px rgba(0,0,0,0.11);
+      transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
       margin-bottom: 1.25rem;
     }
-    .card:hover { border-color: rgba(255,255,255,0.12); }
+    .card:hover { border-color: rgba(255,255,255,0.12); box-shadow: 0 18px 42px rgba(0,0,0,0.18); }
     .card-header {
       display: flex;
       align-items: center;
@@ -370,7 +408,17 @@
       border-radius: 12px;
       padding: 0.75rem 1rem;
       text-align: center;
+      position: relative;
+      overflow: hidden;
       transition: all 0.2s;
+    }
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 3px;
+      background: var(--primary-gradient);
+      opacity: 0.7;
     }
     .stat-card:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.12); }
     .stat-num {
@@ -969,6 +1017,26 @@
     .empty-box h3 { font-size: 1.1rem; color: #e2e8f0; margin-bottom: 0.35rem; }
     .empty-box p { font-size: 0.8rem; max-width: 420px; margin: 0 auto 1.25rem; }
 
+    .context-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.85rem;
+      margin-bottom: 1rem;
+      padding: 0.85rem 1rem;
+      border: 1px solid rgba(96,165,250,0.16);
+      border-radius: 12px;
+      background: linear-gradient(100deg, rgba(30,58,138,0.14), rgba(15,23,42,0.46) 56%, rgba(109,40,217,0.1));
+    }
+    .context-bar-title { color: #e2e8f0; font-size: 0.82rem; font-weight: 700; }
+    .context-bar-copy { color: var(--text-muted); font-size: 0.76rem; margin-top: 0.1rem; }
+    .context-bar-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
+    }
+
     /* ── Responsive ─────────────────────────────────────────────── */
     @media (max-width: 768px) {
       .app { padding: 0 0.7rem 1.25rem; }
@@ -978,6 +1046,7 @@
       .header-title h1 { font-size: 1.08rem; }
       .header-title p { font-size: 0.68rem; line-height: 1.3; }
       .header-right { width: 100%; gap: 0.5rem; }
+      .header-actions { padding-left: 0; border-left: 0; margin-left: auto; }
       .hub-select-wrapper { flex: 1; min-width: 0; }
       .hub-select { width: 100%; min-width: 0; }
       .status-badge { padding: 0.35rem 0.55rem; font-size: 0.67rem; }
@@ -1013,6 +1082,9 @@
       .template-title h3 { font-size: 0.9rem; overflow-wrap: anywhere; }
       .template-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.45rem; }
       .template-actions .btn { width: 100%; min-width: 0; padding-inline: 0.35rem; white-space: normal; overflow-wrap: anywhere; }
+      .context-bar { align-items: stretch; padding: 0.8rem; }
+      .context-bar-actions { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
+      .context-bar-actions .btn { width: 100%; }
       .table-wrapper { margin: 0 -0.25rem; border-radius: 9px; }
       .table-wrapper table { min-width: 680px; }
       .diag-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
@@ -1029,6 +1101,7 @@
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#main-content">Skip to controller content</a>
   <div class="app">
     <!-- Header -->
     <header class="header">
@@ -1054,34 +1127,36 @@
           <span id="status-text">Connecting…</span>
         </div>
 
-        <button class="btn btn-primary" onclick="openAddDeviceModal()">
-          ➕ Add Device
-        </button>
+        <div class="header-actions">
+          <button class="btn btn-primary" onclick="openAddDeviceModal()">
+            ➕ Add Device
+          </button>
 
-        <button class="btn btn-ghost" id="btn-refresh" onclick="refreshData()">
-          ↻ Refresh
-        </button>
+          <button class="btn btn-ghost" id="btn-refresh" onclick="refreshData()" aria-label="Refresh controller data" title="Refresh controller data">
+            ↻ <span class="refresh-label">Refresh</span>
+          </button>
+        </div>
       </div>
     </header>
 
     <!-- Navigation Tabs -->
     <nav class="nav-tabs" role="tablist">
-      <button class="nav-tab active" id="tab-btn-devices" onclick="switchTab('devices')">
+      <button class="nav-tab active" id="tab-btn-devices" role="tab" aria-selected="true" aria-controls="pane-devices" tabindex="0" onclick="switchTab('devices')">
         🎛 Devices <span class="tab-count" id="count-devices">0</span>
       </button>
-      <button class="nav-tab" id="tab-btn-templates" onclick="switchTab('templates')">
+      <button class="nav-tab" id="tab-btn-templates" role="tab" aria-selected="false" aria-controls="pane-templates" tabindex="-1" onclick="switchTab('templates')">
         📑 Device Templates <span class="tab-count" id="count-templates">0</span>
       </button>
-      <button class="nav-tab" id="tab-btn-dashboard" onclick="switchTab('dashboard')">
+      <button class="nav-tab" id="tab-btn-dashboard" role="tab" aria-selected="false" aria-controls="pane-dashboard" tabindex="-1" onclick="switchTab('dashboard')">
         📊 Live Dashboard
       </button>
-      <button class="nav-tab" id="tab-btn-entities" onclick="switchTab('entities')">
+      <button class="nav-tab" id="tab-btn-entities" role="tab" aria-selected="false" aria-controls="pane-entities" tabindex="-1" onclick="switchTab('entities')">
         📋 All Entities <span class="tab-count" id="count-entities">0</span>
       </button>
-      <button class="nav-tab" id="tab-btn-hub" onclick="switchTab('hub')">
+      <button class="nav-tab" id="tab-btn-hub" role="tab" aria-selected="false" aria-controls="pane-hub" tabindex="-1" onclick="switchTab('hub')">
         🔗 Hub &amp; Serial
       </button>
-      <button class="nav-tab" id="tab-btn-diag" onclick="switchTab('diag')">
+      <button class="nav-tab" id="tab-btn-diag" role="tab" aria-selected="false" aria-controls="pane-diag" tabindex="-1" onclick="switchTab('diag')">
         🔬 Diagnostics
       </button>
     </nav>
@@ -1089,12 +1164,16 @@
     <!-- ═════════════════════════════════════════════════════════════ -->
     <!-- TAB 1: DEVICES (Separated & Editable)                        -->
     <!-- ═════════════════════════════════════════════════════════════ -->
-    <div class="tab-pane active" id="pane-devices">
-      <div class="card" style="padding:0.75rem 1.25rem; margin-bottom:1rem; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.75rem;">
-        <div style="font-size:0.82rem; color:var(--text-muted);">
+    <main id="main-content">
+    <div class="tab-pane active" id="pane-devices" role="tabpanel" aria-labelledby="tab-btn-devices">
+      <div class="context-bar">
+        <div>
+          <div class="context-bar-title">Your RS-485 device workspace</div>
+          <div class="context-bar-copy">
           Each Modbus slave device has its own address, sensors, and switches, organized and registered in Home Assistant.
+          </div>
         </div>
-        <div class="flex gap-1">
+        <div class="context-bar-actions">
           <button class="btn btn-secondary btn-sm" onclick="openAddDeviceModal('template')">
             ⚡ Add from Template
           </button>
@@ -1116,7 +1195,7 @@
     <!-- ═════════════════════════════════════════════════════════════ -->
     <!-- TAB 2: TEMPLATES (Stored in separate YAML files)             -->
     <!-- ═════════════════════════════════════════════════════════════ -->
-    <div class="tab-pane" id="pane-templates">
+    <div class="tab-pane" id="pane-templates" role="tabpanel" aria-labelledby="tab-btn-templates" hidden>
       <div class="card" style="padding:0.75rem 1.25rem; margin-bottom:1rem; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.75rem;">
         <div>
           <div style="font-size:0.85rem; font-weight:700; color:#fff;">📁 Device YAML Templates</div>
@@ -1137,7 +1216,7 @@
     <!-- ═════════════════════════════════════════════════════════════ -->
     <!-- TAB 3: DASHBOARD                                            -->
     <!-- ═════════════════════════════════════════════════════════════ -->
-    <div class="tab-pane" id="pane-dashboard">
+    <div class="tab-pane" id="pane-dashboard" role="tabpanel" aria-labelledby="tab-btn-dashboard" hidden>
       <div class="stats-bar">
         <div class="stat-card"><div class="stat-num" style="color:#60a5fa;" id="stat-total-dev">0</div><div class="stat-label">Devices</div></div>
         <div class="stat-card"><div class="stat-num" style="color:#93c5fd;" id="stat-total-ent">0</div><div class="stat-label">Total Entities</div></div>
@@ -1161,7 +1240,7 @@
     <!-- ═════════════════════════════════════════════════════════════ -->
     <!-- TAB 4: ENTITIES TABLE                                       -->
     <!-- ═════════════════════════════════════════════════════════════ -->
-    <div class="tab-pane" id="pane-entities">
+    <div class="tab-pane" id="pane-entities" role="tabpanel" aria-labelledby="tab-btn-entities" hidden>
       <div class="card">
         <div class="card-header">
           <div>
@@ -1198,7 +1277,7 @@
     <!-- ═════════════════════════════════════════════════════════════ -->
     <!-- TAB 5: HUB & SERIAL CONNECTION                              -->
     <!-- ═════════════════════════════════════════════════════════════ -->
-    <div class="tab-pane" id="pane-hub">
+    <div class="tab-pane" id="pane-hub" role="tabpanel" aria-labelledby="tab-btn-hub" hidden>
       <div class="card">
         <div class="card-header">
           <div>
@@ -1219,7 +1298,7 @@
     <!-- ═════════════════════════════════════════════════════════════ -->
     <!-- TAB 6: DIAGNOSTICS                                          -->
     <!-- ═════════════════════════════════════════════════════════════ -->
-    <div class="tab-pane" id="pane-diag">
+    <div class="tab-pane" id="pane-diag" role="tabpanel" aria-labelledby="tab-btn-diag" hidden>
       <div class="card">
         <div class="card-header">
           <div>
@@ -1345,6 +1424,7 @@
         </div>
       </div>
     </div>
+    </main>
   </div>
 
   <!-- ═════════════════════════════════════════════════════════════ -->
@@ -2917,14 +2997,43 @@ entities:
 
     // ─── TAB SWITCHING ──────────────────────────────────────────
     function switchTab(tabName) {
-      document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
-      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.nav-tab').forEach(t => {
+        t.classList.remove('active');
+        t.setAttribute('aria-selected', 'false');
+        t.tabIndex = -1;
+      });
+      document.querySelectorAll('.tab-pane').forEach(p => {
+        p.classList.remove('active');
+        p.hidden = true;
+      });
 
       const btn = document.getElementById(`tab-btn-${tabName}`);
       const pane = document.getElementById(`pane-${tabName}`);
-      if (btn) btn.classList.add('active');
-      if (pane) pane.classList.add('active');
+      if (btn) {
+        btn.classList.add('active');
+        btn.setAttribute('aria-selected', 'true');
+        btn.tabIndex = 0;
+      }
+      if (pane) {
+        pane.hidden = false;
+        pane.classList.add('active');
+      }
     }
+
+    document.addEventListener('keydown', (event) => {
+      const tabList = event.target.closest('[role="tablist"]');
+      if (!tabList || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      const tabs = [...tabList.querySelectorAll('[role="tab"]')];
+      const currentIndex = tabs.indexOf(event.target);
+      if (currentIndex === -1) return;
+      event.preventDefault();
+      const nextIndex = event.key === 'Home' ? 0
+        : event.key === 'End' ? tabs.length - 1
+        : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+      const nextTab = tabs[nextIndex];
+      switchTab(nextTab.id.replace('tab-btn-', ''));
+      nextTab.focus();
+    });
 
     // ─── MODALS CONTROL ─────────────────────────────────────────
     function openModal(id) {

@@ -15,7 +15,7 @@ name: eletechsup R413E16
 manufacturer: eletechsup
 model: R413E16
 default_slave_id: 1
-image: "https://eletechsup.com/cdn/shop/files/10_d5e79182-bd7f-4923-9a48-3494c9c7af1d.jpg?v=1740746147&width=600"
+image: "/modbus_usb_panel/images/eletechsup-r413e16.jpg"
 info_url: "https://eletechsup.com/products/r413e16-rs485-relay-16ch-multifunction-npn-pnp-io-control-core-board-modbus-rtu-eletechsup-oem-odm?_pos=21&_sid=7b35d3777&_ss=r"
 description: >
   16-channel RS-485 Modbus RTU output core (A+/B-). Verified FC06 holding-register

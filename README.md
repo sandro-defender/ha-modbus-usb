@@ -68,7 +68,7 @@ Open **Modbus USB** in the Home Assistant sidebar after the integration is loade
 
 ## Bundled templates
 
-Copied into `config/modbus_usb_templates/` on first run if that folder has no YAML yet. Treat them as starting points — verify addresses against your datasheet.
+Bundled templates are available in the **Templates** tab but are not copied into `config/modbus_usb_templates/` automatically. Use **Download** to save a YAML file locally, or edit/save it in the panel when you want to create your own copy. Treat templates as starting points — verify addresses against your datasheet.
 
 | File | Device | Entities |
 | --- | --- | --- |

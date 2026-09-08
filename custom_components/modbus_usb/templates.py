@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 from typing import Any
 
 import yaml
@@ -26,11 +25,7 @@ def get_user_templates_dir(hass: HomeAssistant) -> str:
 
 
 def ensure_templates_dir(hass: HomeAssistant) -> str:
-    """Ensure the user templates directory exists and add missing starter files.
-
-    Existing files are always left untouched, so a user's edited template is
-    never replaced during an integration update.
-    """
+    """Ensure the user templates directory exists without seeding files."""
     user_dir = get_user_templates_dir(hass)
     if not os.path.exists(user_dir):
         try:
@@ -39,20 +34,6 @@ def ensure_templates_dir(hass: HomeAssistant) -> str:
         except Exception as err:
             _LOGGER.warning("Could not create templates directory %s: %s", user_dir, err)
             return user_dir
-
-    # Copy new bundled starter templates without overwriting user edits.  This
-    # also lets existing installations receive newly added board templates.
-    try:
-        if os.path.isdir(BUNDLED_TEMPLATES_DIR):
-            for fname in os.listdir(BUNDLED_TEMPLATES_DIR):
-                if fname.endswith((".yaml", ".yml")):
-                    src = os.path.join(BUNDLED_TEMPLATES_DIR, fname)
-                    dst = os.path.join(user_dir, fname)
-                    if not os.path.exists(dst):
-                        shutil.copy2(src, dst)
-                        _LOGGER.info("Added starter template %s", fname)
-    except Exception as err:
-        _LOGGER.warning("Error seeding templates into %s: %s", user_dir, err)
 
     return user_dir
 

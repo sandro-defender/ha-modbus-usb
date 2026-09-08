@@ -2,26 +2,20 @@ name: Validate and release
 
 on:
   push:
-    tags:
-      # Supports this repository's existing tags (2.0.5) and v-prefixed tags.
-      - "*"
+    branches:
+      - main
   workflow_dispatch:
-    inputs:
-      release_tag:
-        description: "Existing or new release tag (for example 2.0.7)"
-        required: true
-        type: string
 
 permissions:
   contents: write
 
 jobs:
   validate-and-release:
-    name: Validate integration and create release
+    name: Validate integration and publish a new version
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out the tagged source
+      - name: Check out source
         uses: actions/checkout@v5
 
       - name: Set up Python
@@ -29,54 +23,44 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Confirm tag matches integration version
-        env:
-          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          manifest = json.loads(
-              Path("custom_components/modbus_usb/manifest.json").read_text()
-          )
-          expected = str(manifest["version"])
-          actual = os.environ["RELEASE_TAG"]
-          normalized_tag = actual.removeprefix("v")
-          if normalized_tag != expected:
-              raise SystemExit(
-                  f"Tag {actual!r} does not match manifest version {expected!r}."
-              )
-          print(f"Validated release version {actual}")
-          PY
-
       - name: Check Python source syntax
         run: python -m compileall -q custom_components/modbus_usb
 
-      - name: Create GitHub Release
+      - name: Create tag and GitHub Release from manifest version
         uses: actions/github-script@v8
-        env:
-          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         with:
           script: |
+            const fs = require("fs");
+            const manifest = JSON.parse(
+              fs.readFileSync("custom_components/modbus_usb/manifest.json", "utf8")
+            );
+            const tag = String(manifest.version);
             const release = {
               owner: context.repo.owner,
               repo: context.repo.repo,
-              tag_name: process.env.RELEASE_TAG,
+              tag_name: tag,
               target_commitish: context.sha,
-              name: process.env.RELEASE_TAG,
+              name: tag,
               generate_release_notes: true,
             };
+
             try {
-              const existing = await github.rest.repos.getReleaseByTag(release);
-              await github.rest.repos.updateRelease({
-                ...release,
-                release_id: existing.data.id,
+              await github.rest.git.getRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `tags/${tag}`,
               });
-              core.info(`Updated existing release for ${release.tag_name}`);
+              core.info(`Version ${tag} already exists; no release was changed.`);
+              return;
             } catch (error) {
               if (error.status !== 404) throw error;
-              await github.rest.repos.createRelease(release);
-              core.info(`Created release for ${release.tag_name}`);
             }
+
+            await github.rest.git.createRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: `refs/tags/${tag}`,
+              sha: context.sha,
+            });
+            await github.rest.repos.createRelease(release);
+            core.info(`Created tag and release ${tag}`);

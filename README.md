@@ -265,16 +265,12 @@ automation:
 
 ## Releasing updates
 
-1. Bump `"version"` in [`custom_components/modbus_usb/manifest.json`](custom_components/modbus_usb/manifest.json), then commit and push it to `main`.
-2. Create and push the matching version tag — for example, version `2.0.6` needs tag `2.0.6` (a `v2.0.6` tag also works):
-
-   ```bash
-   git tag 2.0.6
-   git push origin 2.0.6
-   ```
-
-3. GitHub Actions validates the tag and creates the GitHub Release with generated release notes automatically.
+1. Bump `"version"` in [`custom_components/modbus_usb/manifest.json`](custom_components/modbus_usb/manifest.json).
+2. Commit and push the version bump to `main`.
+3. GitHub Actions validates the source, creates the matching tag, and creates the GitHub Release with generated release notes automatically.
 4. HACS users receive an **Update available** notice.
+
+Each manifest version is released once. Pushing more commits with the same version does not modify the existing release; bump the version for the next release.
 
 ## Development tests
 

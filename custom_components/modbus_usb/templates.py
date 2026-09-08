@@ -109,17 +109,27 @@ def load_templates_sync(hass: HomeAssistant) -> list[dict[str, Any]]:
                     templates.append(tpl)
                     seen_ids.add(tpl["id"])
 
-    # Fallback to bundled if not in user dir
+    # Add bundled templates that do not have a user version. When an older
+    # user copy exists, preserve its YAML but fill only missing presentation
+    # metadata (for example a newly added product link or board photo).
     if os.path.isdir(BUNDLED_TEMPLATES_DIR):
         for fname in sorted(os.listdir(BUNDLED_TEMPLATES_DIR)):
             if fname.endswith((".yaml", ".yml")):
                 tid = os.path.splitext(fname)[0]
+                fpath = os.path.join(BUNDLED_TEMPLATES_DIR, fname)
+                bundled_tpl = _parse_template_file(fpath, fname)
+                if not bundled_tpl:
+                    continue
                 if tid not in seen_ids:
-                    fpath = os.path.join(BUNDLED_TEMPLATES_DIR, fname)
-                    tpl = _parse_template_file(fpath, fname)
-                    if tpl:
-                        templates.append(tpl)
-                        seen_ids.add(tpl["id"])
+                    templates.append(bundled_tpl)
+                    seen_ids.add(bundled_tpl["id"])
+                    continue
+
+                user_tpl = next((tpl for tpl in templates if tpl["id"] == tid), None)
+                if user_tpl:
+                    for field in ("image", "info_url"):
+                        if not user_tpl.get(field) and bundled_tpl.get(field):
+                            user_tpl[field] = bundled_tpl[field]
 
     return templates
 

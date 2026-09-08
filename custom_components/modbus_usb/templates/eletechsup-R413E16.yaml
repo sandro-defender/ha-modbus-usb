@@ -1,7 +1,9 @@
 # eletechsup R413E16 — 16-channel RS-485 Modbus RTU I/O core
-# Protocol (FC06 write single holding register), matching the ESPHome payload:
+# Protocol (FC06 write single holding register), verified against the supplied
+# ArduinoModbus holdingRegisterWrite() example:
 #   slave, 0x06, addr_hi=0x00, addr_lo=channel, value_hi=0x01/0x02, value_lo=0x00
 # Channel registers are 1–16 (not 0-based). ON = 256 (0x0100), OFF = 512 (0x0200).
+# The vendor and Arduino example both use default Modbus slave ID 1.
 # Reads are skipped (assumed_state) because this board is command-oriented.
 #
 # Changelog:
@@ -12,12 +14,13 @@ id: eletechsup-R413E16
 name: eletechsup R413E16
 manufacturer: eletechsup
 model: R413E16
-default_slave_id: 3
+default_slave_id: 1
 image: "https://eletechsup.com/cdn/shop/files/10_d5e79182-bd7f-4923-9a48-3494c9c7af1d.jpg?v=1740746147&width=600"
 info_url: "https://eletechsup.com/products/r413e16-rs485-relay-16ch-multifunction-npn-pnp-io-control-core-board-modbus-rtu-eletechsup-oem-odm?_pos=21&_sid=7b35d3777&_ss=r"
 description: >
-  16-channel RS-485 Modbus RTU I/O core (A+/B-). Each AC channel is a holding
-  register switch: write 0x0100 to turn on, 0x0200 to turn off (function code 06).
+  16-channel RS-485 Modbus RTU output core (A+/B-). Verified FC06 holding-register
+  commands: 0x0100 turns a channel on and 0x0200 turns it off. This is a 5 V TTL
+  output core, so it needs a compatible externally powered relay or output board.
 entities:
   - name: CH-01
     entity_type: switch

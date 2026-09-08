@@ -37,6 +37,7 @@ CONF_MODEL = "model"
 CONF_MANUFACTURER = "manufacturer"
 CONF_DESCRIPTION = "description"
 CONF_IMAGE = "image"
+CONF_INFO_URL = "info_url"
 CONF_ASSUMED_STATE = "assumed_state"
 
 TEMPLATES_DIR_NAME = "modbus_usb_templates"

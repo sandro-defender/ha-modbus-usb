@@ -78,11 +78,11 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
             hass,
             component_name="iframe",
             sidebar_title="Modbus USB",
-            sidebar_icon="mdi:usb",
+            sidebar_icon="mdi:serial-port",
             frontend_url_path="modbus-usb",
             # Change this asset version when the standalone sidebar HTML changes.
             # It prevents an already-open browser from retaining an old panel.
-            config={"url": "/modbus_usb_panel/modbus-panel.html?v=2.1.011-entity-save-fix"},
+            config={"url": "/modbus_usb_panel/modbus-panel.html?v=2.1.3"},
             require_admin=False,
         )
         _LOGGER.debug("Modbus USB sidebar panel registered")

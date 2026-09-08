@@ -76,6 +76,7 @@ def _parse_template_file(filepath: str, filename: str) -> dict[str, Any] | None:
             "default_slave_id": int(data.get("default_slave_id", 1)),
             "description": data.get("description", ""),
             "image": data.get("image") or data.get("picture") or "",
+            "info_url": data.get("info_url") or data.get("product_url") or "",
             "fingerprint": data.get("fingerprint", []),
             "entities": data.get("entities", []),
             "raw_yaml": raw_content,

@@ -2306,9 +2306,12 @@ entities:
           `;
         }).join('');
 
-        const avatar = dev.image
+        const avatarImage = dev.image
           ? `<img class="device-avatar" src="${dev.image}" alt="${dev.model || dev.name || 'Device'}">`
           : `<div class="device-avatar">🎛</div>`;
+        const avatar = dev.info_url
+          ? `<a href="${dev.info_url}" target="_blank" rel="noopener noreferrer" title="Open device information">${avatarImage}</a>`
+          : avatarImage;
 
         return `
           <div class="device-card" id="dev-card-${dev.id}">
@@ -2325,6 +2328,7 @@ entities:
                     <span class="badge badge-blue">${devEntities.length} entities</span>
                   </h3>
                   <p>${dev.description || 'Modbus RTU device connected via USB'}</p>
+                  ${dev.info_url ? `<a href="${dev.info_url}" target="_blank" rel="noopener noreferrer" class="text-sm" style="color:#60a5fa;">↗ Device information</a>` : ''}
                 </div>
               </div>
 
@@ -2383,7 +2387,7 @@ entities:
         return `
           <div class="template-card">
             <div>
-              ${tpl.image ? `<img class="template-photo" src="${tpl.image}" alt="${tpl.name || tpl.id}">` : ''}
+              ${tpl.image ? (tpl.info_url ? `<a href="${tpl.info_url}" target="_blank" rel="noopener noreferrer" title="Open device information"><img class="template-photo" src="${tpl.image}" alt="${tpl.name || tpl.id}"></a>` : `<img class="template-photo" src="${tpl.image}" alt="${tpl.name || tpl.id}">`) : ''}
               <div class="template-header">
                 <div class="template-title">
                   <h3>${tpl.name || tpl.id}</h3>
@@ -2396,6 +2400,7 @@ entities:
               </div>
 
               <div class="template-desc">${tpl.description || 'Pre-configured Modbus registers and entity mappings'}</div>
+              ${tpl.info_url ? `<a href="${tpl.info_url}" target="_blank" rel="noopener noreferrer" class="text-sm" style="color:#60a5fa;">↗ Device information</a>` : ''}
 
               <div class="template-entities-preview">
                 ${previewItems || '<div style="color:var(--text-dim); font-size:0.7rem; text-align:center;">No entities defined in template</div>'}

@@ -41,6 +41,7 @@ from .const import (
     CONF_OFF_VALUE,
     CONF_ON_VALUE,
     CONF_IMAGE,
+    CONF_INFO_URL,
     CONF_PARITY,
     CONF_PORT,
     CONF_REGISTER_TYPE,
@@ -649,6 +650,7 @@ async def ws_apply_template(
                 "manufacturer": target_tpl.get("manufacturer", "Generic"),
                 "description": target_tpl.get("description", ""),
                 "image": target_tpl.get(CONF_IMAGE) or "",
+                "info_url": target_tpl.get(CONF_INFO_URL) or "",
             }
             devices.append(new_device)
         else:
@@ -659,6 +661,12 @@ async def ws_apply_template(
             if existing_dev and target_tpl.get(CONF_IMAGE) and not existing_dev.get(CONF_IMAGE):
                 existing_dev = dict(existing_dev)
                 existing_dev[CONF_IMAGE] = target_tpl[CONF_IMAGE]
+                devices = [
+                    existing_dev if d.get("id") == device_id else d for d in devices
+                ]
+            if existing_dev and target_tpl.get(CONF_INFO_URL) and not existing_dev.get(CONF_INFO_URL):
+                existing_dev = dict(existing_dev)
+                existing_dev[CONF_INFO_URL] = target_tpl[CONF_INFO_URL]
                 devices = [
                     existing_dev if d.get("id") == device_id else d for d in devices
                 ]

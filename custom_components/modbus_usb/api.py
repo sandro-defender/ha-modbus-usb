@@ -467,7 +467,10 @@ async def ws_save_entity(
 
         existing_idx = next((i for i, e in enumerate(entities) if e.get(CONF_ENTITY_ID) == ent_id), None)
         if existing_idx is not None:
-            entities[existing_idx] = entity
+            # The editor exposes only the fields it can safely change. Keep
+            # template-only settings such as assumed_state and a device image
+            # when an existing entity is edited from the sidebar.
+            entities[existing_idx] = {**entities[existing_idx], **entity}
         else:
             entities.append(entity)
 

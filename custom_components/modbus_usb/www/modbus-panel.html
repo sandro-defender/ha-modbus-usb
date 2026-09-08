@@ -2293,7 +2293,7 @@ entities:
                   <div class="ent-sub mono">
                     <span>${ent.register_type || 'holding'} @ ${ent.address ?? 0}</span>
                     <span>•</span>
-                    <span>${ent.data_type || (type === 'switch' || type === 'binary_sensor' ? 'bit' : 'uint16')}</span>
+                    <span>${ent.data_type || (ent.register_type === 'holding' ? 'uint16' : (type === 'switch' || type === 'binary_sensor' ? 'bit' : 'uint16'))}</span>
                   </div>
                 </div>
               </div>
@@ -2562,7 +2562,7 @@ entities:
             <td><span class="badge ${pillClass}">${type}</span></td>
             <td class="mono">${ent.register_type || 'holding'}</td>
             <td class="mono">${ent.address ?? '0'}</td>
-            <td class="mono">${ent.data_type || (type === 'switch' || type === 'binary_sensor' ? 'bit' : 'uint16')}</td>
+            <td class="mono">${ent.data_type || (ent.register_type === 'holding' ? 'uint16' : (type === 'switch' || type === 'binary_sensor' ? 'bit' : 'uint16'))}</td>
             <td class="mono">${ent.scale != null && ent.scale !== 1 ? ent.scale + ' × ' : ''}${unit || '—'}</td>
             <td class="mono" style="font-weight:700; color:#93c5fd;">${val} ${unit}</td>
             <td>
@@ -3279,6 +3279,10 @@ entities:
         entityData.state_class = document.getElementById('ent-form-stateclass').value || undefined;
       }
       if (type === 'switch') {
+        if (regtype === 'holding') {
+          // Holding-register switches carry a 16-bit command, unlike coils.
+          entityData.data_type = 'uint16';
+        }
         entityData.on_value = parseInt(document.getElementById('ent-form-onval').value || 1, 10);
         entityData.off_value = parseInt(document.getElementById('ent-form-offval').value || 0, 10);
       }

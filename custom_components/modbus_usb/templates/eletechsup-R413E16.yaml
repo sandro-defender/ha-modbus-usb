@@ -50,6 +50,12 @@ device_controls:
       9600: 3
       19200: 4
     # Code 5 is documented as factory reset, not 38400 baud. Do not expose it.
+  factory_reset:
+    register_type: holding
+    address: 254 # 0x00FE
+    value: 5 # documented factory reset command; power-cycle required
+    default_baud_rate: 9600
+    default_slave_id: 1
   slave_id:
     register_type: holding
     address: 255 # 0x00FF

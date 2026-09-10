@@ -1603,6 +1603,7 @@
         <div class="form-hint" style="color:#fbbf24; line-height:1.5;">A slave-ID change takes effect immediately. After a baud-rate change, power-cycle the board; the hub is saved with the new rate and reconnects after the restart.</div>
       </div>
       <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('modal-r413e16-controls')">Cancel</button><button class="btn btn-primary" id="r413e16-save" onclick="saveR413e16Settings()">Save board settings</button></div>
+      <div class="modal-footer" style="justify-content:space-between; border-top:1px solid rgba(239,68,68,0.24);"><span class="form-hint" style="margin:0;">Reset restores the board’s default connection settings.</span><button class="btn btn-danger" id="r413e16-reset" onclick="resetR413e16Board()">Restore factory settings</button></div>
     </div>
   </div>
 
@@ -2761,6 +2762,18 @@ entities:
         await apiCall('r413e16_command', payload); closeModal('modal-r413e16-controls'); toast(baudrate !== originalBaud ? 'Settings saved. Power-cycle the board to apply the new baud rate.' : 'Board slave ID saved.', 'ok'); setTimeout(refreshData, 1500);
       } catch (err) { toast('Could not save board settings: ' + err.message, 'err'); }
       finally { button.disabled = false; button.textContent = 'Save board settings'; }
+    }
+
+    async function resetR413e16Board() {
+      const entry = getCurrentEntry(); const deviceId = document.getElementById('r413e16-device-id').value;
+      if (!entry || !deviceId) return;
+      if (!confirm('Restore this R413E16 to factory connection settings?\n\nThis sends the documented reset command. After it is accepted, power-cycle the board. The integration will use 9600 baud and slave ID 1.')) return;
+      const button = document.getElementById('r413e16-reset'); button.disabled = true; button.textContent = 'Resetting…';
+      try {
+        await apiCall('r413e16_command', { entry_id: entry.entry_id, device_id: deviceId, command: 'factory_reset' });
+        closeModal('modal-r413e16-controls'); toast('Reset command sent. Power-cycle the board, then use 9600 baud and slave ID 1.', 'ok'); setTimeout(refreshData, 1500);
+      } catch (err) { toast('Factory reset failed: ' + err.message, 'err'); }
+      finally { button.disabled = false; button.textContent = 'Restore factory settings'; }
     }
 
     // ─── TAB 2: RENDER TEMPLATES ────────────────────────────────

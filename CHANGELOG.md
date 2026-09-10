@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.29
+
+### Fixes and settings
+
+- Fixed R413E16 switches failing with `CONF_DEVICES is not defined`.
+- Added a confirmed R413E16 factory-reset command. It restores the documented connection defaults: 9600 baud and slave ID 1; power-cycle the board after sending it.
+
 ## 2.1.28
 
 ### Eletechsup R413E16

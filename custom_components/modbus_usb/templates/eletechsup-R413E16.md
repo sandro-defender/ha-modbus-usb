@@ -27,7 +27,7 @@ All commands use function code 06 (write one holding register) unless noted.
 | Set baud rate | 254 / `0x00FE` | 0=1200, 1=2400, 2=4800, 3=9600, 4=19200 |
 | Set slave ID | 255 / `0x00FF` | 1–247 |
 
-**Important:** the detailed command guide says baud value `5` performs a factory reset. This integration intentionally does not offer it.
+**Factory reset:** baud register value `5` performs a factory reset. The integration exposes this only behind an explicit confirmation and saves the documented defaults: 9600 baud and slave ID 1. Power-cycle the board after sending it.
 
 ## Status reads
 
@@ -39,7 +39,7 @@ The template includes individual switches with live state reads, an **All Channe
 
 Use the **Actions** button beside a channel in the integration panel for the per-channel actions. Interlock deliberately turns all other channels off. The All Channels and group switches remain command-state controls because they do not have one matching status register.
 
-Do not add factory reset to the regular UI. It can erase the working communication setup.
+Factory reset is available only in the R413E16 settings dialog and always requires confirmation.
 
 ## Sources
 

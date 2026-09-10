@@ -355,7 +355,7 @@ def _get_r413e16_device(entry, device_id: str) -> dict[str, Any]:
     vol.Required("type"): "modbus_usb/r413e16_command",
     vol.Required("entry_id"): cv.string,
     vol.Required("device_id"): cv.string,
-    vol.Required("command"): vol.In(["all_on", "all_off", "configure", "channel_action"]),
+    vol.Required("command"): vol.In(["all_on", "all_off", "configure", "channel_action", "factory_reset"]),
     # The R413E16 command guide assigns codes 0–4 to 1200–19200. Code 5 is
     # factory reset, so higher rates must never be offered for this board.
     vol.Optional("baudrate"): vol.In([1200, 2400, 4800, 9600, 19200]),
@@ -375,6 +375,31 @@ async def ws_r413e16_command(
         coordinator = hass.data[DOMAIN][entry.entry_id]
         current_slave = int(device.get(CONF_SLAVE_ID, entry.data.get(CONF_SLAVE_ID, 1)))
         command = msg["command"]
+
+        if command == "factory_reset":
+            # The vendor guide assigns baud register value 5 to factory reset.
+            # It takes effect after the board is powered up again. The published
+            # defaults are 9600 baud and slave ID 1, so keep HA in sync.
+            await hass.async_add_executor_job(
+                coordinator.write_register, 0x00FE, 5, current_slave
+            )
+            new_data = {**entry.data, CONF_BAUDRATE: 9600}
+            new_options = dict(entry.options or {})
+            new_options[CONF_DEVICES] = [
+                {**item, CONF_SLAVE_ID: 1} if item.get("id") == device["id"] else item
+                for item in new_options.get(CONF_DEVICES, [])
+            ]
+            new_options[CONF_ENTITIES] = [
+                {**item, CONF_SLAVE_ID: 1}
+                if item.get(CONF_DEVICE_ID) == device["id"] else item
+                for item in new_options.get(CONF_ENTITIES, [])
+            ]
+            hass.config_entries.async_update_entry(entry, data=new_data, options=new_options)
+            connection.send_result(msg["id"], {
+                "success": True, "command": command, "baudrate": 9600,
+                "slave_id": 1, "power_cycle_required": True,
+            })
+            return
 
         if command == "channel_action":
             channel = msg.get("channel")

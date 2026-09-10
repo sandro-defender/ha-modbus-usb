@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.37
+
+### R413E16 reliable all-channel control
+
+- Changed R413E16 All ON/OFF to send the proven per-channel FC06 commands (`0x0100` / `0x0200`) to channels 1–16. This avoids the optional register-0 broadcast command, which is not implemented consistently by every board revision.
+- Fixed R413E16 live state recognition: both a read-back value of `1` and `256` now report a channel as ON, matching the board’s two observed status representations.
+
 ## 2.1.36
 
 ### R413E16 state synchronization

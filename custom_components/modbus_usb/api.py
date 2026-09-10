@@ -559,15 +559,20 @@ async def ws_r413e16_command(
             return
 
         if command in ("all_on", "all_off"):
-            value = 0x0700 if command == "all_on" else 0x0800
-            await hass.async_add_executor_job(
-                coordinator.write_register, 0, value, current_slave
-            )
-            # The all-channel command changes all outputs at once; immediately
-            # update individual channel entities from their state registers.
+            # Some R413E16 board revisions do not implement the optional
+            # register-0 broadcast command consistently. Interlock and normal
+            # channels prove the individual FC06 commands, so use those known
+            # good writes for a reliable all-channel operation.
+            value = 0x0100 if command == "all_on" else 0x0200
+            for channel in range(1, 17):
+                await hass.async_add_executor_job(
+                    coordinator.write_register, channel, value, current_slave
+                )
+            # Read the individual channel states before returning to the UI.
             await coordinator.async_request_refresh()
             connection.send_result(msg["id"], {
                 "success": True, "command": command, "slave_id": current_slave,
+                "channels_written": 16, "value": value,
             })
             return
 

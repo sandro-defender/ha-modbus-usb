@@ -83,7 +83,18 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
             return None
         if self._ent[CONF_REGISTER_TYPE] == REGISTER_TYPE_COIL:
             return bool(value)
-        return value == self._ent.get(CONF_STATE_ON_VALUE, self._ent.get(CONF_ON_VALUE, 1))
+        state_on_value = self._ent.get(CONF_STATE_ON_VALUE, self._ent.get(CONF_ON_VALUE, 1))
+        # R413E16 firmware variants report a channel as either 1 (state-bit
+        # form) or 0x0100 / 256 (last-command form). Both are the documented
+        # ON representation for a channel written with 0x0100; accepting both
+        # prevents a physically ON output appearing OFF in Home Assistant.
+        if (
+            state_on_value == 1
+            and self._ent.get(CONF_ON_VALUE) == 0x0100
+            and self._ent.get(CONF_OFF_VALUE) == 0x0200
+        ):
+            return value in (1, 0x0100)
+        return value == state_on_value
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self._write(True)

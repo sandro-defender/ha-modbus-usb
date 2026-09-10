@@ -549,6 +549,9 @@ async def ws_r413e16_command(
             await hass.async_add_executor_job(
                 coordinator.write_register, channel, value, current_slave
             )
+            # Toggle and interlock can change more than the selected channel.
+            # Read the configured channel states before returning to the UI.
+            await coordinator.async_request_refresh()
             connection.send_result(msg["id"], {
                 "success": True, "command": command, "channel": channel,
                 "action": action, "value": value, "slave_id": current_slave,
@@ -560,6 +563,9 @@ async def ws_r413e16_command(
             await hass.async_add_executor_job(
                 coordinator.write_register, 0, value, current_slave
             )
+            # The all-channel command changes all outputs at once; immediately
+            # update individual channel entities from their state registers.
+            await coordinator.async_request_refresh()
             connection.send_result(msg["id"], {
                 "success": True, "command": command, "slave_id": current_slave,
             })

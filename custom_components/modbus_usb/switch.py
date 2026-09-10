@@ -108,7 +108,10 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
         if self._attr_assumed_state:
             self._last_command = on
             self.async_write_ha_state()
-            return
+            # A combined command has no single register to read back for its
+            # own state, but it can change normal channel switches. Refresh
+            # those channel entities immediately so HA does not show stale
+            # CH-01…CH-16 states until the next polling interval.
         await self.coordinator.async_request_refresh()
 
 

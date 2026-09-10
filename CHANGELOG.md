@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.36
+
+### R413E16 state synchronization
+
+- Fixed Combined Switches: after sending confirmed `0x0100` ON or `0x0200` OFF commands to every selected channel, the integration immediately reads the individual channel states.
+- Fixed R413E16 All ON/OFF, toggle, and interlock actions so CH-01 through CH-16 update from their state registers immediately after the command.
+
 ## 2.1.35
 
 ### R413E16 documentation

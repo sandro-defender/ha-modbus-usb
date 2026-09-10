@@ -53,6 +53,7 @@ from .const import (
     CONF_SCALE,
     CONF_SCAN_INTERVAL,
     CONF_SLAVE_ID,
+    CONF_STATE_ON_VALUE,
     CONF_STATE_CLASS,
     CONF_STEP,
     CONF_STOPBITS,
@@ -405,7 +406,7 @@ def _entity_slave_id(entry, entity: dict[str, Any]) -> int:
         device = next(
             (
                 device for device in entry.options.get(CONF_DEVICES, [])
-                if device.get("id") == entity.get(CONF_DEVICE_ID)
+                if str(device.get("id")) == str(entity.get(CONF_DEVICE_ID))
             ),
             None,
         )
@@ -970,6 +971,12 @@ async def ws_save_entity(
             entity[CONF_MAX_VALUE] = float(entity[CONF_MAX_VALUE])
         if CONF_STEP in entity and entity[CONF_STEP] not in (None, ""):
             entity[CONF_STEP] = float(entity[CONF_STEP])
+        # JSON form values are strings.  Keep Modbus command and state values
+        # numeric so a switch edited in the sidebar retains its template
+        # behaviour (including the R413E16 verified-state mapping).
+        for value_key in (CONF_ON_VALUE, CONF_OFF_VALUE, CONF_STATE_ON_VALUE):
+            if value_key in entity and entity[value_key] not in (None, ""):
+                entity[value_key] = int(entity[value_key])
 
         new_options = dict(entry.options or {})
         entities = list(new_options.get(CONF_ENTITIES, []))
@@ -1007,8 +1014,30 @@ async def ws_delete_entity(
         ent_id = msg["entity_id"]
 
         new_options = dict(entry.options or {})
+        existing_entity = next(
+            (
+                entity for entity in new_options.get(CONF_ENTITIES, [])
+                if entity.get(CONF_ENTITY_ID) == ent_id
+            ),
+            None,
+        )
         entities = [e for e in new_options.get(CONF_ENTITIES, []) if e.get(CONF_ENTITY_ID) != ent_id]
         new_options[CONF_ENTITIES] = entities
+
+        # Remove the registry entry too. Otherwise deleting and re-adding a
+        # template switch leaves an old, similarly named HA entity behind,
+        # which can make a dashboard appear not to synchronize.
+        entity_registry = er.async_get(hass)
+        entity_domain = (existing_entity or {}).get(CONF_ENTITY_TYPE)
+        ha_entity_id = (
+            entity_registry.async_get_entity_id(
+                entity_domain, DOMAIN, f"{entry.entry_id}_{ent_id}"
+            )
+            if entity_domain in {"sensor", "switch", "binary_sensor", "number"}
+            else None
+        )
+        if ha_entity_id:
+            entity_registry.async_remove(ha_entity_id)
 
         hass.config_entries.async_update_entry(entry, options=new_options)
         connection.send_result(msg["id"], {"success": True})
@@ -1209,6 +1238,11 @@ async def ws_apply_template(
             ent[CONF_SLAVE_ID] = slave_id
             if CONF_ADDRESS in ent:
                 ent[CONF_ADDRESS] = int(ent[CONF_ADDRESS]) + address_offset
+            if CONF_ADDRESSES in ent:
+                ent[CONF_ADDRESSES] = [
+                    int(address) + address_offset
+                    for address in ent[CONF_ADDRESSES]
+                ]
             entities.append(ent)
             added_entities.append(ent)
 

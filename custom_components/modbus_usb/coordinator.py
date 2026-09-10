@@ -9,15 +9,12 @@ from threading import Lock
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
     CONF_ADDRESS,
-    CONF_ADDRESSES,
     CONF_ASSUMED_STATE,
     CONF_BAUDRATE,
     CONF_BYTESIZE,
@@ -126,6 +123,12 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             _LOGGER,
             name="Modbus USB Controller",
             update_interval=timedelta(seconds=scan_interval),
+            # R413E16 reports are also kept in a verified-state cache.  A
+            # manual read can change that cache while the raw values in the
+            # coordinator dictionary compare equal to the previous snapshot.
+            # Always notify listeners so HA switch entities still recalculate
+            # their state from the confirmed board response.
+            always_update=True,
         )
         self.client = client
         self.slave_id = slave_id
@@ -156,9 +159,6 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         # channel read fails. R413E16 holding-register feedback is otherwise
         # authoritative and refreshes this cache on every successful poll.
         self._command_states: dict[str, bool] = {}
-        # Kept by the switch platform so an explicit channel-state read can
-        # immediately publish the corresponding HA entity states.
-        self._switch_entities: list[Any] = []
         # Modbus RTU is request/response based: concurrent access to one serial
         # adapter can pair a response with the wrong request. Every I/O operation
         # must therefore own this lock for its entire transaction.
@@ -167,55 +167,6 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
     def get_command_state(self, entity_id: str) -> bool | None:
         """Return the last known state when a board read is temporarily unavailable."""
         return self._command_states.get(entity_id)
-
-    def register_switch_entities(self, switch_entities: list[Any]) -> None:
-        """Register loaded switch entities for immediate state publication."""
-        self._switch_entities = switch_entities
-
-    def _publish_r413e16_switch_states(self, device_id: str) -> None:
-        """Write the changed R413E16 channel and group states to HA now."""
-        for switch_entity in self._switch_entities:
-            config = getattr(switch_entity, "_ent", {})
-            if str(config.get(CONF_DEVICE_ID)) != str(device_id):
-                continue
-            if getattr(switch_entity, "hass", None) is not None:
-                switch_entity.async_write_ha_state()
-
-        # Force the state machine to receive the exact reply as well. This is
-        # needed on some HA versions where the coordinator listener batches a
-        # state update behind the completed WebSocket request.
-        entity_registry = er.async_get(self.hass)
-        for config in self._get_entities():
-            if (
-                str(config.get(CONF_DEVICE_ID)) != str(device_id)
-                or config.get(CONF_ENTITY_TYPE) != "switch"
-                or config.get(CONF_REGISTER_TYPE) != REGISTER_TYPE_HOLDING
-                or config.get("on_value") != 0x0100
-                or config.get("off_value") != 0x0200
-            ):
-                continue
-            config_id = config.get("id")
-            if not config_id:
-                continue
-            if config.get(CONF_ASSUMED_STATE):
-                state = self.get_r413e16_group_state(
-                    device_id, [int(address) for address in config.get(CONF_ADDRESSES, [])]
-                )
-            else:
-                state = self._command_states.get(str(config_id))
-            if state is None:
-                continue
-            ha_entity_id = entity_registry.async_get_entity_id(
-                "switch", DOMAIN, f"{self.entry_id}_{config_id}"
-            )
-            if not ha_entity_id:
-                continue
-            existing = self.hass.states.get(ha_entity_id)
-            attributes = dict(existing.attributes) if existing else {}
-            self.hass.states.async_set(
-                ha_entity_id, STATE_ON if state else STATE_OFF, attributes,
-                force_update=True,
-            )
 
     def get_r413e16_group_state(
         self, device_id: str, addresses: list[int]
@@ -279,7 +230,6 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 for entity_id, state in updates.items()
             })
             self.async_set_updated_data(updated_data)
-            self._publish_r413e16_switch_states(device_id)
 
     def _ensure_connected(self) -> None:
         """Open the serial adapter or raise a useful error before a request."""

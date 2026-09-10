@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.1.47
+
+### Reliable Home Assistant state synchronization
+
+- Fixed R413E16 state refreshes being skipped when the raw coordinator data
+  looked unchanged. Verified channel reads now always notify Home Assistant
+  entities, so CH and Combined Switch states follow the board response.
+- Removed the unsupported direct state-machine override that could be replaced
+  by a later entity update.
+- Preserve numeric switch command/state values after editing a template entity,
+  preventing string values from breaking R413E16 state matching.
+- Apply a template address offset to every address in a Combined Switch.
+
 ## 2.1.46
 
 ### Forced Home Assistant state-machine synchronization

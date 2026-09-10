@@ -42,7 +42,6 @@ async def async_setup_entry(
         if ent[CONF_ENTITY_TYPE] == "switch"
     ]
     async_add_entities(switches)
-    coordinator.register_switch_entities(switches)
 
 
 class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.45
+
+### Immediate Home Assistant R413E16 updates
+
+- Added an explicit state publication path for R413E16 channel reads and commands. When the board reports channel states, HA immediately rewrites the state of every affected CH switch and its Combined Switch.
+- This fixes cases where the sidebar correctly showed verified Modbus feedback but Home Assistant dashboards still displayed old switch states.
+
 ## 2.1.44
 
 ### R413E16 verified feedback display

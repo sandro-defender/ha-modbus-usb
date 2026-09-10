@@ -153,6 +153,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         # channel read fails. R413E16 holding-register feedback is otherwise
         # authoritative and refreshes this cache on every successful poll.
         self._command_states: dict[str, bool] = {}
+        # Kept by the switch platform so an explicit channel-state read can
+        # immediately publish the corresponding HA entity states.
+        self._switch_entities: list[Any] = []
         # Modbus RTU is request/response based: concurrent access to one serial
         # adapter can pair a response with the wrong request. Every I/O operation
         # must therefore own this lock for its entire transaction.
@@ -161,6 +164,19 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
     def get_command_state(self, entity_id: str) -> bool | None:
         """Return the last known state when a board read is temporarily unavailable."""
         return self._command_states.get(entity_id)
+
+    def register_switch_entities(self, switch_entities: list[Any]) -> None:
+        """Register loaded switch entities for immediate state publication."""
+        self._switch_entities = switch_entities
+
+    def _publish_r413e16_switch_states(self, device_id: str) -> None:
+        """Write the changed R413E16 channel and group states to HA now."""
+        for switch_entity in self._switch_entities:
+            config = getattr(switch_entity, "_ent", {})
+            if str(config.get(CONF_DEVICE_ID)) != str(device_id):
+                continue
+            if getattr(switch_entity, "hass", None) is not None:
+                switch_entity.async_write_ha_state()
 
     def get_r413e16_group_state(
         self, device_id: str, addresses: list[int]
@@ -224,6 +240,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 for entity_id, state in updates.items()
             })
             self.async_set_updated_data(updated_data)
+            self._publish_r413e16_switch_states(device_id)
 
     def _ensure_connected(self) -> None:
         """Open the serial adapter or raise a useful error before a request."""

@@ -265,6 +265,104 @@ async def ws_diagnostic_write(
         connection.send_error(msg["id"], "write_failed", str(err))
 
 
+_PROBE_FUNCTIONS = {
+    "coil": (0x01, "Read Coils"),
+    "discrete": (0x02, "Read Discrete Inputs"),
+    "holding": (0x03, "Read Holding Registers"),
+    "input": (0x04, "Read Input Registers"),
+}
+
+
+def _probe_request_frame(slave_id: int, function_code: int, address: int) -> str:
+    """Return the visible portion of a one-item Modbus RTU read request.
+
+    The CRC is deliberately represented rather than calculated here: pymodbus
+    owns frame generation and may use a different transport implementation.
+    """
+    return (
+        f"{slave_id:02X} {function_code:02X} {address >> 8:02X} "
+        f"{address & 0xFF:02X} 00 01 [CRC]"
+    )
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "modbus_usb/probe_registers",
+    vol.Required("entry_id"): cv.string,
+    vol.Required("slave_id"): vol.All(vol.Coerce(int), vol.Range(min=1, max=247)),
+    vol.Required("start_address"): vol.All(vol.Coerce(int), vol.Range(min=0, max=65535)),
+    vol.Required("end_address"): vol.All(vol.Coerce(int), vol.Range(min=0, max=65535)),
+    vol.Required("register_types"): vol.All(
+        [vol.In(list(_PROBE_FUNCTIONS))], vol.Length(min=1, max=4)
+    ),
+})
+@websocket_api.async_response
+async def ws_probe_registers(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Safely probe standard *read-only* Modbus functions at a few addresses.
+
+    Unknown devices often use vendor-specific write values.  This endpoint never
+    writes anything and intentionally limits the address span, avoiding a long
+    request flood when the selected slave is absent or wired incorrectly.
+    """
+    start_address = msg["start_address"]
+    end_address = msg["end_address"]
+    if end_address < start_address:
+        connection.send_error(msg["id"], "invalid_range", "End address must be at or above start address")
+        return
+    if end_address - start_address > 3:
+        connection.send_error(
+            msg["id"], "range_too_large",
+            "The safe probe can check at most four consecutive addresses at once",
+        )
+        return
+
+    try:
+        coordinator = hass.data[DOMAIN][msg["entry_id"]]
+        results: list[dict[str, Any]] = []
+        for register_type in msg["register_types"]:
+            function_code, function_name = _PROBE_FUNCTIONS[register_type]
+            for address in range(start_address, end_address + 1):
+                request = _probe_request_frame(msg["slave_id"], function_code, address)
+                try:
+                    value = await hass.async_add_executor_job(
+                        coordinator.read_register_raw,
+                        address, register_type, "uint16", msg["slave_id"],
+                    )
+                    value_hint = (
+                        "A binary value; this may be a state bit."
+                        if isinstance(value, bool)
+                        else "A raw 16-bit register value; meaning is device-specific."
+                    )
+                    results.append({
+                        "register_type": register_type,
+                        "function_code": f"0x{function_code:02X}",
+                        "function_name": function_name,
+                        "address": address,
+                        "request": request,
+                        "status": "response",
+                        "value": value,
+                        "meaning": value_hint,
+                    })
+                except Exception as err:  # noqa: BLE001
+                    results.append({
+                        "register_type": register_type,
+                        "function_code": f"0x{function_code:02X}",
+                        "function_name": function_name,
+                        "address": address,
+                        "request": request,
+                        "status": "no_response",
+                        "error": str(err),
+                        "meaning": "No valid response. Check slave ID, baud rate, wiring, and register map.",
+                    })
+                # Keep the Home Assistant event loop responsive between probes.
+                await asyncio.sleep(0)
+        connection.send_result(msg["id"], {"results": results})
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("Read-only Modbus probe failed: %s", err)
+        connection.send_error(msg["id"], "probe_failed", str(err))
+
+
 def _entity_slave_id(entry, entity: dict[str, Any]) -> int:
     """Resolve an entity's explicit or owning device's Modbus slave ID."""
     slave_id = entity.get(CONF_SLAVE_ID)
@@ -1122,6 +1220,7 @@ async def async_register_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_get_data)
     websocket_api.async_register_command(hass, ws_diagnostic_read)
     websocket_api.async_register_command(hass, ws_diagnostic_write)
+    websocket_api.async_register_command(hass, ws_probe_registers)
     websocket_api.async_register_command(hass, ws_write_entity)
     websocket_api.async_register_command(hass, ws_r413e16_command)
     websocket_api.async_register_command(hass, ws_test_device_entities)

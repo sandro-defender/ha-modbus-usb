@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.30
+
+### Board Debug Lab
+
+- Added a read-only unknown-board probe for the four standard Modbus read functions: coils, discrete inputs, holding registers, and input registers.
+- Each probe result now shows the RTU request format, returned value or error, and a careful interpretation of what the response proves.
+- Added a separately guarded manual-write lab. It requires an explicit single-board acknowledgement, typing `ONE BOARD`, and two confirmation prompts. No automatic write, reset, or configuration sweep is performed.
+
 ## 2.1.29
 
 ### Fixes and settings

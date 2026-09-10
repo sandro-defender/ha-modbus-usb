@@ -121,6 +121,20 @@
     .diag-log td { color:#cbd5e1; padding:0.55rem 0.5rem; border-bottom:1px solid rgba(255,255,255,0.05); vertical-align:top; }
     .diag-log tr.error td { background:rgba(239,68,68,0.06); color:#fca5a5; }
     .diag-log-wrap { overflow:auto; max-height:420px; border:1px solid rgba(255,255,255,0.06); border-radius:10px; }
+    .debug-warning { padding:0.9rem; border:1px solid rgba(245,158,11,0.42); border-radius:10px; background:rgba(245,158,11,0.09); color:#fde68a; font-size:0.8rem; }
+    .debug-danger { padding:1rem; border:1px solid rgba(239,68,68,0.45); border-radius:12px; background:rgba(127,29,29,0.18); }
+    .debug-danger .card-title { color:#fecaca; }
+    .debug-checks { display:flex; flex-wrap:wrap; gap:0.65rem 1rem; margin:0.8rem 0; }
+    .debug-checks label, .debug-ack-label { display:flex; align-items:center; gap:0.45rem; color:#cbd5e1; font-size:0.8rem; cursor:pointer; }
+    .debug-ack-label { align-items:flex-start; margin:0.75rem 0; }
+    .debug-ack-label input { margin-top:0.18rem; flex:0 0 auto; }
+    .debug-output { display:grid; gap:0.6rem; margin-top:1rem; }
+    .debug-result { padding:0.8rem; border:1px solid rgba(255,255,255,0.09); border-left:3px solid #f59e0b; border-radius:9px; background:rgba(0,0,0,0.2); overflow-wrap:anywhere; }
+    .debug-result.ok { border-left-color:#34d399; }
+    .debug-result.error { border-left-color:#f87171; }
+    .debug-result-title { display:flex; justify-content:space-between; gap:0.65rem; flex-wrap:wrap; color:#f8fafc; font-size:0.82rem; font-weight:700; }
+    .debug-result-code { margin-top:0.4rem; color:#93c5fd; font-family:var(--font-mono); font-size:0.73rem; overflow-wrap:anywhere; }
+    .debug-result-copy { margin-top:0.45rem; color:#cbd5e1; font-size:0.76rem; }
 
     /* ── Header ────────────────────────────────────────────────── */
     .header {
@@ -1177,6 +1191,10 @@
         <svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M9 3h6M12 3v7l4.5 7.5A2.5 2.5 0 0 1 14.35 21h-4.7a2.5 2.5 0 0 1-2.15-3.5L12 10M9 16h6" /></svg>
         Diagnostics
       </button>
+      <button class="nav-tab" id="tab-btn-debug" role="tab" aria-selected="false" aria-controls="pane-debug" tabindex="-1" onclick="switchTab('debug')">
+        <svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v4m0 10v4M5.64 5.64l2.83 2.83m7.06 7.06 2.83 2.83M3 12h4m10 0h4M5.64 18.36l2.83-2.83m7.06-7.06 2.83-2.83M9 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z" /></svg>
+        Board Debug
+      </button>
     </nav>
 
     <!-- ═════════════════════════════════════════════════════════════ -->
@@ -1439,6 +1457,83 @@
             <thead><tr><th>Time</th><th>Request</th><th>Slave</th><th>Address</th><th>Value / Response</th><th>Time</th></tr></thead>
             <tbody id="diag-log-body"><tr><td colspan="6" class="text-muted" style="text-align:center; padding:1.2rem;">Waiting for RS-485 activity…</td></tr></tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <!-- TAB 7: UNKNOWN BOARD DEBUG LAB                              -->
+    <!-- ═════════════════════════════════════════════════════════════ -->
+    <div class="tab-pane" id="pane-debug" role="tabpanel" aria-labelledby="tab-btn-debug" hidden>
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Board Debug Lab</div>
+            <div class="card-subtitle">Read-only discovery for an unknown Modbus RTU board</div>
+          </div>
+          <span class="badge badge-amber">Read-only probe</span>
+        </div>
+        <div class="debug-warning" role="note">
+          This lab can identify standard Modbus read functions, but it cannot safely discover unknown write commands. A reply proves that the selected slave, function, and address answered; it does not identify the meaning of a register. Start with one powered board connected.
+        </div>
+        <div class="form-grid-3 mt-2">
+          <div class="form-group">
+            <label class="form-label" for="debug-slave">Target Slave ID</label>
+            <input class="form-input mono" type="number" id="debug-slave" value="1" min="1" max="247" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="debug-start-address">Start address</label>
+            <input class="form-input mono" type="number" id="debug-start-address" value="0" min="0" max="65535" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="debug-end-address">End address</label>
+            <input class="form-input mono" type="number" id="debug-end-address" value="0" min="0" max="65535" />
+            <div class="form-hint">Up to four consecutive addresses per run.</div>
+          </div>
+        </div>
+        <fieldset class="debug-checks">
+          <legend class="form-label">Read functions to test</legend>
+          <label><input type="checkbox" name="debug-read-type" value="holding" checked /> Holding (0x03)</label>
+          <label><input type="checkbox" name="debug-read-type" value="input" /> Input (0x04)</label>
+          <label><input type="checkbox" name="debug-read-type" value="coil" /> Coils (0x01)</label>
+          <label><input type="checkbox" name="debug-read-type" value="discrete" /> Discrete (0x02)</label>
+        </fieldset>
+        <button class="btn btn-primary" id="btn-debug-probe" onclick="runSafeBoardProbe()">Run safe read probe</button>
+        <div id="debug-probe-status" class="text-muted text-sm mt-1" aria-live="polite">No probe has run yet.</div>
+        <div id="debug-probe-results" class="debug-output" aria-live="polite"></div>
+      </div>
+
+      <div class="card">
+        <div class="debug-danger">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Dangerous manual write</div>
+              <div class="card-subtitle">Sends exactly one command you enter; no automatic command sweep is ever run.</div>
+            </div>
+            <span class="badge" style="background:rgba(239,68,68,0.18); color:#fecaca; border:1px solid rgba(239,68,68,0.42);">Hardware risk</span>
+          </div>
+          <p class="text-sm" style="color:#fecaca;">A write can energize equipment, change a board setting, reset a board, or make it unreachable. Use this only with a documented command and exactly one powered board on the RS-485 line.</p>
+          <div class="form-grid-3 mt-2">
+            <div class="form-group">
+              <label class="form-label" for="debug-write-type">Write target</label>
+              <select class="form-select" id="debug-write-type"><option value="holding">Holding register (0x06)</option><option value="coil">Coil (0x05)</option></select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="debug-write-address">Address</label>
+              <input class="form-input mono" type="number" id="debug-write-address" value="0" min="0" max="65535" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="debug-write-value">Value</label>
+              <input class="form-input mono" type="number" id="debug-write-value" value="1" min="0" max="65535" />
+            </div>
+          </div>
+          <label class="debug-ack-label"><input type="checkbox" id="debug-one-board-check" /> I confirm exactly one powered board is connected, and I have checked this command in that board's documentation.</label>
+          <div class="form-group">
+            <label class="form-label" for="debug-one-board-text">Type <span class="mono">ONE BOARD</span> to unlock the command</label>
+            <input class="form-input mono" id="debug-one-board-text" autocomplete="off" autocapitalize="characters" placeholder="ONE BOARD" />
+          </div>
+          <button class="btn btn-danger" id="btn-debug-write" onclick="sendGuardedDebugWrite()">Send one manual write</button>
+          <div id="debug-write-result" class="text-sm mt-1" aria-live="polite"></div>
         </div>
       </div>
     </div>
@@ -2237,6 +2332,21 @@ entities:
       }
       if (type === 'diagnostic_read') {
         return { value: 230.4 };
+      }
+      if (type === 'probe_registers') {
+        const types = payload.register_types || ['holding'];
+        const names = { coil: ['0x01', 'Read Coils'], discrete: ['0x02', 'Read Discrete Inputs'], holding: ['0x03', 'Read Holding Registers'], input: ['0x04', 'Read Input Registers'] };
+        const results = [];
+        types.forEach(type => {
+          for (let address = payload.start_address; address <= payload.end_address; address += 1) {
+            const [code, name] = names[type];
+            results.push({ register_type: type, function_code: code, function_name: name, address,
+              request: `${Number(payload.slave_id).toString(16).padStart(2, '0').toUpperCase()} ${code.slice(2)} ${Math.floor(address / 256).toString(16).padStart(2, '0').toUpperCase()} ${(address % 256).toString(16).padStart(2, '0').toUpperCase()} 00 01 [CRC]`,
+              status: 'response', value: type === 'holding' ? 0 : false,
+              meaning: 'Simulated response — a real board may return a different value.' });
+          }
+        });
+        return { results };
       }
       if (type === 'scan_bus') {
         return { found: [{ slave_id: 1, baudrate: 9600, response: 'register response' }], probed: 20 };
@@ -4003,6 +4113,120 @@ entities:
       } catch (error) {
         resBox.style.color = '#f87171';
         resBox.textContent = `❌ Write failed: ${error.message}`;
+      }
+    }
+
+    // ─── UNKNOWN BOARD DEBUG LAB ───────────────────────────────
+    function renderBoardProbeResults(results) {
+      const box = document.getElementById('debug-probe-results');
+      if (!results?.length) {
+        box.innerHTML = '<div class="debug-result">No requests were sent.</div>';
+        return;
+      }
+      box.innerHTML = results.map(item => {
+        const isOk = item.status === 'response';
+        const title = isOk
+          ? `Response · ${item.function_name} (${item.function_code}) · address ${item.address}`
+          : `No response · ${item.function_name} (${item.function_code}) · address ${item.address}`;
+        const reply = isOk
+          ? `<strong>Returned:</strong> ${escapeHtml(item.value)}`
+          : `<strong>Error:</strong> ${escapeHtml(item.error || 'No response received')}`;
+        return `<article class="debug-result ${isOk ? 'ok' : 'error'}">
+          <div class="debug-result-title"><span>${escapeHtml(title)}</span><span>${isOk ? 'Reply received' : 'Check connection'}</span></div>
+          <div class="debug-result-code">Request: ${escapeHtml(item.request)}</div>
+          <div class="debug-result-copy">${reply}</div>
+          <div class="debug-result-copy"><strong>What this tells you:</strong> ${escapeHtml(item.meaning)}</div>
+        </article>`;
+      }).join('');
+    }
+
+    async function runSafeBoardProbe() {
+      const entry = getCurrentEntry();
+      const slave = parseInt(document.getElementById('debug-slave').value, 10);
+      const startAddress = parseInt(document.getElementById('debug-start-address').value, 10);
+      const endAddress = parseInt(document.getElementById('debug-end-address').value, 10);
+      const types = [...document.querySelectorAll('input[name="debug-read-type"]:checked')].map(input => input.value);
+      const button = document.getElementById('btn-debug-probe');
+      const status = document.getElementById('debug-probe-status');
+      const output = document.getElementById('debug-probe-results');
+      if (!entry || !Number.isInteger(slave) || slave < 1 || slave > 247 || !Number.isInteger(startAddress) || !Number.isInteger(endAddress)) {
+        status.textContent = 'Enter a valid slave ID and register-address range.';
+        return;
+      }
+      if (endAddress < startAddress || endAddress - startAddress > 3) {
+        status.textContent = 'Use an address range from 0 to 3 addresses wide (up to four addresses total).';
+        return;
+      }
+      if (!types.length) {
+        status.textContent = 'Choose at least one read function.';
+        return;
+      }
+      const requestCount = (endAddress - startAddress + 1) * types.length;
+      button.disabled = true;
+      button.textContent = 'Probing…';
+      status.textContent = `Sending ${requestCount} read-only request${requestCount === 1 ? '' : 's'}… absent boards can take time to reply.`;
+      output.innerHTML = '';
+      try {
+        const result = await apiCall('probe_registers', {
+          entry_id: entry.entry_id, slave_id: slave, start_address: startAddress,
+          end_address: endAddress, register_types: types,
+        });
+        const successCount = result.results.filter(item => item.status === 'response').length;
+        status.textContent = `Finished: ${successCount} response${successCount === 1 ? '' : 's'} from ${result.results.length} safe read requests.`;
+        renderBoardProbeResults(result.results);
+        setTimeout(refreshData, 200);
+      } catch (error) {
+        status.textContent = `Probe failed: ${error.message}`;
+        output.innerHTML = '<div class="debug-result error">The probe did not complete. Confirm the serial settings and retry with one function and one address.</div>';
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Run safe read probe';
+      }
+    }
+
+    async function sendGuardedDebugWrite() {
+      const entry = getCurrentEntry();
+      const slave = parseInt(document.getElementById('debug-slave').value, 10);
+      const address = parseInt(document.getElementById('debug-write-address').value, 10);
+      const value = parseInt(document.getElementById('debug-write-value').value, 10);
+      const registerType = document.getElementById('debug-write-type').value;
+      const hasOneBoardAcknowledgement = document.getElementById('debug-one-board-check').checked;
+      const typedConfirmation = document.getElementById('debug-one-board-text').value.trim().toUpperCase();
+      const resultBox = document.getElementById('debug-write-result');
+      const button = document.getElementById('btn-debug-write');
+      if (!entry || ![slave, address, value].every(Number.isInteger) || slave < 1 || slave > 247 || address < 0 || address > 65535 || value < 0 || value > 65535) {
+        resultBox.style.color = '#fca5a5';
+        resultBox.textContent = 'Enter a valid slave ID, address, and value from 0 to 65535.';
+        return;
+      }
+      if (registerType === 'coil' && ![0, 1].includes(value)) {
+        resultBox.style.color = '#fca5a5';
+        resultBox.textContent = 'Coil writes use only 0 (OFF) or 1 (ON).';
+        return;
+      }
+      if (!hasOneBoardAcknowledgement || typedConfirmation !== 'ONE BOARD') {
+        resultBox.style.color = '#fcd34d';
+        resultBox.textContent = 'Check the single-board acknowledgement and type ONE BOARD exactly before continuing.';
+        return;
+      }
+      if (!window.confirm(`Warning: this sends a write to slave ${slave}, ${registerType} address ${address}, value ${value}. It may activate equipment, alter settings, or reset a board. Continue?`)) return;
+      if (!window.confirm('Final check: exactly one powered board is connected to this RS-485 line, and this command is documented for that board. Send it now?')) return;
+      button.disabled = true;
+      button.textContent = 'Sending…';
+      resultBox.style.color = '#93c5fd';
+      const functionCode = registerType === 'coil' ? '0x05' : '0x06';
+      resultBox.textContent = `Sending one write: function ${functionCode}, slave ${slave}, ${registerType} ${address}, value ${value}…`;
+      try {
+        await apiCall('diagnostic_write', { entry_id: entry.entry_id, slave_id: slave, address, register_type: registerType, value });
+        resultBox.style.color = '#86efac';
+        resultBox.textContent = `Function ${functionCode} acknowledgement received for slave ${slave}, ${registerType} address ${address}. This confirms the Modbus reply, not the physical effect.`;
+        setTimeout(refreshData, 200);
+      } catch (error) {
+        resultBox.style.color = '#fca5a5';
+        resultBox.textContent = `Write failed: ${error.message}. Do not retry until you verify the command and connection.`;
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Send one manual write';
       }
     }
 

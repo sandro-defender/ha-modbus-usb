@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.35
+
+### R413E16 documentation
+
+- Added a visible Documentation button to every configured R413E16 device.
+- Added an in-panel reference covering confirmed wiring defaults, channel commands, live state reads, baud/slave settings, factory-reset safety, and links to the manufacturer’s documentation.
+
 ## 2.1.34
 
 ### Combined Switches and panel stability

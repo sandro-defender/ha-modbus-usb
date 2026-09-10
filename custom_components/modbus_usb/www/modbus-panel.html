@@ -1774,6 +1774,29 @@
     </div>
   </div>
 
+  <div class="modal-backdrop" id="modal-r413e16-documentation">
+    <div class="modal-box modal-lg">
+      <div class="modal-header">
+        <div class="modal-title">R413E16 documentation</div>
+        <button class="modal-close" aria-label="Close R413E16 documentation" onclick="closeModal('modal-r413e16-documentation')">✕</button>
+      </div>
+      <div class="modal-body" style="line-height:1.6;">
+        <p class="text-muted">Verified Modbus RTU reference used by the tested R413E16 template. The board is a 5 V TTL output core; it needs compatible external relays or output hardware.</p>
+        <h3 style="margin:1rem 0 0.35rem;">Connection defaults</h3>
+        <p>RS-485 Modbus RTU: <strong>9600 baud, 8 data bits, no parity, 1 stop bit</strong>. Default slave ID: <strong>1</strong>. Valid IDs: 1–247.</p>
+        <h3 style="margin:1rem 0 0.35rem;">Channel commands</h3>
+        <p>Use function 06 (write one holding register), register 1–16:</p>
+        <ul style="margin:0.25rem 0 0.75rem 1.2rem;"><li>ON: 256 / <span class="mono">0x0100</span></li><li>OFF: 512 / <span class="mono">0x0200</span></li><li>Toggle: 768 / <span class="mono">0x0300</span></li><li>Interlock: 1024 / <span class="mono">0x0400</span></li><li>Momentary one-second pulse: 1280 / <span class="mono">0x0500</span></li><li>Timed action: 1536 + 0–255 seconds</li></ul>
+        <p>Read holding registers 1–16 with function 03 for channel state: <strong>1 = ON</strong>, <strong>0 = OFF</strong>.</p>
+        <h3 style="margin:1rem 0 0.35rem;">Settings and safety</h3>
+        <p>Baud register 254: 0=1200, 1=2400, 2=4800, 3=9600, 4=19200. Slave ID register 255 accepts 1–247. Value <strong>5</strong> at register 254 is a factory reset—use only the confirmed Reset action in the integration, then power-cycle the board.</p>
+        <p class="debug-warning" style="margin-top:0.85rem;">Interlock turns other channels off. A Combined Switch sends the normal ON/OFF command to every selected channel; you can create more than one combined group.</p>
+        <div class="flex gap-1 mt-2" style="flex-wrap:wrap;"><a class="btn btn-primary" target="_blank" rel="noopener noreferrer" href="https://eletechsup.com/products/r413e16-rs485-relay-16ch-multifunction-npn-pnp-io-control-core-board-modbus-rtu-eletechsup-oem-odm?_pos=21&amp;_sid=7b35d3777&amp;_ss=r">Manufacturer page</a><a class="btn btn-secondary" target="_blank" rel="noopener noreferrer" href="https://eletechsup.com/blogs/news/eletechsup-r413e16-r413d08-multi-function-io-control-some-basic-command">Command reference</a></div>
+      </div>
+      <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('modal-r413e16-documentation')">Close</button></div>
+    </div>
+  </div>
+
   <div class="modal-backdrop" id="modal-r413e16-channel-action">
     <div class="modal-box">
       <div class="modal-header">
@@ -2790,6 +2813,7 @@ entities:
                 ${isR413e16 ? (legacyAllChannelsSwitch
                   ? `<button class="btn btn-secondary btn-sm" onclick="convertR413e16AllChannelsSwitch('${dev.id}', '${legacyAllChannelsSwitch.id}')" title="Replace the legacy all-channel command with a selectable combined switch">Convert to Combined Switch</button>`
                   : `<button class="btn btn-secondary btn-sm" onclick="openAddR413e16CombinedSwitch('${dev.id}')" title="Create another switch for selected R413E16 channels">Add Combined Switch</button>`) : ''}
+                ${isR413e16 ? `<button class="btn btn-secondary btn-sm" onclick="openR413e16Documentation()" title="Open verified R413E16 wiring and command reference">Documentation</button>` : ''}
                 ${isR413e16 ? `<button class="btn btn-secondary btn-sm" onclick="openR413e16Controls('${dev.id}')" title="Control all channels or change this R413E16 board's communication settings">R413E16 controls</button>` : ''}
                 <button class="btn btn-ghost btn-sm" onclick="openEditDeviceModal('${dev.id}')" title="Rename or edit slave ID">
                   ✏ Edit
@@ -2870,6 +2894,10 @@ entities:
       document.getElementById('r413e16-baud').value = baud;
       document.getElementById('r413e16-slave').value = slave;
       openModal('modal-r413e16-controls');
+    }
+
+    function openR413e16Documentation() {
+      openModal('modal-r413e16-documentation');
     }
 
     async function convertR413e16AllChannelsSwitch(deviceId, entityId) {

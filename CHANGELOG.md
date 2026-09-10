@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.27
+
+### Safety
+
+- Corrected the R413E16 baud-rate control to the documented safe range: 1200–19200 baud. Higher choices were removed because the documented code `5` performs a factory reset.
+- Added a concise R413E16 protocol reference beside the tested template, including verified commands, wiring notes, safe limits, and future feature candidates.
+
 ## 2.1.26
 
 ### Eletechsup R413E16

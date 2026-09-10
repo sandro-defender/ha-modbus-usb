@@ -9,6 +9,7 @@
 # Changelog:
 # 2026-09-06 — Initial template from ESPHome rs485 CH-01..CH-16 mapping.
 # 2026-09-10 — Added verified all-channel, baud-rate and address control metadata.
+# 2026-09-10 — Cross-checked against the 16-channel command guide; baud codes 0–4 only.
 # Date modified: 2026-09-10
 
 id: eletechsup-R413E16
@@ -46,9 +47,7 @@ device_controls:
       4800: 2
       9600: 3
       19200: 4
-      38400: 5
-      57600: 6
-      115200: 7
+    # Code 5 is documented as factory reset, not 38400 baud. Do not expose it.
   slave_id:
     register_type: holding
     address: 255 # 0x00FF

@@ -356,7 +356,9 @@ def _get_r413e16_device(entry, device_id: str) -> dict[str, Any]:
     vol.Required("entry_id"): cv.string,
     vol.Required("device_id"): cv.string,
     vol.Required("command"): vol.In(["all_on", "all_off", "configure"]),
-    vol.Optional("baudrate"): vol.In([1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]),
+    # The R413E16 command guide assigns codes 0–4 to 1200–19200. Code 5 is
+    # factory reset, so higher rates must never be offered for this board.
+    vol.Optional("baudrate"): vol.In([1200, 2400, 4800, 9600, 19200]),
     vol.Optional("slave_id"): vol.All(vol.Coerce(int), vol.Range(min=1, max=247)),
 })
 @websocket_api.async_response
@@ -398,7 +400,6 @@ async def ws_r413e16_command(
         if baudrate is not None:
             baud_codes = {
                 1200: 0, 2400: 1, 4800: 2, 9600: 3, 19200: 4,
-                38400: 5, 57600: 6, 115200: 7,
             }
             await hass.async_add_executor_job(
                 coordinator.write_register, 0x00FE, baud_codes[baudrate], target_slave

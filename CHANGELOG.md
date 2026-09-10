@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.31
+
+### Board Debug Lab
+
+- Added a Stop button for a running safe probe. It stops queued requests after the current serial read returns.
+- Simplified the manual-write guard: use one clear single-board checkbox instead of typing a confirmation phrase, while retaining the two final safety warnings.
+
 ## 2.1.30
 
 ### Board Debug Lab

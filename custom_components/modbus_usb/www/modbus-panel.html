@@ -1498,7 +1498,10 @@
           <label><input type="checkbox" name="debug-read-type" value="coil" /> Coils (0x01)</label>
           <label><input type="checkbox" name="debug-read-type" value="discrete" /> Discrete (0x02)</label>
         </fieldset>
-        <button class="btn btn-primary" id="btn-debug-probe" onclick="runSafeBoardProbe()">Run safe read probe</button>
+        <div class="flex gap-1" style="flex-wrap:wrap;">
+          <button class="btn btn-primary" id="btn-debug-probe" onclick="runSafeBoardProbe()">Run safe read probe</button>
+          <button class="btn btn-secondary" id="btn-debug-stop" onclick="stopSafeBoardProbe()" disabled>Stop probe</button>
+        </div>
         <div id="debug-probe-status" class="text-muted text-sm mt-1" aria-live="polite">No probe has run yet.</div>
         <div id="debug-probe-results" class="debug-output" aria-live="polite"></div>
       </div>
@@ -1528,10 +1531,6 @@
             </div>
           </div>
           <label class="debug-ack-label"><input type="checkbox" id="debug-one-board-check" /> I confirm exactly one powered board is connected, and I have checked this command in that board's documentation.</label>
-          <div class="form-group">
-            <label class="form-label" for="debug-one-board-text">Type <span class="mono">ONE BOARD</span> to unlock the command</label>
-            <input class="form-input mono" id="debug-one-board-text" autocomplete="off" autocapitalize="characters" placeholder="ONE BOARD" />
-          </div>
           <button class="btn btn-danger" id="btn-debug-write" onclick="sendGuardedDebugWrite()">Send one manual write</button>
           <div id="debug-write-result" class="text-sm mt-1" aria-live="polite"></div>
         </div>
@@ -2348,6 +2347,7 @@ entities:
         });
         return { results };
       }
+      if (type === 'stop_probe_registers') return { stopping: true };
       if (type === 'scan_bus') {
         return { found: [{ slave_id: 1, baudrate: 9600, response: 'register response' }], probed: 20 };
       }
@@ -4147,6 +4147,7 @@ entities:
       const endAddress = parseInt(document.getElementById('debug-end-address').value, 10);
       const types = [...document.querySelectorAll('input[name="debug-read-type"]:checked')].map(input => input.value);
       const button = document.getElementById('btn-debug-probe');
+      const stopButton = document.getElementById('btn-debug-stop');
       const status = document.getElementById('debug-probe-status');
       const output = document.getElementById('debug-probe-results');
       if (!entry || !Number.isInteger(slave) || slave < 1 || slave > 247 || !Number.isInteger(startAddress) || !Number.isInteger(endAddress)) {
@@ -4164,6 +4165,7 @@ entities:
       const requestCount = (endAddress - startAddress + 1) * types.length;
       button.disabled = true;
       button.textContent = 'Probing…';
+      stopButton.disabled = false;
       status.textContent = `Sending ${requestCount} read-only request${requestCount === 1 ? '' : 's'}… absent boards can take time to reply.`;
       output.innerHTML = '';
       try {
@@ -4172,7 +4174,9 @@ entities:
           end_address: endAddress, register_types: types,
         });
         const successCount = result.results.filter(item => item.status === 'response').length;
-        status.textContent = `Finished: ${successCount} response${successCount === 1 ? '' : 's'} from ${result.results.length} safe read requests.`;
+        status.textContent = result.stopped
+          ? `Stopped: ${successCount} response${successCount === 1 ? '' : 's'} from ${result.results.length} completed request${result.results.length === 1 ? '' : 's'}.`
+          : `Finished: ${successCount} response${successCount === 1 ? '' : 's'} from ${result.results.length} safe read requests.`;
         renderBoardProbeResults(result.results);
         setTimeout(refreshData, 200);
       } catch (error) {
@@ -4181,6 +4185,25 @@ entities:
       } finally {
         button.disabled = false;
         button.textContent = 'Run safe read probe';
+        stopButton.disabled = true;
+      }
+    }
+
+    async function stopSafeBoardProbe() {
+      const entry = getCurrentEntry();
+      const button = document.getElementById('btn-debug-stop');
+      const status = document.getElementById('debug-probe-status');
+      if (!entry) return;
+      button.disabled = true;
+      button.textContent = 'Stopping…';
+      status.textContent = 'Stop requested. The current serial read must finish before remaining requests are cancelled.';
+      try {
+        const result = await apiCall('stop_probe_registers', { entry_id: entry.entry_id });
+        if (!result.stopping) status.textContent = 'There is no active probe to stop.';
+      } catch (error) {
+        status.textContent = `Could not stop the probe: ${error.message}`;
+        button.disabled = false;
+        button.textContent = 'Stop probe';
       }
     }
 
@@ -4191,7 +4214,6 @@ entities:
       const value = parseInt(document.getElementById('debug-write-value').value, 10);
       const registerType = document.getElementById('debug-write-type').value;
       const hasOneBoardAcknowledgement = document.getElementById('debug-one-board-check').checked;
-      const typedConfirmation = document.getElementById('debug-one-board-text').value.trim().toUpperCase();
       const resultBox = document.getElementById('debug-write-result');
       const button = document.getElementById('btn-debug-write');
       if (!entry || ![slave, address, value].every(Number.isInteger) || slave < 1 || slave > 247 || address < 0 || address > 65535 || value < 0 || value > 65535) {
@@ -4204,9 +4226,9 @@ entities:
         resultBox.textContent = 'Coil writes use only 0 (OFF) or 1 (ON).';
         return;
       }
-      if (!hasOneBoardAcknowledgement || typedConfirmation !== 'ONE BOARD') {
+      if (!hasOneBoardAcknowledgement) {
         resultBox.style.color = '#fcd34d';
-        resultBox.textContent = 'Check the single-board acknowledgement and type ONE BOARD exactly before continuing.';
+        resultBox.textContent = 'Confirm that exactly one powered board is connected before continuing.';
         return;
       }
       if (!window.confirm(`Warning: this sends a write to slave ${slave}, ${registerType} address ${address}, value ${value}. It may activate equipment, alter settings, or reset a board. Continue?`)) return;

@@ -75,6 +75,21 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
     @property
     def is_on(self) -> bool | None:
         if self._attr_assumed_state:
+            # R413E16 Combined Switches have no separate status register.
+            # Their state comes from the live feedback of every selected
+            # channel, not merely from the last button press.
+            if (
+                self._ent.get(CONF_REGISTER_TYPE) == "holding"
+                and self._ent.get(CONF_ON_VALUE) == 0x0100
+                and self._ent.get(CONF_OFF_VALUE) == 0x0200
+                and self._ent.get(CONF_DEVICE_ID)
+            ):
+                group_state = self.coordinator.get_r413e16_group_state(
+                    self._ent[CONF_DEVICE_ID],
+                    [int(address) for address in self._ent.get(CONF_ADDRESSES, [])],
+                )
+                if group_state is not None:
+                    return group_state
             return False if self._last_command is None else self._last_command
         command_state = self.coordinator.get_command_state(self._ent[CONF_ENTITY_ID])
         if command_state is not None:

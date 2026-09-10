@@ -2651,6 +2651,13 @@ entities:
       const devSlug = dev ? (dev.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_') + '_' : '';
       const domain = ent.entity_type === 'switch' ? 'switch' : ent.entity_type === 'binary_sensor' ? 'binary_sensor' : ent.entity_type === 'number' ? 'number' : 'sensor';
 
+      // The backend resolves the exact Home Assistant entity ID through the
+      // entity registry. Use it first; name-based guesses can select a stale
+      // entity when channels have been re-created or similarly named.
+      if (ent.ha_entity_id && _statesCache[ent.ha_entity_id]) {
+        return _statesCache[ent.ha_entity_id];
+      }
+
       const candidateIds = [
         `${domain}.${devSlug}${slug}`,
         `${domain}.${slug}`,
@@ -2912,7 +2919,9 @@ entities:
       try {
         const report = await apiCall('r413e16_command', { entry_id: entry.entry_id, device_id: deviceId, command: 'read_states' });
         _r413e16StateReports[deviceId] = report;
-        renderDevicesTab();
+        // The command updates HA switch entities. Refresh the state snapshot
+        // before rendering so the sixteen toggles use the fresh real feedback.
+        await refreshData();
         const replied = report.states.filter(item => item.ok).length;
         toast(`Requested state from ${replied}/16 channels`, replied === 16 ? 'ok' : 'err');
       } catch (error) {

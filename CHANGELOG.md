@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.43
+
+### R413E16 switch-state correction
+
+- Fixed the device panel to use each switch’s exact Home Assistant entity ID instead of guessing from its name, preventing old or similarly named entities from showing the wrong state.
+- **Read channel states** now refreshes the panel after synchronizing the board feedback, so all CH-01 through CH-16 toggles immediately show `1 = ON` and `0 = OFF`.
+- Fixed R413E16 Combined Switches to derive their state from the live status of their selected channels. A group is ON only when every selected channel is ON.
+
 ## 2.1.42
 
 ### Unified Diagnostics & Debug workspace

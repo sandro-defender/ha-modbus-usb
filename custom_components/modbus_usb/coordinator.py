@@ -162,6 +162,40 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         """Return the last known state when a board read is temporarily unavailable."""
         return self._command_states.get(entity_id)
 
+    def get_r413e16_group_state(
+        self, device_id: str, addresses: list[int]
+    ) -> bool | None:
+        """Return an R413E16 group state derived from its real channel states.
+
+        A Combined Switch has no state register of its own. Its state is ON
+        only when every selected normal channel is confirmed ON. Return None
+        until all selected channels have a usable state, so generic assumed
+        switches retain their normal fallback behaviour.
+        """
+        channel_entities: dict[int, str] = {}
+        for entity in self._get_entities():
+            if (
+                str(entity.get(CONF_DEVICE_ID)) != str(device_id)
+                or entity.get(CONF_ENTITY_TYPE) != "switch"
+                or entity.get(CONF_ASSUMED_STATE)
+                or entity.get(CONF_REGISTER_TYPE) != REGISTER_TYPE_HOLDING
+                or entity.get("on_value") != 0x0100
+                or entity.get("off_value") != 0x0200
+            ):
+                continue
+            try:
+                channel_entities[int(entity[CONF_ADDRESS])] = str(entity["id"])
+            except (KeyError, TypeError, ValueError):
+                continue
+        states: list[bool] = []
+        for address in addresses:
+            entity_id = channel_entities.get(int(address))
+            state = self._command_states.get(entity_id) if entity_id else None
+            if state is None:
+                return None
+            states.append(state)
+        return all(states) if states else None
+
     def set_r413e16_channel_states(
         self, device_id: str, channel_states: dict[int, bool]
     ) -> None:

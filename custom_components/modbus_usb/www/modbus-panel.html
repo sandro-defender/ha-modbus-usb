@@ -135,6 +135,9 @@
     .debug-result-title { display:flex; justify-content:space-between; gap:0.65rem; flex-wrap:wrap; color:#f8fafc; font-size:0.82rem; font-weight:700; }
     .debug-result-code { margin-top:0.4rem; color:#93c5fd; font-family:var(--font-mono); font-size:0.73rem; overflow-wrap:anywhere; }
     .debug-result-copy { margin-top:0.45rem; color:#cbd5e1; font-size:0.76rem; }
+    .traffic-feed { display:grid; gap:0.45rem; max-height:360px; overflow-y:auto; }
+    .traffic-item { padding:0.65rem 0.75rem; border:1px solid rgba(255,255,255,0.08); border-left:3px solid #60a5fa; border-radius:8px; background:rgba(0,0,0,0.18); font-family:var(--font-mono); font-size:0.72rem; overflow-wrap:anywhere; }
+    .traffic-item.error { border-left-color:#f87171; color:#fecaca; }
 
     /* ── Header ────────────────────────────────────────────────── */
     .header {
@@ -1507,6 +1510,52 @@
       </div>
 
       <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Watch inputs and sensors</div>
+            <div class="card-subtitle">Repeated read-only checks; change a button or input on the board to reveal a changing address.</div>
+          </div>
+          <span class="badge badge-blue">Read-only watch</span>
+        </div>
+        <div class="form-grid-3">
+          <div class="form-group">
+            <label class="form-label" for="input-watch-type">Signal type</label>
+            <select class="form-select" id="input-watch-type">
+              <option value="discrete">Discrete inputs (0x02)</option>
+              <option value="input">Input registers (0x04)</option>
+              <option value="coil">Coil states (0x01)</option>
+              <option value="holding">Holding registers (0x03)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="input-watch-interval">Check every</label>
+            <select class="form-select" id="input-watch-interval"><option value="1000">1 second</option><option value="2000" selected>2 seconds</option><option value="5000">5 seconds</option></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Addresses</label>
+            <div class="form-hint" style="margin-top:0.55rem;">Uses the Start and End address above.</div>
+          </div>
+        </div>
+        <div class="flex gap-1" style="flex-wrap:wrap;">
+          <button class="btn btn-primary" id="btn-input-watch-start" onclick="startInputWatch()">Start input watch</button>
+          <button class="btn btn-secondary" id="btn-input-watch-stop" onclick="stopInputWatch()" disabled>Stop watch</button>
+        </div>
+        <div id="input-watch-status" class="text-muted text-sm mt-1" role="status" aria-atomic="true">Not watching signals.</div>
+        <div id="input-watch-results" class="debug-output" aria-live="off"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Live RS-485 traffic</div>
+            <div class="card-subtitle">Latest reads, writes, replies, and errors. Refreshes while Board Debug is open.</div>
+          </div>
+          <span id="debug-traffic-count" class="badge badge-slate">0 requests</span>
+        </div>
+        <div id="debug-traffic-feed" class="traffic-feed" aria-live="off"><div class="text-muted text-sm">Waiting for RS-485 traffic…</div></div>
+      </div>
+
+      <div class="card">
         <div class="debug-danger">
           <div class="card-header">
             <div>
@@ -2037,6 +2086,9 @@
     let _statesCache = {};
     let _dashboardFilter = 'all';
     const _deviceTestReports = {};
+    let _inputWatchActive = false;
+    let _inputWatchTimer = null;
+    const _inputWatchPrevious = new Map();
 
     // Standalone fallback mock data for testing/preview outside Home Assistant
     const MOCK_DATA = {
@@ -2287,7 +2339,7 @@ entities:
       await refreshData();
       setInterval(refreshData, 15000);
       setInterval(() => {
-        if (document.getElementById('pane-diag')?.classList.contains('active')) refreshData();
+        if (document.getElementById('pane-diag')?.classList.contains('active') || document.getElementById('pane-debug')?.classList.contains('active')) refreshData();
       }, 5000);
     }
 
@@ -2474,6 +2526,7 @@ entities:
         renderEntitiesTab();
         renderHubTab();
         renderDiagnosticsTab();
+        renderDebugTraffic();
       } catch(e) {
         console.error('[Modbus USB] Refresh failed:', e);
         toast('Failed to load data: ' + e.message, 'err');
@@ -4205,6 +4258,96 @@ entities:
         button.disabled = false;
         button.textContent = 'Stop probe';
       }
+    }
+
+    function renderInputWatchResults(results, changedAddresses) {
+      const output = document.getElementById('input-watch-results');
+      output.innerHTML = results.map(item => {
+        const key = `${item.register_type}:${item.address}`;
+        const changed = changedAddresses.has(key);
+        if (item.status !== 'response') {
+          return `<article class="debug-result error"><div class="debug-result-title"><span>Address ${item.address}</span><span>No response</span></div><div class="debug-result-copy">${escapeHtml(item.error || 'No response received')}</div></article>`;
+        }
+        return `<article class="debug-result ${changed ? 'ok' : ''}"><div class="debug-result-title"><span>Address ${item.address}</span><span>${changed ? 'Signal changed' : 'Current value'}</span></div><div class="debug-result-copy"><strong>${escapeHtml(item.register_type)}:</strong> ${escapeHtml(item.value)}</div></article>`;
+      }).join('');
+    }
+
+    async function runInputWatchCycle() {
+      if (!_inputWatchActive) return;
+      const entry = getCurrentEntry();
+      const slave = parseInt(document.getElementById('debug-slave').value, 10);
+      const startAddress = parseInt(document.getElementById('debug-start-address').value, 10);
+      const endAddress = parseInt(document.getElementById('debug-end-address').value, 10);
+      const registerType = document.getElementById('input-watch-type').value;
+      const interval = parseInt(document.getElementById('input-watch-interval').value, 10);
+      const status = document.getElementById('input-watch-status');
+      try {
+        const result = await apiCall('probe_registers', {
+          entry_id: entry.entry_id, slave_id: slave, start_address: startAddress,
+          end_address: endAddress, register_types: [registerType],
+        });
+        const changedAddresses = new Set();
+        result.results.forEach(item => {
+          if (item.status !== 'response') return;
+          const key = `${item.register_type}:${item.address}`;
+          if (_inputWatchPrevious.has(key) && _inputWatchPrevious.get(key) !== item.value) changedAddresses.add(key);
+          _inputWatchPrevious.set(key, item.value);
+        });
+        renderInputWatchResults(result.results, changedAddresses);
+        const replyCount = result.results.filter(item => item.status === 'response').length;
+        status.textContent = result.stopped
+          ? 'Watch stopped after the current read.'
+          : `${replyCount} address${replyCount === 1 ? '' : 'es'} replied. ${changedAddresses.size ? `${changedAddresses.size} signal change${changedAddresses.size === 1 ? '' : 's'} detected.` : 'Change a board input to detect a signal.'}`;
+      } catch (error) {
+        status.textContent = `Watch read failed: ${error.message}. Check serial settings, then retry.`;
+      }
+      if (_inputWatchActive) _inputWatchTimer = setTimeout(runInputWatchCycle, Number.isFinite(interval) ? interval : 2000);
+    }
+
+    function startInputWatch() {
+      const slave = parseInt(document.getElementById('debug-slave').value, 10);
+      const startAddress = parseInt(document.getElementById('debug-start-address').value, 10);
+      const endAddress = parseInt(document.getElementById('debug-end-address').value, 10);
+      const status = document.getElementById('input-watch-status');
+      if (!Number.isInteger(slave) || slave < 1 || slave > 247 || !Number.isInteger(startAddress) || !Number.isInteger(endAddress) || endAddress < startAddress || endAddress - startAddress > 3) {
+        status.textContent = 'Use a valid slave ID and a range of up to four addresses before starting the watch.';
+        return;
+      }
+      _inputWatchActive = true;
+      _inputWatchPrevious.clear();
+      document.getElementById('btn-input-watch-start').disabled = true;
+      document.getElementById('btn-input-watch-stop').disabled = false;
+      document.getElementById('btn-debug-probe').disabled = true;
+      status.textContent = 'Watching inputs with read-only requests…';
+      runInputWatchCycle();
+    }
+
+    async function stopInputWatch() {
+      _inputWatchActive = false;
+      if (_inputWatchTimer) clearTimeout(_inputWatchTimer);
+      _inputWatchTimer = null;
+      document.getElementById('btn-input-watch-stop').disabled = true;
+      document.getElementById('btn-input-watch-start').disabled = false;
+      document.getElementById('btn-debug-probe').disabled = false;
+      document.getElementById('input-watch-status').textContent = 'Stopping input watch after the current read…';
+      await stopSafeBoardProbe();
+      if (!document.getElementById('btn-debug-stop').disabled) document.getElementById('btn-debug-stop').disabled = true;
+    }
+
+    function renderDebugTraffic() {
+      const feed = document.getElementById('debug-traffic-feed');
+      const count = document.getElementById('debug-traffic-count');
+      if (!feed || !count) return;
+      const transactions = getCurrentEntry()?.diagnostics?.transactions || [];
+      count.textContent = `${transactions.length} request${transactions.length === 1 ? '' : 's'}`;
+      if (!transactions.length) {
+        feed.innerHTML = '<div class="text-muted text-sm">Waiting for RS-485 traffic…</div>';
+        return;
+      }
+      feed.innerHTML = transactions.slice(0, 40).map(item => {
+        const response = item.status === 'error' ? `Error: ${item.error || 'Unknown error'}` : `Reply: ${item.result ?? item.value ?? 'Accepted'}`;
+        return `<div class="traffic-item ${item.status === 'error' ? 'error' : ''}"><strong>${escapeHtml(formatLogTime(item.timestamp))}</strong> · ${escapeHtml(item.operation)} · slave ${escapeHtml(item.slave)} · address ${escapeHtml(item.address)}<br>${escapeHtml(response)}${item.duration_ms == null ? '' : ` · ${escapeHtml(item.duration_ms)} ms`}</div>`;
+      }).join('');
     }
 
     async function sendGuardedDebugWrite() {

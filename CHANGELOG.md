@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.32
+
+### Board Debug Lab
+
+- Added a read-only input and sensor watcher. It repeatedly checks a selected function and highlights addresses whose reply changes when a board input changes.
+- Added a live traffic feed to Board Debug showing recent RS-485 reads, writes, replies, timing, and errors while the page is open.
+
 ## 2.1.31
 
 ### Board Debug Lab

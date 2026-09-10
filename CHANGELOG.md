@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.46
+
+### Forced Home Assistant state-machine synchronization
+
+- R413E16 channel feedback now explicitly writes the verified `on`/`off` state to every registered Home Assistant CH switch and Combined Switch, preserving entity attributes.
+- This closes the remaining gap where the custom panel displayed correct Modbus feedback but Home Assistant cards retained an old state.
+
 ## 2.1.45
 
 ### Immediate Home Assistant R413E16 updates

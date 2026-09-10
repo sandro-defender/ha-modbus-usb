@@ -9,12 +9,15 @@ from threading import Lock
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
     CONF_ADDRESS,
+    CONF_ADDRESSES,
     CONF_ASSUMED_STATE,
     CONF_BAUDRATE,
     CONF_BYTESIZE,
@@ -177,6 +180,42 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 continue
             if getattr(switch_entity, "hass", None) is not None:
                 switch_entity.async_write_ha_state()
+
+        # Force the state machine to receive the exact reply as well. This is
+        # needed on some HA versions where the coordinator listener batches a
+        # state update behind the completed WebSocket request.
+        entity_registry = er.async_get(self.hass)
+        for config in self._get_entities():
+            if (
+                str(config.get(CONF_DEVICE_ID)) != str(device_id)
+                or config.get(CONF_ENTITY_TYPE) != "switch"
+                or config.get(CONF_REGISTER_TYPE) != REGISTER_TYPE_HOLDING
+                or config.get("on_value") != 0x0100
+                or config.get("off_value") != 0x0200
+            ):
+                continue
+            config_id = config.get("id")
+            if not config_id:
+                continue
+            if config.get(CONF_ASSUMED_STATE):
+                state = self.get_r413e16_group_state(
+                    device_id, [int(address) for address in config.get(CONF_ADDRESSES, [])]
+                )
+            else:
+                state = self._command_states.get(str(config_id))
+            if state is None:
+                continue
+            ha_entity_id = entity_registry.async_get_entity_id(
+                "switch", DOMAIN, f"{self.entry_id}_{config_id}"
+            )
+            if not ha_entity_id:
+                continue
+            existing = self.hass.states.get(ha_entity_id)
+            attributes = dict(existing.attributes) if existing else {}
+            self.hass.states.async_set(
+                ha_entity_id, STATE_ON if state else STATE_OFF, attributes,
+                force_update=True,
+            )
 
     def get_r413e16_group_state(
         self, device_id: str, addresses: list[int]

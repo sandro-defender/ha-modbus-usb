@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.39
+
+### R413E16 raw state check
+
+- Added **Read channel states** to request function-03 holding-register data from all 16 channels on demand.
+- The device card now shows every raw reply, including errors, so physical feedback support can be verified instead of inferred from switch UI state.
+- Kept confirmed command state separate from raw device read-back to prevent a known false-OFF reply from making an energized channel impossible to turn off in Home Assistant.
+
 ## 2.1.38
 
 ### R413E16 command-state control

@@ -2137,6 +2137,7 @@
     let _statesCache = {};
     let _dashboardFilter = 'all';
     const _deviceTestReports = {};
+    const _r413e16StateReports = {};
     let _inputWatchActive = false;
     let _inputWatchTimer = null;
     const _inputWatchPrevious = new Map();
@@ -2814,6 +2815,7 @@ entities:
                   ? `<button class="btn btn-secondary btn-sm" onclick="convertR413e16AllChannelsSwitch('${dev.id}', '${legacyAllChannelsSwitch.id}')" title="Replace the legacy all-channel command with a selectable combined switch">Convert to Combined Switch</button>`
                   : `<button class="btn btn-secondary btn-sm" onclick="openAddR413e16CombinedSwitch('${dev.id}')" title="Create another switch for selected R413E16 channels">Add Combined Switch</button>`) : ''}
                 ${isR413e16 ? `<button class="btn btn-secondary btn-sm" onclick="openR413e16Documentation()" title="Open verified R413E16 wiring and command reference">Documentation</button>` : ''}
+                ${isR413e16 ? `<button class="btn btn-secondary btn-sm" id="r413e16-read-${dev.id}" onclick="readR413e16States('${dev.id}')" title="Read every reported R413E16 channel state now">Read channel states</button>` : ''}
                 ${isR413e16 ? `<button class="btn btn-secondary btn-sm" onclick="openR413e16Controls('${dev.id}')" title="Control all channels or change this R413E16 board's communication settings">R413E16 controls</button>` : ''}
                 <button class="btn btn-ghost btn-sm" onclick="openEditDeviceModal('${dev.id}')" title="Rename or edit slave ID">
                   ✏ Edit
@@ -2828,6 +2830,7 @@ entities:
               ${entitiesHtml}
             </div>
             ${isR413e16 ? `<div class="device-command-panel"><p>Board communication settings: baud rate and slave ID.</p><button class="btn btn-secondary btn-sm" onclick="openR413e16Controls('${dev.id}')">Open R413E16 settings</button></div>` : ''}
+            ${_r413e16StateReports[dev.id] ? renderR413e16StateReport(_r413e16StateReports[dev.id]) : ''}
             ${_deviceTestReports[dev.id] ? renderDeviceTestReport(_deviceTestReports[dev.id]) : ''}
           </div>
         `;
@@ -2851,6 +2854,13 @@ entities:
         <p style="margin-top:0.55rem; color:var(--text-muted);">Readings test configured sensors, binary sensors, and numbers. Switches turn on briefly, then off. An acknowledgement confirms Modbus communication, not the physical relay position.</p>
         <ul>${rows}</ul>
       </details>`;
+    }
+
+    function renderR413e16StateReport(report) {
+      const rows = (report.states || []).map(item => item.ok
+        ? `CH-${String(item.channel).padStart(2, '0')}: <strong>${escapeHtml(item.value)}</strong>`
+        : `CH-${String(item.channel).padStart(2, '0')}: <strong>Error</strong>`).join(' · ');
+      return `<details class="device-test-report" open><summary>Device read-back — all 16 channels requested</summary><p style="margin-top:0.55rem; color:var(--text-muted);">Raw function-03 values: ${rows}</p><p style="margin-top:0.4rem; color:#fcd34d;">If an output is physically ON but its raw value is 0, this board revision does not expose real output feedback. The switch then keeps the last confirmed integration command so it remains controllable.</p></details>`;
     }
 
     async function runDeviceEntityTest(deviceId) {
@@ -2894,6 +2904,23 @@ entities:
       document.getElementById('r413e16-baud').value = baud;
       document.getElementById('r413e16-slave').value = slave;
       openModal('modal-r413e16-controls');
+    }
+
+    async function readR413e16States(deviceId) {
+      const entry = getCurrentEntry();
+      const button = document.getElementById(`r413e16-read-${deviceId}`);
+      if (!entry) return;
+      if (button) { button.disabled = true; button.textContent = 'Reading…'; }
+      try {
+        const report = await apiCall('r413e16_command', { entry_id: entry.entry_id, device_id: deviceId, command: 'read_states' });
+        _r413e16StateReports[deviceId] = report;
+        renderDevicesTab();
+        const replied = report.states.filter(item => item.ok).length;
+        toast(`Requested state from ${replied}/16 channels`, replied === 16 ? 'ok' : 'err');
+      } catch (error) {
+        toast(`Could not read channel states: ${error.message}`, 'err');
+        if (button) { button.disabled = false; button.textContent = 'Read channel states'; }
+      }
     }
 
     function openR413e16Documentation() {

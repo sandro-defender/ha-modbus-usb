@@ -490,7 +490,7 @@ def _get_r413e16_device(entry, device_id: str) -> dict[str, Any]:
     vol.Required("type"): "modbus_usb/r413e16_command",
     vol.Required("entry_id"): cv.string,
     vol.Required("device_id"): cv.string,
-    vol.Required("command"): vol.In(["all_on", "all_off", "configure", "channel_action", "factory_reset"]),
+    vol.Required("command"): vol.In(["all_on", "all_off", "read_states", "configure", "channel_action", "factory_reset"]),
     # The R413E16 command guide assigns codes 0–4 to 1200–19200. Code 5 is
     # factory reset, so higher rates must never be offered for this board.
     vol.Optional("baudrate"): vol.In([1200, 2400, 4800, 9600, 19200]),
@@ -510,6 +510,26 @@ async def ws_r413e16_command(
         coordinator = hass.data[DOMAIN][entry.entry_id]
         current_slave = int(device.get(CONF_SLAVE_ID, entry.data.get(CONF_SLAVE_ID, 1)))
         command = msg["command"]
+
+        if command == "read_states":
+            # Explicitly collect the board's reported state for every output.
+            # Return raw values so the UI can expose a board revision that does
+            # not provide trustworthy physical output feedback.
+            states: list[dict[str, Any]] = []
+            for channel in range(1, 17):
+                try:
+                    value = await hass.async_add_executor_job(
+                        coordinator.read_register_raw,
+                        channel, "holding", "uint16", current_slave,
+                    )
+                    states.append({"channel": channel, "value": value, "ok": True})
+                except Exception as err:  # noqa: BLE001
+                    states.append({"channel": channel, "ok": False, "error": str(err)})
+            connection.send_result(msg["id"], {
+                "success": True, "command": command, "slave_id": current_slave,
+                "states": states,
+            })
+            return
 
         if command == "factory_reset":
             # The vendor guide assigns baud register value 5 to factory reset.

@@ -150,6 +150,13 @@ def _format_entry_data(hass: HomeAssistant, entry) -> dict[str, Any]:
             )
             if ha_entity_id:
                 entity["ha_entity_id"] = ha_entity_id
+        # A tested R413E16 channel has verified function-03 feedback. Include
+        # that coordinator state so the sidebar cannot show a stale browser
+        # snapshot while HA is processing its entity-state event.
+        if coordinator and entity_id:
+            reported_state = coordinator.get_command_state(str(entity_id))
+            if reported_state is not None:
+                entity["reported_state"] = "on" if reported_state else "off"
     diagnostics["devices"] = []
     for device in devices:
         slave_id = int(device.get(CONF_SLAVE_ID, entry.data.get(CONF_SLAVE_ID, 1)))

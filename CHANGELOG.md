@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.44
+
+### R413E16 verified feedback display
+
+- Channel-state reads now publish a complete updated coordinator snapshot, immediately updating Home Assistant’s individual CH-01 through CH-16 entities.
+- The device panel now receives and prioritizes verified R413E16 function-03 feedback while Home Assistant updates its normal state snapshot. A channel read as `1` displays ON; `0` displays OFF.
+
 ## 2.1.43
 
 ### R413E16 switch-state correction

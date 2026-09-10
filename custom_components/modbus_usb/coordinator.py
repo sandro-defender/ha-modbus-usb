@@ -215,7 +215,15 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 updates[str(entity["id"])] = channel_states[channel]
         if updates:
             self._command_states.update(updates)
-            self.async_update_listeners()
+            # Publish an updated coordinator snapshot as well as the fallback
+            # cache. This guarantees that HA entities receive the new state
+            # immediately after an on-demand channel read or group command.
+            updated_data = dict(self.data or {})
+            updated_data.update({
+                entity_id: 1 if state else 0
+                for entity_id, state in updates.items()
+            })
+            self.async_set_updated_data(updated_data)
 
     def _ensure_connected(self) -> None:
         """Open the serial adapter or raise a useful error before a request."""

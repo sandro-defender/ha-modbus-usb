@@ -2651,6 +2651,13 @@ entities:
       const devSlug = dev ? (dev.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_') + '_' : '';
       const domain = ent.entity_type === 'switch' ? 'switch' : ent.entity_type === 'binary_sensor' ? 'binary_sensor' : ent.entity_type === 'number' ? 'number' : 'sensor';
 
+      // Verified Modbus feedback wins while HA updates its state machine. This
+      // prevents an old browser snapshot from rendering a known ON channel as
+      // OFF immediately after "Read channel states".
+      if (ent.entity_type === 'switch' && ['on', 'off'].includes(ent.reported_state)) {
+        return { state: ent.reported_state };
+      }
+
       // The backend resolves the exact Home Assistant entity ID through the
       // entity registry. Use it first; name-based guesses can select a stale
       // entity when channels have been re-created or similarly named.

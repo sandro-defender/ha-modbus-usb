@@ -323,6 +323,13 @@
     }
     .btn-danger:hover { background: rgba(239,68,68,0.25); }
     .btn-sm { padding: 0.3rem 0.65rem; font-size: 0.72rem; }
+    #btn-refresh { min-width:92px; }
+    #btn-refresh .refresh-icon { width:16px; height:16px; stroke:currentColor; stroke-width:2; fill:none; stroke-linecap:round; }
+    #btn-refresh.is-loading .refresh-icon { animation:refreshSpin 0.8s linear infinite; }
+    @keyframes refreshSpin { to { transform:rotate(360deg); } }
+    .channel-picker { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:0.45rem; margin-top:0.45rem; }
+    .channel-picker label { display:flex; align-items:center; justify-content:center; gap:0.28rem; min-height:44px; padding:0.3rem; border:1px solid rgba(255,255,255,0.12); border-radius:7px; color:#cbd5e1; font-size:0.72rem; cursor:pointer; }
+    .channel-picker label:has(input:checked) { border-color:rgba(59,130,246,0.65); background:rgba(59,130,246,0.16); color:#dbeafe; }
 
     /* ── Navigation Tabs ────────────────────────────────────────── */
     .nav-tabs {
@@ -1162,7 +1169,7 @@
           </button>
 
           <button class="btn btn-ghost" id="btn-refresh" onclick="refreshData()" aria-label="Refresh controller data" title="Refresh controller data">
-            ↻ <span class="refresh-label">Refresh</span>
+            <svg class="refresh-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0 2 5.5M20 4v7h-7" /></svg><span class="refresh-label">Refresh</span>
           </button>
         </div>
       </div>
@@ -1889,7 +1896,7 @@
 
         <div class="form-group">
           <label class="form-label">Assign to Device</label>
-          <select class="form-select" id="ent-form-device">
+          <select class="form-select" id="ent-form-device" onchange="renderSwitchChannelPicker()">
             <!-- Populated dynamically -->
           </select>
         </div>
@@ -1978,9 +1985,13 @@
             </div>
           </div>
           <div class="form-group">
-            <label class="form-label">Group channel addresses (optional)</label>
-            <input class="form-input mono" type="text" id="ent-form-addresses" inputmode="numeric" placeholder="e.g. 1, 5, 6" />
-            <div class="form-hint">Leave empty for one register. For a group switch, enter the channel/register numbers to control together.</div>
+            <label class="form-label">Combined register addresses (optional)</label>
+            <input class="form-input mono" type="text" id="ent-form-addresses" placeholder="e.g. 1, 5, 6" />
+            <div class="form-hint">Leave empty for one register. Separate addresses with commas, or use the channel picker for an R413E16 board.</div>
+          </div>
+          <div class="form-group" id="ent-form-channel-picker-wrap" style="display:none;">
+            <label class="form-label">Select R413E16 channels for this Combined Switch</label>
+            <div id="ent-form-channel-picker" class="channel-picker"></div>
           </div>
         </div>
 
@@ -2518,7 +2529,8 @@ entities:
     async function refreshData() {
       const btn = document.getElementById('btn-refresh');
       btn.disabled = true;
-      btn.textContent = '⟳ Refreshing…';
+      btn.classList.add('is-loading');
+      btn.setAttribute('aria-busy', 'true');
 
       try {
         if (_isLiveHA) {
@@ -2550,7 +2562,8 @@ entities:
         toast('Failed to load data: ' + e.message, 'err');
       } finally {
         btn.disabled = false;
-        btn.textContent = '↻ Refresh';
+        btn.classList.remove('is-loading');
+        btn.removeAttribute('aria-busy');
       }
     }
 
@@ -2667,7 +2680,7 @@ entities:
         const switchCount = devEntities.filter(e => e.entity_type === 'switch').length;
         const slaveId = dev.slave_id != null ? dev.slave_id : (entry.hub?.slave_id || 1);
         const isR413e16 = dev.device_controls?.protocol === 'eletechsup_r413e16' || String(dev.model || '').toLowerCase().includes('r413e16');
-        const hasAllChannelsSwitch = devEntities.some(e => e.entity_type === 'switch' && e.address === 0 && e.on_value === 1792 && e.off_value === 2048);
+        const legacyAllChannelsSwitch = devEntities.find(e => e.entity_type === 'switch' && e.address === 0 && e.on_value === 1792 && e.off_value === 2048);
         const health = (entry.diagnostics?.devices || []).find(item => item.device_id === dev.id);
         const healthBadge = !health || health.status === 'unknown'
           ? '<span class="badge badge-slate">No bus activity</span>'
@@ -2774,7 +2787,9 @@ entities:
                   ➕ Add Entity
                 </button>
                 ${devEntities.length ? `<button class="btn btn-secondary btn-sm" id="device-test-${dev.id}" onclick="runDeviceEntityTest('${dev.id}')" title="Read all configured entities and cycle switches one at a time">🧪 Test device</button>` : ''}
-                ${isR413e16 && !hasAllChannelsSwitch ? `<button class="btn btn-secondary btn-sm" onclick="addR413e16AllChannelsSwitch('${dev.id}')" title="Add the all-channels ON/OFF switch from the R413E16 template">Add all-channels switch</button>` : ''}
+                ${isR413e16 ? (legacyAllChannelsSwitch
+                  ? `<button class="btn btn-secondary btn-sm" onclick="convertR413e16AllChannelsSwitch('${dev.id}', '${legacyAllChannelsSwitch.id}')" title="Replace the legacy all-channel command with a selectable combined switch">Convert to Combined Switch</button>`
+                  : `<button class="btn btn-secondary btn-sm" onclick="openAddR413e16CombinedSwitch('${dev.id}')" title="Create another switch for selected R413E16 channels">Add Combined Switch</button>`) : ''}
                 ${isR413e16 ? `<button class="btn btn-secondary btn-sm" onclick="openR413e16Controls('${dev.id}')" title="Control all channels or change this R413E16 board's communication settings">R413E16 controls</button>` : ''}
                 <button class="btn btn-ghost btn-sm" onclick="openEditDeviceModal('${dev.id}')" title="Rename or edit slave ID">
                   ✏ Edit
@@ -2857,21 +2872,22 @@ entities:
       openModal('modal-r413e16-controls');
     }
 
-    async function addR413e16AllChannelsSwitch(deviceId) {
+    async function convertR413e16AllChannelsSwitch(deviceId, entityId) {
       const entry = getCurrentEntry();
-      if (!entry || !confirm('Add an “All Channels” switch? It will turn every physical R413E16 output on or off.')) return;
+      const legacy = (entry?.entities || []).find(item => item.id === entityId);
+      if (!entry || !legacy || !confirm('Convert this legacy All Channels switch to Combined Switch? It will control channels 1–16 individually using the confirmed R413E16 commands.')) return;
       try {
         await apiCall('save_entity', {
           entry_id: entry.entry_id,
           entity: {
-            device_id: deviceId, name: 'All Channels', entity_type: 'switch',
-            register_type: 'holding', address: 0, data_type: 'uint16',
-            on_value: 1792, off_value: 2048, assumed_state: true,
+            ...legacy, device_id: deviceId, name: 'Combined Switch', entity_type: 'switch',
+            register_type: 'holding', address: 1, addresses: Array.from({ length: 16 }, (_, index) => index + 1), data_type: 'uint16',
+            on_value: 256, off_value: 512, assumed_state: true,
           },
         });
-        toast('All Channels switch added', 'ok');
+        toast('Converted to Combined Switch', 'ok');
         await refreshData();
-      } catch (err) { toast('Could not add all-channels switch: ' + err.message, 'err'); }
+      } catch (err) { toast('Could not convert the switch: ' + err.message, 'err'); }
     }
 
     function openR413e16ChannelAction(deviceId, channel, name) {
@@ -3877,6 +3893,46 @@ entities:
       openModal('modal-entity-form');
     }
 
+    function renderSwitchChannelPicker() {
+      const wrap = document.getElementById('ent-form-channel-picker-wrap');
+      const picker = document.getElementById('ent-form-channel-picker');
+      const type = document.getElementById('ent-form-type')?.value;
+      const deviceId = document.getElementById('ent-form-device')?.value;
+      const entry = getCurrentEntry();
+      const device = (entry?.devices || []).find(item => item.id === deviceId);
+      const isR413e16 = String(device?.model || '').toLowerCase().includes('r413e16');
+      if (type !== 'switch' || !isR413e16) {
+        wrap.style.display = 'none';
+        picker.innerHTML = '';
+        return;
+      }
+      const field = document.getElementById('ent-form-addresses');
+      const selected = new Set(field.value.split(',').map(value => Number(value.trim())).filter(Number.isInteger));
+      wrap.style.display = 'block';
+      picker.innerHTML = Array.from({ length: 16 }, (_, index) => {
+        const channel = index + 1;
+        return `<label><input type="checkbox" value="${channel}" ${selected.has(channel) ? 'checked' : ''} onchange="syncR413e16ChannelPicker()" /> CH-${String(channel).padStart(2, '0')}</label>`;
+      }).join('');
+    }
+
+    function syncR413e16ChannelPicker() {
+      const values = [...document.querySelectorAll('#ent-form-channel-picker input:checked')]
+        .map(input => Number(input.value)).sort((a, b) => a - b);
+      document.getElementById('ent-form-addresses').value = values.join(', ');
+    }
+
+    function openAddR413e16CombinedSwitch(deviceId) {
+      openAddEntityModal(deviceId);
+      document.getElementById('entity-modal-title').textContent = 'Add Combined Switch';
+      document.getElementById('ent-form-name').value = 'Combined Switch';
+      document.getElementById('ent-form-type').value = 'switch';
+      document.getElementById('ent-form-regtype').value = 'holding';
+      document.getElementById('ent-form-onval').value = '256';
+      document.getElementById('ent-form-offval').value = '512';
+      onEntityTypeChange('switch');
+      renderSwitchChannelPicker();
+    }
+
     function onEntityTypeChange(type) {
       const numFields = document.getElementById('ent-numeric-fields');
       const swFields = document.getElementById('ent-switch-fields');
@@ -3887,6 +3943,7 @@ entities:
         numFields.style.display = 'block';
         swFields.style.display = 'none';
         nFields.style.display = 'none';
+        renderSwitchChannelPicker();
       } else if (type === 'switch') {
         numFields.style.display = 'none';
         swFields.style.display = 'block';
@@ -3894,6 +3951,7 @@ entities:
         if (regTypeSel.value !== 'coil' && regTypeSel.value !== 'holding') {
           regTypeSel.value = 'coil';
         }
+        renderSwitchChannelPicker();
       } else if (type === 'binary_sensor') {
         numFields.style.display = 'none';
         swFields.style.display = 'none';
@@ -3901,11 +3959,13 @@ entities:
         if (regTypeSel.value !== 'discrete' && regTypeSel.value !== 'coil') {
           regTypeSel.value = 'discrete';
         }
+        renderSwitchChannelPicker();
       } else if (type === 'number') {
         numFields.style.display = 'block';
         swFields.style.display = 'none';
         nFields.style.display = 'block';
         regTypeSel.value = 'holding';
+        renderSwitchChannelPicker();
       }
     }
 

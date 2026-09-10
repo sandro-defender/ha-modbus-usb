@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.34
+
+### Combined Switches and panel stability
+
+- Kept the Refresh button’s size stable during automatic updates; its icon now spins without replacing the button label.
+- Replaced the R413E16 template’s legacy All Channels switch with a Combined Switch that sends the confirmed per-channel ON/OFF commands to channels 1–16.
+- Added a phone-friendly R413E16 channel picker for Combined Switches. Create as many combinations as needed, such as CH-01 + CH-05 + CH-06, without typing commas.
+- Existing legacy All Channels switches now offer a one-click conversion to the new Combined Switch behavior.
+
 ## 2.1.33
 
 ### Board Debug Lab

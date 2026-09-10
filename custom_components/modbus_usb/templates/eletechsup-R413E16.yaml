@@ -27,7 +27,8 @@ description: >
   output core, so it needs a compatible externally powered relay or output board.
   The device controls provide all documented Modbus actions: ON/OFF, toggle,
   interlock, momentary pulse, timed action, all-channel control, baud rate, and
-  slave-ID setup.
+  slave-ID setup. The default Combined Switch controls all channels with the
+  same confirmed per-channel commands and can be copied for any selected group.
 # Device-specific commands, retained with this template whenever it is applied.
 # Values are decimal forms of the verified Modbus FC06 register words.
 device_controls:
@@ -68,13 +69,14 @@ device_controls:
     delay_base: 1536 # 0x0600; add 0–255 seconds to this value
     maximum_delay_seconds: 255
 entities:
-  - name: All Channels
+  - name: Combined Switch
     entity_type: switch
     register_type: holding
-    address: 0
+    address: 1
+    addresses: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
     data_type: uint16
-    on_value: 1792 # 0x0700 — turn all 16 outputs on
-    off_value: 2048 # 0x0800 — turn all 16 outputs off
+    on_value: 256 # 0x0100 — turn each selected channel on
+    off_value: 512 # 0x0200 — turn each selected channel off
     assumed_state: true
   - name: CH-01
     entity_type: switch

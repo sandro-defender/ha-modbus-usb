@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.42
+
+### Unified Diagnostics & Debug workspace
+
+- Combined the separate Diagnostics and Board Debug tabs into one **Diagnostics & Debug** workspace, reducing phone navigation to six tabs.
+- Placed connection health, device scanning, direct Modbus tools, and the complete live RS-485 log before the safe board-discovery tools.
+- Removed the duplicate traffic feed: the activity log is now the single source for every read, write, reply, and error.
+- Kept automatic discovery, safe read probes, and input watching together below a clear safe-tools heading; the hardware-risk manual write is folded by default.
+
 ## 2.1.41
 
 ### R413E16 real state synchronization

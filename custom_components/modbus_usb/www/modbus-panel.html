@@ -129,6 +129,15 @@
     .debug-ack-label { align-items:flex-start; margin:0.75rem 0; }
     .debug-ack-label input { margin-top:0.18rem; flex:0 0 auto; }
     .debug-output { display:grid; gap:0.6rem; margin-top:1rem; }
+    .diagnostic-workspace { margin-top:1.75rem; padding-top:1.4rem; border-top:1px solid var(--border-subtle); }
+    .diagnostic-workspace-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:0.75rem; margin:0 0 1rem; }
+    .diagnostic-workspace-heading h2 { margin:0; font-size:1rem; color:var(--text-main); }
+    .diagnostic-workspace-heading p { margin:0.28rem 0 0; color:var(--text-dim); font-size:0.8rem; line-height:1.45; }
+    .debug-manual-write { overflow:hidden; }
+    .debug-manual-write summary { display:flex; align-items:center; justify-content:space-between; gap:0.75rem; cursor:pointer; list-style:none; padding:0.95rem 1rem; color:#fecaca; font-weight:700; }
+    .debug-manual-write summary::-webkit-details-marker { display:none; }
+    .debug-manual-write summary::after { content:'Show'; color:var(--text-dim); font-size:0.75rem; font-weight:600; }
+    .debug-manual-write[open] summary::after { content:'Hide'; }
     .debug-result { padding:0.8rem; border:1px solid rgba(255,255,255,0.09); border-left:3px solid #f59e0b; border-radius:9px; background:rgba(0,0,0,0.2); overflow-wrap:anywhere; }
     .debug-result.ok { border-left-color:#34d399; }
     .debug-result.error { border-left-color:#f87171; }
@@ -1124,6 +1133,8 @@
       .diag-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; }
       .diag-metric { padding: 0.65rem; }
       .diag-log-wrap { max-height: 320px; }
+      .diagnostic-workspace-heading { flex-wrap:wrap; }
+      .debug-manual-write summary { min-height:44px; }
       .modal-backdrop { padding: 0.5rem; align-items: flex-end; }
       .modal-box, .modal-box.modal-lg { width: 100%; max-width: none; max-height: 92vh; border-radius: 16px 16px 10px 10px; }
       .modal-body { max-height: calc(92vh - 130px); overflow-y: auto; }
@@ -1199,11 +1210,7 @@
       </button>
       <button class="nav-tab" id="tab-btn-diag" role="tab" aria-selected="false" aria-controls="pane-diag" tabindex="-1" onclick="switchTab('diag')">
         <svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M9 3h6M12 3v7l4.5 7.5A2.5 2.5 0 0 1 14.35 21h-4.7a2.5 2.5 0 0 1-2.15-3.5L12 10M9 16h6" /></svg>
-        Diagnostics
-      </button>
-      <button class="nav-tab" id="tab-btn-debug" role="tab" aria-selected="false" aria-controls="pane-debug" tabindex="-1" onclick="switchTab('debug')">
-        <svg class="nav-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v4m0 10v4M5.64 5.64l2.83 2.83m7.06 7.06 2.83 2.83M3 12h4m10 0h4M5.64 18.36l2.83-2.83m7.06-7.06 2.83-2.83M9 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z" /></svg>
-        Board Debug
+        Diagnostics &amp; Debug
       </button>
     </nav>
 
@@ -1342,7 +1349,7 @@
     </div>
 
     <!-- ═════════════════════════════════════════════════════════════ -->
-    <!-- TAB 6: DIAGNOSTICS                                          -->
+    <!-- TAB 6: DIAGNOSTICS & DEBUG                                  -->
     <!-- ═════════════════════════════════════════════════════════════ -->
     <div class="tab-pane" id="pane-diag" role="tabpanel" aria-labelledby="tab-btn-diag" hidden>
       <div class="card">
@@ -1469,12 +1476,14 @@
           </table>
         </div>
       </div>
-    </div>
-
-    <!-- ═════════════════════════════════════════════════════════════ -->
-    <!-- TAB 7: UNKNOWN BOARD DEBUG LAB                              -->
-    <!-- ═════════════════════════════════════════════════════════════ -->
-    <div class="tab-pane" id="pane-debug" role="tabpanel" aria-labelledby="tab-btn-debug" hidden>
+      <section class="diagnostic-workspace" aria-labelledby="advanced-debug-title">
+        <div class="diagnostic-workspace-heading">
+          <div>
+            <h2 id="advanced-debug-title">Board discovery &amp; signal tools</h2>
+            <p>Safe read-only tools for identifying an unknown board, its registers, and changing input signals. The activity log above shows every request and reply.</p>
+          </div>
+          <span class="badge badge-green">Safe reads first</span>
+        </div>
       <div class="card">
         <div class="card-header">
           <div>
@@ -1568,25 +1577,14 @@
         <div id="input-watch-results" class="debug-output" aria-live="off"></div>
       </div>
 
-      <div class="card">
-        <div class="card-header">
-          <div>
-            <div class="card-title">Live RS-485 traffic</div>
-            <div class="card-subtitle">Latest reads, writes, replies, and errors. Refreshes while Board Debug is open.</div>
-          </div>
-          <span id="debug-traffic-count" class="badge badge-slate">0 requests</span>
-        </div>
-        <div id="debug-traffic-feed" class="traffic-feed" aria-live="off"><div class="text-muted text-sm">Waiting for RS-485 traffic…</div></div>
-      </div>
-
-      <div class="card">
+      <details class="card debug-manual-write">
+        <summary>Manual write command <span class="badge" style="background:rgba(239,68,68,0.18); color:#fecaca; border:1px solid rgba(239,68,68,0.42);">Hardware risk</span></summary>
         <div class="debug-danger">
           <div class="card-header">
             <div>
               <div class="card-title">Dangerous manual write</div>
               <div class="card-subtitle">Sends exactly one command you enter; no automatic command sweep is ever run.</div>
             </div>
-            <span class="badge" style="background:rgba(239,68,68,0.18); color:#fecaca; border:1px solid rgba(239,68,68,0.42);">Hardware risk</span>
           </div>
           <p class="text-sm" style="color:#fecaca;">A write can energize equipment, change a board setting, reset a board, or make it unreachable. Use this only with a documented command and exactly one powered board on the RS-485 line.</p>
           <div class="form-grid-3 mt-2">
@@ -1607,7 +1605,8 @@
           <button class="btn btn-danger" id="btn-debug-write" onclick="sendGuardedDebugWrite()">Send one manual write</button>
           <div id="debug-write-result" class="text-sm mt-1" aria-live="polite"></div>
         </div>
-      </div>
+      </details>
+      </section>
     </div>
     </main>
   </div>
@@ -2392,7 +2391,7 @@ entities:
       await refreshData();
       setInterval(refreshData, 15000);
       setInterval(() => {
-        if (document.getElementById('pane-diag')?.classList.contains('active') || document.getElementById('pane-debug')?.classList.contains('active')) refreshData();
+        if (document.getElementById('pane-diag')?.classList.contains('active')) refreshData();
       }, 5000);
     }
 
@@ -2580,7 +2579,6 @@ entities:
         renderEntitiesTab();
         renderHubTab();
         renderDiagnosticsTab();
-        renderDebugTraffic();
       } catch(e) {
         console.error('[Modbus USB] Refresh failed:', e);
         toast('Failed to load data: ' + e.message, 'err');
@@ -4557,22 +4555,6 @@ entities:
       document.getElementById('input-watch-status').textContent = 'Stopping input watch after the current read…';
       await stopSafeBoardProbe();
       if (!document.getElementById('btn-debug-stop').disabled) document.getElementById('btn-debug-stop').disabled = true;
-    }
-
-    function renderDebugTraffic() {
-      const feed = document.getElementById('debug-traffic-feed');
-      const count = document.getElementById('debug-traffic-count');
-      if (!feed || !count) return;
-      const transactions = getCurrentEntry()?.diagnostics?.transactions || [];
-      count.textContent = `${transactions.length} request${transactions.length === 1 ? '' : 's'}`;
-      if (!transactions.length) {
-        feed.innerHTML = '<div class="text-muted text-sm">Waiting for RS-485 traffic…</div>';
-        return;
-      }
-      feed.innerHTML = transactions.slice(0, 40).map(item => {
-        const response = item.status === 'error' ? `Error: ${item.error || 'Unknown error'}` : `Reply: ${item.result ?? item.value ?? 'Accepted'}`;
-        return `<div class="traffic-item ${item.status === 'error' ? 'error' : ''}"><strong>${escapeHtml(formatLogTime(item.timestamp))}</strong> · ${escapeHtml(item.operation)} · slave ${escapeHtml(item.slave)} · address ${escapeHtml(item.address)}<br>${escapeHtml(response)}${item.duration_ms == null ? '' : ` · ${escapeHtml(item.duration_ms)} ms`}</div>`;
-      }).join('');
     }
 
     async function sendGuardedDebugWrite() {

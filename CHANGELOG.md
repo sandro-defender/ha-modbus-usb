@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.38
+
+### R413E16 command-state control
+
+- Fixed boards that physically switch correctly but return a false OFF read-back value. R413E16 channel switches now retain the last accepted integration command when the board’s status register is unreliable.
+- All ON/OFF, Combined Switches, and interlock now propagate their confirmed result to every affected CH-01 through CH-16 switch immediately, so individual OFF controls remain available after a group command.
+- The displayed R413E16 state is now explicitly command state after an integration command; manually changing hardware outside Home Assistant cannot be detected reliably on affected board revisions.
+
 ## 2.1.37
 
 ### R413E16 reliable all-channel control

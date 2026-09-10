@@ -149,10 +149,40 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             "total": 0,
             "found": 0,
         }
+        # Some relay-board revisions accept a command but do not expose a
+        # reliable readable output-state register. Keep the last confirmed
+        # integration command for those channels so grouped controls remain
+        # operable and do not immediately display a false OFF state.
+        self._command_states: dict[str, bool] = {}
         # Modbus RTU is request/response based: concurrent access to one serial
         # adapter can pair a response with the wrong request. Every I/O operation
         # must therefore own this lock for its entire transaction.
         self._serial_lock = Lock()
+
+    def get_command_state(self, entity_id: str) -> bool | None:
+        """Return a known command state when a board cannot read it back."""
+        return self._command_states.get(entity_id)
+
+    def set_r413e16_channel_states(
+        self, device_id: str, channel_states: dict[int, bool]
+    ) -> None:
+        """Publish confirmed R413E16 command states to matching channel switches."""
+        updates: dict[str, bool] = {}
+        for entity in self._get_entities():
+            if (
+                str(entity.get(CONF_DEVICE_ID)) != str(device_id)
+                or entity.get(CONF_ENTITY_TYPE) != "switch"
+                or entity.get(CONF_REGISTER_TYPE) != REGISTER_TYPE_HOLDING
+                or entity.get("on_value") != 0x0100
+                or entity.get("off_value") != 0x0200
+            ):
+                continue
+            channel = entity.get(CONF_ADDRESS)
+            if channel in channel_states:
+                updates[str(entity["id"])] = channel_states[channel]
+        if updates:
+            self._command_states.update(updates)
+            self.async_update_listeners()
 
     def _ensure_connected(self) -> None:
         """Open the serial adapter or raise a useful error before a request."""

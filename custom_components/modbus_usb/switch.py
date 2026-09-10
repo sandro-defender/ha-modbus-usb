@@ -76,6 +76,9 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
     def is_on(self) -> bool | None:
         if self._attr_assumed_state:
             return False if self._last_command is None else self._last_command
+        command_state = self.coordinator.get_command_state(self._ent[CONF_ENTITY_ID])
+        if command_state is not None:
+            return command_state
         if self.coordinator.data is None:
             return None
         value = self.coordinator.data.get(self._ent[CONF_ENTITY_ID])
@@ -116,13 +119,23 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
                 await self.hass.async_add_executor_job(
                     self.coordinator.write_register, int(address), value, slave
                 )
+        if (
+            self._ent.get(CONF_REGISTER_TYPE) != REGISTER_TYPE_COIL
+            and self._ent.get(CONF_ON_VALUE) == 0x0100
+            and self._ent.get(CONF_OFF_VALUE) == 0x0200
+            and self._ent.get(CONF_DEVICE_ID)
+        ):
+            self.coordinator.set_r413e16_channel_states(
+                self._ent[CONF_DEVICE_ID], {int(address): on for address in addresses}
+            )
         if self._attr_assumed_state:
             self._last_command = on
             self.async_write_ha_state()
             # A combined command has no single register to read back for its
-            # own state, but it can change normal channel switches. Refresh
-            # those channel entities immediately so HA does not show stale
-            # CH-01…CH-16 states until the next polling interval.
+            # own state. Matching R413E16 channels were updated above from the
+            # accepted commands, because some board revisions report OFF when
+            # read immediately after a successful write.
+            return
         await self.coordinator.async_request_refresh()
 
 

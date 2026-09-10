@@ -425,6 +425,15 @@ async def _async_write_configured_switch(
             await hass.async_add_executor_job(
                 coordinator.write_register, int(address), int(value), slave_id
             )
+    if (
+        entity.get(CONF_REGISTER_TYPE) != REGISTER_TYPE_COIL
+        and entity.get(CONF_ON_VALUE) == 0x0100
+        and entity.get(CONF_OFF_VALUE) == 0x0200
+        and entity.get(CONF_DEVICE_ID)
+    ):
+        coordinator.set_r413e16_channel_states(
+            entity[CONF_DEVICE_ID], {int(address): state for address in addresses}
+        )
     return slave_id
 
 
@@ -549,9 +558,10 @@ async def ws_r413e16_command(
             await hass.async_add_executor_job(
                 coordinator.write_register, channel, value, current_slave
             )
-            # Toggle and interlock can change more than the selected channel.
-            # Read the configured channel states before returning to the UI.
-            await coordinator.async_request_refresh()
+            if action == "interlock":
+                coordinator.set_r413e16_channel_states(
+                    device["id"], {item: item == channel for item in range(1, 17)}
+                )
             connection.send_result(msg["id"], {
                 "success": True, "command": command, "channel": channel,
                 "action": action, "value": value, "slave_id": current_slave,
@@ -568,8 +578,9 @@ async def ws_r413e16_command(
                 await hass.async_add_executor_job(
                     coordinator.write_register, channel, value, current_slave
                 )
-            # Read the individual channel states before returning to the UI.
-            await coordinator.async_request_refresh()
+            coordinator.set_r413e16_channel_states(
+                device["id"], {channel: command == "all_on" for channel in range(1, 17)}
+            )
             connection.send_result(msg["id"], {
                 "success": True, "command": command, "slave_id": current_slave,
                 "channels_written": 16, "value": value,

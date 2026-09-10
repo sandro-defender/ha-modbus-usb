@@ -3358,7 +3358,7 @@ entities:
         return;
       }
       body.innerHTML = transactions.map(item => {
-        const response = item.status === 'error' ? `ERROR: ${item.error || 'Unknown error'}` : (item.result ?? item.value ?? 'Accepted');
+        const response = getDiagnosticResponse(item);
         return `<tr class="${item.status === 'error' ? 'error' : ''}">
           <td>${escapeHtml(formatLogTime(item.timestamp))}</td>
           <td>${escapeHtml(item.operation)}</td>
@@ -3368,6 +3368,13 @@ entities:
           <td>${item.duration_ms == null ? '—' : `${escapeHtml(item.duration_ms)} ms`}</td>
         </tr>`;
       }).join('');
+    }
+
+    function getDiagnosticResponse(item) {
+      // Do not use || here: a Modbus value of 0 is a real, useful response.
+      return item.status === 'error'
+        ? `ERROR: ${item.error || 'Unknown error'}`
+        : (item.result ?? item.value ?? 'Accepted');
     }
 
     function renderScanProgress(scan) {
@@ -3407,7 +3414,7 @@ entities:
         (filter === 'write' && String(item.operation || '').startsWith('write_'))
       );
       const text = rows.map(item => [item.timestamp, item.status.toUpperCase(), item.operation,
-        `slave=${item.slave}`, `address=${item.address}`, item.error || item.result || item.value || '',
+        `slave=${item.slave}`, `address=${item.address}`, getDiagnosticResponse(item),
         item.duration_ms == null ? '' : `${item.duration_ms}ms`].join(' | ')).join('\n');
       try {
         const content = text || 'No RS-485 activity recorded.';

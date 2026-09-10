@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.40
+
+### Diagnostic log zero values
+
+- Fixed the RS-485 diagnostic log copy action: a valid Modbus response of `0` is now preserved and copied as `0` instead of appearing blank.
+- The on-screen log and copied log now use the same response formatting.
+
 ## 2.1.39
 
 ### R413E16 raw state check

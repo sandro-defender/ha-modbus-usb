@@ -8,7 +8,8 @@
 #
 # Changelog:
 # 2026-09-06 — Initial template from ESPHome rs485 CH-01..CH-16 mapping.
-# Date modified: 2026-09-06
+# 2026-09-10 — Added verified all-channel, baud-rate and address control metadata.
+# Date modified: 2026-09-10
 
 id: eletechsup-R413E16
 name: eletechsup R413E16
@@ -22,6 +23,37 @@ description: >
   16-channel RS-485 Modbus RTU output core (A+/B-). Verified FC06 holding-register
   commands: 0x0100 turns a channel on and 0x0200 turns it off. This is a 5 V TTL
   output core, so it needs a compatible externally powered relay or output board.
+  The device controls also provide verified all-channel ON/OFF, baud-rate, and
+  slave-ID setup commands.
+# Device-specific commands, retained with this template whenever it is applied.
+# Values are decimal forms of the verified Modbus FC06 register words.
+device_controls:
+  protocol: eletechsup_r413e16
+  all_on:
+    register_type: holding
+    address: 0
+    value: 1792 # 0x0700
+  all_off:
+    register_type: holding
+    address: 0
+    value: 2048 # 0x0800
+  baud_rate:
+    register_type: holding
+    address: 254 # 0x00FE
+    values:
+      1200: 0
+      2400: 1
+      4800: 2
+      9600: 3
+      19200: 4
+      38400: 5
+      57600: 6
+      115200: 7
+  slave_id:
+    register_type: holding
+    address: 255 # 0x00FF
+    minimum: 1
+    maximum: 247
 entities:
   - name: CH-01
     entity_type: switch

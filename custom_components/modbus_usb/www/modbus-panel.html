@@ -525,6 +525,9 @@
     .device-test-report ul { margin: 0.65rem 0 0; padding-left: 1.1rem; display: grid; gap: 0.35rem; }
     .device-test-ok { color: #6ee7b7; }
     .device-test-fail { color: #fca5a5; }
+    .device-command-panel { margin: 0 1.25rem 1.1rem; padding: 0.85rem; border: 1px solid rgba(139,92,246,0.32); border-radius: 12px; background: linear-gradient(110deg, rgba(88,28,135,0.16), rgba(15,23,42,0.38)); }
+    .device-command-panel p { color: var(--text-muted); font-size: 0.75rem; line-height: 1.45; margin-bottom: 0.75rem; }
+    .device-command-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 0.55rem; }
     .device-entity-item {
       background: rgba(255,255,255,0.025);
       border: 1px solid rgba(255,255,255,0.05);
@@ -1077,6 +1080,8 @@
       .device-header-actions .btn { width: 100%; padding-inline: 0.45rem; }
       .device-entities-list { padding: 0.7rem; grid-template-columns: 1fr; gap: 0.55rem; }
       .device-test-report { margin: 0 0.7rem 0.7rem; }
+      .device-command-panel { margin: 0 0.7rem 0.7rem; }
+      .device-command-actions { grid-template-columns: 1fr; }
       .device-entity-item { padding: 0.65rem; }
       .ent-right { gap: 0.35rem; }
       .template-grid { grid-template-columns: 1fr; gap: 0.85rem; }
@@ -1568,6 +1573,42 @@
         <button class="btn btn-ghost" onclick="closeModal('modal-edit-device')">Cancel</button>
         <button class="btn btn-primary" onclick="submitEditDevice()">Save Device</button>
       </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modal-r413e16-controls">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title">R413E16 controls</div>
+        <button class="modal-close" aria-label="Close R413E16 controls" onclick="closeModal('modal-r413e16-controls')">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="r413e16-device-id" />
+        <input type="hidden" id="r413e16-original-baud" />
+        <input type="hidden" id="r413e16-original-slave" />
+        <p class="form-hint" style="margin:0 0 1rem; font-size:0.78rem; line-height:1.5;">These commands use the confirmed Eletechsup R413E16 protocol. All-channel commands affect every output on this board.</p>
+        <div class="device-command-panel" style="margin:0 0 1rem;">
+          <p>Control all 16 physical R413E16 outputs at once.</p>
+          <div class="device-command-actions">
+            <button class="btn btn-primary" id="r413e16-all-on" onclick="runR413e16GroupCommand('all_on')">Turn all ON</button>
+            <button class="btn btn-danger" id="r413e16-all-off" onclick="runR413e16GroupCommand('all_off')">Turn all OFF</button>
+          </div>
+        </div>
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label" for="r413e16-baud">Board baud rate</label>
+            <select class="form-select" id="r413e16-baud"><option value="1200">1200</option><option value="2400">2400</option><option value="4800">4800</option><option value="9600">9600</option><option value="19200">19200</option><option value="38400">38400</option><option value="57600">57600</option><option value="115200">115200</option></select>
+            <div class="form-hint">The hub is updated and reconnects at this rate.</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="r413e16-slave">Board slave ID</label>
+            <input class="form-input mono" id="r413e16-slave" type="number" inputmode="numeric" min="1" max="247" />
+            <div class="form-hint">This updates the device and all its configured entities.</div>
+          </div>
+        </div>
+        <div class="form-hint" style="color:#fbbf24; line-height:1.5;">Changing the baud rate or slave ID takes effect immediately. Do not close Home Assistant until the confirmation appears.</div>
+      </div>
+      <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('modal-r413e16-controls')">Cancel</button><button class="btn btn-primary" id="r413e16-save" onclick="saveR413e16Settings()">Save board settings</button></div>
     </div>
   </div>
 
@@ -2415,6 +2456,7 @@ entities:
         const devEntities = entities.filter(e => e.device_id === dev.id);
         const switchCount = devEntities.filter(e => e.entity_type === 'switch').length;
         const slaveId = dev.slave_id != null ? dev.slave_id : (entry.hub?.slave_id || 1);
+        const isR413e16 = dev.device_controls?.protocol === 'eletechsup_r413e16' || String(dev.model || '').toLowerCase().includes('r413e16');
         const health = (entry.diagnostics?.devices || []).find(item => item.device_id === dev.id);
         const healthBadge = !health || health.status === 'unknown'
           ? '<span class="badge badge-slate">No bus activity</span>'
@@ -2519,6 +2561,7 @@ entities:
                   ➕ Add Entity
                 </button>
                 ${devEntities.length ? `<button class="btn btn-secondary btn-sm" id="device-test-${dev.id}" onclick="runDeviceEntityTest('${dev.id}')" title="Read all configured entities and cycle switches one at a time">🧪 Test device</button>` : ''}
+                ${isR413e16 ? `<button class="btn btn-secondary btn-sm" onclick="openR413e16Controls('${dev.id}')" title="Control all channels or change this R413E16 board's communication settings">R413E16 controls</button>` : ''}
                 <button class="btn btn-ghost btn-sm" onclick="openEditDeviceModal('${dev.id}')" title="Rename or edit slave ID">
                   ✏ Edit
                 </button>
@@ -2531,6 +2574,7 @@ entities:
             <div class="device-entities-list">
               ${entitiesHtml}
             </div>
+            ${isR413e16 ? `<div class="device-command-panel"><p>Verified R413E16 commands are available for all 16 outputs, baud rate, and slave ID.</p><button class="btn btn-secondary btn-sm" onclick="openR413e16Controls('${dev.id}')">Open R413E16 controls</button></div>` : ''}
             ${_deviceTestReports[dev.id] ? renderDeviceTestReport(_deviceTestReports[dev.id]) : ''}
           </div>
         `;
@@ -2583,6 +2627,48 @@ entities:
         toast('Device test failed: ' + err.message, 'err');
         if (button) { button.disabled = false; button.textContent = '🧪 Test device'; }
       }
+    }
+
+    function openR413e16Controls(deviceId) {
+      const entry = getCurrentEntry();
+      const dev = (entry?.devices || []).find(item => item.id === deviceId);
+      if (!entry || !dev || !(dev.device_controls?.protocol === 'eletechsup_r413e16' || String(dev.model || '').toLowerCase().includes('r413e16'))) { toast('R413E16 controls are unavailable for this device', 'err'); return; }
+      const baud = entry.hub?.baudrate || 9600;
+      const slave = dev.slave_id != null ? dev.slave_id : (entry.hub?.slave_id || 1);
+      document.getElementById('r413e16-device-id').value = deviceId;
+      document.getElementById('r413e16-original-baud').value = baud;
+      document.getElementById('r413e16-original-slave').value = slave;
+      document.getElementById('r413e16-baud').value = baud;
+      document.getElementById('r413e16-slave').value = slave;
+      openModal('modal-r413e16-controls');
+    }
+
+    async function runR413e16GroupCommand(command) {
+      const entry = getCurrentEntry(); const deviceId = document.getElementById('r413e16-device-id').value;
+      const actionLabel = command === 'all_on' ? 'turn every R413E16 output ON' : 'turn every R413E16 output OFF';
+      if (!entry || !deviceId || !confirm(`Confirm: ${actionLabel}?`)) return;
+      const button = document.getElementById(command === 'all_on' ? 'r413e16-all-on' : 'r413e16-all-off');
+      if (button) { button.disabled = true; button.textContent = 'Sending…'; }
+      try { await apiCall('r413e16_command', { entry_id: entry.entry_id, device_id: deviceId, command }); toast(command === 'all_on' ? 'All R413E16 outputs turned ON' : 'All R413E16 outputs turned OFF', 'ok'); }
+      catch (err) { toast('R413E16 command failed: ' + err.message, 'err'); }
+      finally { if (button) { button.disabled = false; button.textContent = command === 'all_on' ? 'Turn all ON' : 'Turn all OFF'; } }
+    }
+
+    async function saveR413e16Settings() {
+      const entry = getCurrentEntry(); const deviceId = document.getElementById('r413e16-device-id').value;
+      const baudrate = parseInt(document.getElementById('r413e16-baud').value, 10); const slaveId = parseInt(document.getElementById('r413e16-slave').value, 10);
+      const originalBaud = parseInt(document.getElementById('r413e16-original-baud').value, 10); const originalSlave = parseInt(document.getElementById('r413e16-original-slave').value, 10);
+      if (!entry || !deviceId || !Number.isFinite(baudrate) || !Number.isInteger(slaveId) || slaveId < 1 || slaveId > 247) { toast('Enter a valid baud rate and slave ID (1–247)', 'err'); return; }
+      if (baudrate === originalBaud && slaveId === originalSlave) { toast('No board settings were changed', 'inf'); return; }
+      if (!confirm(`Change this R413E16 board to ${baudrate} baud and slave ID ${slaveId}?\n\nThe board changes immediately. The hub will reconnect with the new baud rate.`)) return;
+      const button = document.getElementById('r413e16-save'); button.disabled = true; button.textContent = 'Saving…';
+      try {
+        const payload = { entry_id: entry.entry_id, device_id: deviceId, command: 'configure' };
+        if (baudrate !== originalBaud) payload.baudrate = baudrate;
+        if (slaveId !== originalSlave) payload.slave_id = slaveId;
+        await apiCall('r413e16_command', payload); closeModal('modal-r413e16-controls'); toast('Board settings saved. Reconnecting the hub…', 'ok'); setTimeout(refreshData, 1500);
+      } catch (err) { toast('Could not save board settings: ' + err.message, 'err'); }
+      finally { button.disabled = false; button.textContent = 'Save board settings'; }
     }
 
     // ─── TAB 2: RENDER TEMPLATES ────────────────────────────────

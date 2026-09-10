@@ -62,6 +62,7 @@ def _parse_template_file(
             "description": data.get("description", ""),
             "image": data.get("image") or data.get("picture") or "",
             "info_url": data.get("info_url") or data.get("product_url") or "",
+            "device_controls": data.get("device_controls", {}),
             "fingerprint": data.get("fingerprint", []),
             "entities": data.get("entities", []),
             "raw_yaml": raw_content,

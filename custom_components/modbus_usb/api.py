@@ -28,6 +28,7 @@ from .const import (
     CONF_BAUDRATE,
     CONF_BYTESIZE,
     CONF_DATA_TYPE,
+    CONF_DEVICE_CONTROLS,
     CONF_DESCRIPTION,
     CONF_DEVICES,
     CONF_DEVICE_CLASS,
@@ -330,6 +331,100 @@ async def ws_write_entity(
     except Exception as err:  # noqa: BLE001
         _LOGGER.warning("Configured switch write failed: %s", err)
         connection.send_error(msg["id"], "write_failed", str(err))
+
+
+def _get_r413e16_device(entry, device_id: str) -> dict[str, Any]:
+    """Return a R413E16 device or reject a device-specific command."""
+    device = next(
+        (item for item in entry.options.get(CONF_DEVICES, []) if item.get("id") == device_id),
+        None,
+    )
+    if device is None:
+        raise ValueError("Configured device was not found")
+    controls = device.get(CONF_DEVICE_CONTROLS, {})
+    model = str(device.get(CONF_MODEL, "")).lower()
+    if controls.get("protocol") != "eletechsup_r413e16" and "r413e16" not in model:
+        raise ValueError("These controls are available only for an eletechsup R413E16 device")
+    return device
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "modbus_usb/r413e16_command",
+    vol.Required("entry_id"): cv.string,
+    vol.Required("device_id"): cv.string,
+    vol.Required("command"): vol.In(["all_on", "all_off", "configure"]),
+    vol.Optional("baudrate"): vol.In([1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]),
+    vol.Optional("slave_id"): vol.All(vol.Coerce(int), vol.Range(min=1, max=247)),
+})
+@websocket_api.async_response
+async def ws_r413e16_command(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Run verified R413E16 group commands and serial-setup writes."""
+    try:
+        entry = _get_entry(hass, msg["entry_id"])
+        device = _get_r413e16_device(entry, msg["device_id"])
+        coordinator = hass.data[DOMAIN][entry.entry_id]
+        current_slave = int(device.get(CONF_SLAVE_ID, entry.data.get(CONF_SLAVE_ID, 1)))
+        command = msg["command"]
+
+        if command in ("all_on", "all_off"):
+            value = 0x0700 if command == "all_on" else 0x0800
+            await hass.async_add_executor_job(
+                coordinator.write_register, 0, value, current_slave
+            )
+            connection.send_result(msg["id"], {
+                "success": True, "command": command, "slave_id": current_slave,
+            })
+            return
+
+        baudrate = msg.get("baudrate")
+        new_slave = msg.get("slave_id")
+        if baudrate is None and new_slave is None:
+            raise ValueError("Choose a baud rate, a slave ID, or both")
+
+        # Each write applies immediately. Change the address first, then send
+        # the baud-rate command to the new address while the adapter still
+        # uses the old rate.
+        target_slave = current_slave
+        if new_slave is not None:
+            await hass.async_add_executor_job(
+                coordinator.write_register, 0x00FF, new_slave, current_slave
+            )
+            target_slave = new_slave
+        if baudrate is not None:
+            baud_codes = {
+                1200: 0, 2400: 1, 4800: 2, 9600: 3, 19200: 4,
+                38400: 5, 57600: 6, 115200: 7,
+            }
+            await hass.async_add_executor_job(
+                coordinator.write_register, 0x00FE, baud_codes[baudrate], target_slave
+            )
+
+        new_options = dict(entry.options or {})
+        devices = [dict(item) for item in new_options.get(CONF_DEVICES, [])]
+        if new_slave is not None:
+            devices = [
+                {**item, CONF_SLAVE_ID: new_slave} if item.get("id") == device["id"] else item
+                for item in devices
+            ]
+            new_options[CONF_ENTITIES] = [
+                {**item, CONF_SLAVE_ID: new_slave}
+                if item.get(CONF_DEVICE_ID) == device["id"] else item
+                for item in new_options.get(CONF_ENTITIES, [])
+            ]
+        new_options[CONF_DEVICES] = devices
+        new_data = dict(entry.data)
+        if baudrate is not None:
+            new_data[CONF_BAUDRATE] = baudrate
+        hass.config_entries.async_update_entry(entry, data=new_data, options=new_options)
+        connection.send_result(msg["id"], {
+            "success": True, "baudrate": baudrate, "slave_id": new_slave,
+            "reload_required": baudrate is not None,
+        })
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("R413E16 command failed: %s", err)
+        connection.send_error(msg["id"], "r413e16_command_failed", str(err))
 
 
 @websocket_api.websocket_command({
@@ -814,6 +909,7 @@ async def ws_apply_template(
                 "description": target_tpl.get("description", ""),
                 "image": target_tpl.get(CONF_IMAGE) or "",
                 "info_url": target_tpl.get(CONF_INFO_URL) or "",
+                CONF_DEVICE_CONTROLS: target_tpl.get(CONF_DEVICE_CONTROLS, {}),
             }
             devices.append(new_device)
         else:
@@ -830,6 +926,12 @@ async def ws_apply_template(
             if existing_dev and target_tpl.get(CONF_INFO_URL) and not existing_dev.get(CONF_INFO_URL):
                 existing_dev = dict(existing_dev)
                 existing_dev[CONF_INFO_URL] = target_tpl[CONF_INFO_URL]
+                devices = [
+                    existing_dev if d.get("id") == device_id else d for d in devices
+                ]
+            if existing_dev and target_tpl.get(CONF_DEVICE_CONTROLS) and not existing_dev.get(CONF_DEVICE_CONTROLS):
+                existing_dev = dict(existing_dev)
+                existing_dev[CONF_DEVICE_CONTROLS] = target_tpl[CONF_DEVICE_CONTROLS]
                 devices = [
                     existing_dev if d.get("id") == device_id else d for d in devices
                 ]
@@ -954,6 +1056,7 @@ async def async_register_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_diagnostic_read)
     websocket_api.async_register_command(hass, ws_diagnostic_write)
     websocket_api.async_register_command(hass, ws_write_entity)
+    websocket_api.async_register_command(hass, ws_r413e16_command)
     websocket_api.async_register_command(hass, ws_test_device_entities)
     websocket_api.async_register_command(hass, ws_clear_diagnostic_log)
     websocket_api.async_register_command(hass, ws_scan_bus)

@@ -512,9 +512,9 @@ async def ws_r413e16_command(
         command = msg["command"]
 
         if command == "read_states":
-            # Explicitly collect the board's reported state for every output.
-            # Return raw values so the UI can expose a board revision that does
-            # not provide trustworthy physical output feedback.
+            # The confirmed R413E16 channel map returns 1 for ON and 0 for OFF.
+            # Refresh the configured channel switches from this real board
+            # feedback, rather than leaving an older accepted command cached.
             states: list[dict[str, Any]] = []
             for channel in range(1, 17):
                 try:
@@ -525,6 +525,14 @@ async def ws_r413e16_command(
                     states.append({"channel": channel, "value": value, "ok": True})
                 except Exception as err:  # noqa: BLE001
                     states.append({"channel": channel, "ok": False, "error": str(err)})
+            coordinator.set_r413e16_channel_states(
+                device["id"],
+                {
+                    item["channel"]: int(item["value"]) in (1, 0x0100)
+                    for item in states
+                    if item["ok"]
+                },
+            )
             connection.send_result(msg["id"], {
                 "success": True, "command": command, "slave_id": current_slave,
                 "states": states,

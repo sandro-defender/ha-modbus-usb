@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.41
+
+### R413E16 real state synchronization
+
+- Confirmed the tested eletechsup R413E16 function-03 response: `1` is ON and `0` is OFF.
+- **Read channel states** now synchronizes all configured CH-01 through CH-16 switches with the board’s live feedback, replacing any stale command state.
+- Regular automatic polling now also uses this live feedback, so manual or external channel changes appear in Home Assistant after the configured scan interval.
+
 ## 2.1.40
 
 ### Diagnostic log zero values

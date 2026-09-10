@@ -2860,7 +2860,7 @@ entities:
       const rows = (report.states || []).map(item => item.ok
         ? `CH-${String(item.channel).padStart(2, '0')}: <strong>${escapeHtml(item.value)}</strong>`
         : `CH-${String(item.channel).padStart(2, '0')}: <strong>Error</strong>`).join(' · ');
-      return `<details class="device-test-report" open><summary>Device read-back — all 16 channels requested</summary><p style="margin-top:0.55rem; color:var(--text-muted);">Raw function-03 values: ${rows}</p><p style="margin-top:0.4rem; color:#fcd34d;">If an output is physically ON but its raw value is 0, this board revision does not expose real output feedback. The switch then keeps the last confirmed integration command so it remains controllable.</p></details>`;
+      return `<details class="device-test-report" open><summary>Device read-back — all 16 channels synchronized</summary><p style="margin-top:0.55rem; color:var(--text-muted);">Raw function-03 values: ${rows}</p><p style="margin-top:0.4rem; color:#86efac;">Confirmed R413E16 feedback: <strong>1 = ON</strong>, <strong>0 = OFF</strong>. The channel switches now match this board response.</p></details>`;
     }
 
     async function runDeviceEntityTest(deviceId) {

@@ -149,10 +149,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             "total": 0,
             "found": 0,
         }
-        # Some relay-board revisions accept a command but do not expose a
-        # reliable readable output-state register. Keep the last confirmed
-        # integration command for those channels so grouped controls remain
-        # operable and do not immediately display a false OFF state.
+        # Keep a last confirmed command only as a short-lived fallback when a
+        # channel read fails. R413E16 holding-register feedback is otherwise
+        # authoritative and refreshes this cache on every successful poll.
         self._command_states: dict[str, bool] = {}
         # Modbus RTU is request/response based: concurrent access to one serial
         # adapter can pair a response with the wrong request. Every I/O operation
@@ -160,7 +159,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         self._serial_lock = Lock()
 
     def get_command_state(self, entity_id: str) -> bool | None:
-        """Return a known command state when a board cannot read it back."""
+        """Return the last known state when a board read is temporarily unavailable."""
         return self._command_states.get(entity_id)
 
     def set_r413e16_channel_states(
@@ -430,7 +429,18 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 continue
             self.diag[DIAG_TOTAL_READS] += 1
             try:
-                data[ent_id] = self._read_one(ent, device_slave_map)
+                value = self._read_one(ent, device_slave_map)
+                data[ent_id] = value
+                # Tested R413E16 boards report 1 for ON and 0 for OFF from
+                # holding registers 1–16. Keep the fallback synchronized with
+                # this real feedback so manual/external changes show in HA.
+                if (
+                    ent.get(CONF_ENTITY_TYPE) == "switch"
+                    and ent.get(CONF_REGISTER_TYPE) == REGISTER_TYPE_HOLDING
+                    and ent.get(CONF_ON_VALUE) == 0x0100
+                    and ent.get(CONF_OFF_VALUE) == 0x0200
+                ):
+                    self._command_states[ent_id] = value in (1, 0x0100)
                 self.diag[DIAG_CONSECUTIVE_FAILURES] = 0
                 self.diag[DIAG_LAST_SUCCESS] = datetime.now().isoformat()
             except Exception as err:  # noqa: BLE001

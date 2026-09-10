@@ -4,12 +4,13 @@
 #   slave, 0x06, addr_hi=0x00, addr_lo=channel, value_hi=0x01/0x02, value_lo=0x00
 # Channel registers are 1–16 (not 0-based). ON = 256 (0x0100), OFF = 512 (0x0200).
 # The vendor and Arduino example both use default Modbus slave ID 1.
-# Reads are skipped (assumed_state) because this board is command-oriented.
+# Holding-register reads return status: 1 = ON, 0 = OFF for channels 1–16.
 #
 # Changelog:
 # 2026-09-06 — Initial template from ESPHome rs485 CH-01..CH-16 mapping.
 # 2026-09-10 — Added verified all-channel, baud-rate and address control metadata.
 # 2026-09-10 — Cross-checked against the 16-channel command guide; baud codes 0–4 only.
+# 2026-09-10 — Added all documented per-channel Modbus actions and live state mapping.
 # Date modified: 2026-09-10
 
 id: eletechsup-R413E16
@@ -24,8 +25,9 @@ description: >
   16-channel RS-485 Modbus RTU output core (A+/B-). Verified FC06 holding-register
   commands: 0x0100 turns a channel on and 0x0200 turns it off. This is a 5 V TTL
   output core, so it needs a compatible externally powered relay or output board.
-  The device controls also provide verified all-channel ON/OFF, baud-rate, and
-  slave-ID setup commands.
+  The device controls provide all documented Modbus actions: ON/OFF, toggle,
+  interlock, momentary pulse, timed action, all-channel control, baud rate, and
+  slave-ID setup.
 # Device-specific commands, retained with this template whenever it is applied.
 # Values are decimal forms of the verified Modbus FC06 register words.
 device_controls:
@@ -53,6 +55,12 @@ device_controls:
     address: 255 # 0x00FF
     minimum: 1
     maximum: 247
+  channel_actions:
+    toggle: 768 # 0x0300 — toggle selected channel
+    interlock: 1024 # 0x0400 — selected channel ON; other channels OFF
+    momentary: 1280 # 0x0500 — one-second pulse
+    delay_base: 1536 # 0x0600; add 0–255 seconds to this value
+    maximum_delay_seconds: 255
 entities:
   - name: All Channels
     entity_type: switch
@@ -69,7 +77,7 @@ entities:
     data_type: uint16
     on_value: 256
     off_value: 512
-    assumed_state: true
+    state_on_value: 1
   - name: CH-02
     entity_type: switch
     register_type: holding
@@ -77,7 +85,7 @@ entities:
     data_type: uint16
     on_value: 256
     off_value: 512
-    assumed_state: true
+    state_on_value: 1
   - name: CH-03
     entity_type: switch
     register_type: holding
@@ -85,7 +93,7 @@ entities:
     data_type: uint16
     on_value: 256
     off_value: 512
-    assumed_state: true
+    state_on_value: 1
   - name: CH-04
     entity_type: switch
     register_type: holding
@@ -93,7 +101,7 @@ entities:
     data_type: uint16
     on_value: 256
     off_value: 512
-    assumed_state: true
+    state_on_value: 1
   - name: CH-05
     entity_type: switch
     register_type: holding
@@ -101,7 +109,7 @@ entities:
     data_type: uint16
     on_value: 256
     off_value: 512
-    assumed_state: true
+    state_on_value: 1
   - name: CH-06
     entity_type: switch
     register_type: holding
@@ -109,7 +117,7 @@ entities:
     data_type: uint16
     on_value: 256
     off_value: 512
-    assumed_state: true
+    state_on_value: 1
   - name: CH-07
     entity_type: switch
     register_type: holding
@@ -117,7 +125,7 @@ entities:
     data_type: uint16
     on_value: 256
     off_value: 512
-    assumed_state: true
+    state_on_value: 1
   - name: CH-08
     entity_type: switch
     register_type: holding
@@ -125,7 +133,7 @@ entities:
     data_type: uint16
     on_value: 256
     off_value: 512
-    assumed_state: true
+    state_on_value: 1
   - name: CH-09
     entity_type: switch
     register_type: holding
@@ -133,7 +141,7 @@ entities:
     data_type: uint16
     on_value: 256
     off_value: 512
-    assumed_state: true
+    state_on_value: 1
   - name: CH-10
     entity_type: switch
     register_type: holding
@@ -141,7 +149,7 @@ entities:
     data_type: uint16
     on_value: 256
     off_value: 512
-    assumed_state: true
+    state_on_value: 1
   - name: CH-11
     entity_type: switch
     register_type: holding
@@ -149,7 +157,7 @@ entities:
     data_type: uint16
     on_value: 256
     off_value: 512
-    assumed_state: true
+    state_on_value: 1
   - name: CH-12
     entity_type: switch
     register_type: holding
@@ -157,7 +165,7 @@ entities:
     data_type: uint16
     on_value: 256
     off_value: 512
-    assumed_state: true
+    state_on_value: 1
   - name: CH-13
     entity_type: switch
     register_type: holding
@@ -165,7 +173,7 @@ entities:
     data_type: uint16
     on_value: 256
     off_value: 512
-    assumed_state: true
+    state_on_value: 1
   - name: CH-14
     entity_type: switch
     register_type: holding
@@ -173,7 +181,7 @@ entities:
     data_type: uint16
     on_value: 256
     off_value: 512
-    assumed_state: true
+    state_on_value: 1
   - name: CH-15
     entity_type: switch
     register_type: holding
@@ -181,7 +189,7 @@ entities:
     data_type: uint16
     on_value: 256
     off_value: 512
-    assumed_state: true
+    state_on_value: 1
   - name: CH-16
     entity_type: switch
     register_type: holding
@@ -189,4 +197,4 @@ entities:
     data_type: uint16
     on_value: 256
     off_value: 512
-    assumed_state: true
+    state_on_value: 1

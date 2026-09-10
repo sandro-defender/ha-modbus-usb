@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.28
+
+### Eletechsup R413E16
+
+- Added every documented per-channel Modbus action to the tested template: toggle, interlock, one-second momentary pulse, and timed actions from 0 to 255 seconds.
+- Added live channel feedback for the normal CH-01 through CH-16 switches.
+- Added a compact phone-friendly Actions dialog with confirmations for commands that activate hardware or turn other channels off.
+
 ## 2.1.27
 
 ### Safety

@@ -58,6 +58,7 @@ CONF_DEVICE_CLASS = "device_class"
 CONF_STATE_CLASS = "state_class"
 CONF_ON_VALUE = "on_value"
 CONF_OFF_VALUE = "off_value"
+CONF_STATE_ON_VALUE = "state_on_value"
 # Number entity extras
 CONF_MIN_VALUE = "min_value"
 CONF_MAX_VALUE = "max_value"

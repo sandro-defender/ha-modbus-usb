@@ -355,11 +355,14 @@ def _get_r413e16_device(entry, device_id: str) -> dict[str, Any]:
     vol.Required("type"): "modbus_usb/r413e16_command",
     vol.Required("entry_id"): cv.string,
     vol.Required("device_id"): cv.string,
-    vol.Required("command"): vol.In(["all_on", "all_off", "configure"]),
+    vol.Required("command"): vol.In(["all_on", "all_off", "configure", "channel_action"]),
     # The R413E16 command guide assigns codes 0–4 to 1200–19200. Code 5 is
     # factory reset, so higher rates must never be offered for this board.
     vol.Optional("baudrate"): vol.In([1200, 2400, 4800, 9600, 19200]),
     vol.Optional("slave_id"): vol.All(vol.Coerce(int), vol.Range(min=1, max=247)),
+    vol.Optional("channel"): vol.All(vol.Coerce(int), vol.Range(min=1, max=16)),
+    vol.Optional("action"): vol.In(["toggle", "interlock", "momentary", "delay"]),
+    vol.Optional("delay_seconds"): vol.All(vol.Coerce(int), vol.Range(min=0, max=255)),
 })
 @websocket_api.async_response
 async def ws_r413e16_command(
@@ -372,6 +375,34 @@ async def ws_r413e16_command(
         coordinator = hass.data[DOMAIN][entry.entry_id]
         current_slave = int(device.get(CONF_SLAVE_ID, entry.data.get(CONF_SLAVE_ID, 1)))
         command = msg["command"]
+
+        if command == "channel_action":
+            channel = msg.get("channel")
+            action = msg.get("action")
+            if channel is None or action is None:
+                raise ValueError("Choose a channel and an action")
+            controls = device.get(CONF_DEVICE_CONTROLS, {})
+            channel_actions = controls.get("channel_actions", {})
+            values = {
+                "toggle": 0x0300,
+                "interlock": 0x0400,
+                "momentary": 0x0500,
+            }
+            if action == "delay":
+                delay_seconds = msg.get("delay_seconds")
+                if delay_seconds is None:
+                    raise ValueError("Enter a delay from 0 to 255 seconds")
+                value = int(channel_actions.get("delay_base", 0x0600)) + delay_seconds
+            else:
+                value = int(channel_actions.get(action, values[action]))
+            await hass.async_add_executor_job(
+                coordinator.write_register, channel, value, current_slave
+            )
+            connection.send_result(msg["id"], {
+                "success": True, "command": command, "channel": channel,
+                "action": action, "value": value, "slave_id": current_slave,
+            })
+            return
 
         if command in ("all_on", "all_off"):
             value = 0x0700 if command == "all_on" else 0x0800

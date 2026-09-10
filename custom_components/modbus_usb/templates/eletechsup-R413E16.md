@@ -35,14 +35,9 @@ Function code 03 can read the output state. Read holding registers 1–16; `1` m
 
 ## Current template coverage
 
-The template includes individual channel switches, an **All Channels** switch, configurable group switches, a safe baud-rate selector, and slave-ID configuration. It uses assumed state for output switches because earlier tested hardware behavior was command-oriented.
+The template includes individual switches with live state reads, an **All Channels** switch, configurable group switches, and the complete documented per-channel action set: toggle, interlock, one-second momentary pulse, and 0–255 second timed actions. It also includes a safe baud-rate selector and slave-ID configuration.
 
-## Safe next additions
-
-1. **Live channel feedback:** poll registers 1–16 and display the actual ON/OFF status instead of only the last command.
-2. **Momentary buttons:** trigger one channel for the board’s fixed one-second pulse.
-3. **Timed buttons:** expose the documented 0–255 second delayed command.
-4. **Toggle and interlock buttons:** useful for manual panels, but should not replace normal ON/OFF switches.
+Use the **Actions** button beside a channel in the integration panel for the per-channel actions. Interlock deliberately turns all other channels off. The All Channels and group switches remain command-state controls because they do not have one matching status register.
 
 Do not add factory reset to the regular UI. It can erase the working communication setup.
 

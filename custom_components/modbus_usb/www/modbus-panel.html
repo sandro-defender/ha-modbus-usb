@@ -1084,6 +1084,7 @@
       .device-command-actions { grid-template-columns: 1fr; }
       .device-entity-item { padding: 0.65rem; }
       .ent-right { gap: 0.35rem; }
+      .ent-right { flex-wrap: wrap; justify-content: flex-end; }
       .template-grid { grid-template-columns: 1fr; gap: 0.85rem; }
       .template-card { padding: 0.9rem; border-radius: 12px; }
       .template-photo { height: 120px; }
@@ -1602,6 +1603,35 @@
         <div class="form-hint" style="color:#fbbf24; line-height:1.5;">A slave-ID change takes effect immediately. After a baud-rate change, power-cycle the board; the hub is saved with the new rate and reconnects after the restart.</div>
       </div>
       <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('modal-r413e16-controls')">Cancel</button><button class="btn btn-primary" id="r413e16-save" onclick="saveR413e16Settings()">Save board settings</button></div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modal-r413e16-channel-action">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div class="modal-title" id="r413e16-action-title">R413E16 channel action</div>
+        <button class="modal-close" aria-label="Close channel actions" onclick="closeModal('modal-r413e16-channel-action')">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="r413e16-action-device-id" />
+        <input type="hidden" id="r413e16-action-channel" />
+        <div class="form-group">
+          <label class="form-label" for="r413e16-action-kind">Action</label>
+          <select class="form-select" id="r413e16-action-kind" onchange="updateR413e16ActionForm()">
+            <option value="toggle">Toggle channel</option>
+            <option value="momentary">Momentary pulse (1 second)</option>
+            <option value="delay">Timed action</option>
+            <option value="interlock">Interlock — turn other channels off</option>
+          </select>
+        </div>
+        <div class="form-group" id="r413e16-delay-group" style="display:none;">
+          <label class="form-label" for="r413e16-delay-seconds">Delay (seconds)</label>
+          <input class="form-input mono" id="r413e16-delay-seconds" type="number" inputmode="numeric" min="0" max="255" value="1" />
+          <div class="form-hint">The board supports 0–255 seconds for this documented timed action.</div>
+        </div>
+        <div class="form-hint" id="r413e16-action-hint" style="color:#fbbf24; line-height:1.5;"></div>
+      </div>
+      <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('modal-r413e16-channel-action')">Cancel</button><button class="btn btn-primary" id="r413e16-action-run" onclick="runR413e16ChannelAction()">Run action</button></div>
     </div>
   </div>
 
@@ -2473,6 +2503,7 @@ entities:
           </div>
         ` : devEntities.map(ent => {
           const type = ent.entity_type || 'sensor';
+          const isR413Channel = isR413e16 && type === 'switch' && Number.isInteger(ent.address) && ent.address >= 1 && ent.address <= 16;
           const typeIcon = { sensor: '📈', switch: '💡', binary_sensor: '🔵', number: '🔢' }[type] || '📊';
           const state = getLiveState(ent, dev);
           const val = state ? state.state : '—';
@@ -2519,6 +2550,7 @@ entities:
               </div>
               <div class="ent-right">
                 ${controlHtml}
+                ${isR413Channel ? `<button class="btn btn-secondary btn-sm" title="Open R413E16 channel actions" onclick="openR413e16ChannelAction('${dev.id}', ${ent.address}, '${escapeHtml(ent.name)}')">Actions</button>` : ''}
                 <button class="btn btn-ghost btn-sm" style="padding:0.2rem 0.45rem; font-size:0.68rem;" title="Edit entity" onclick="openEditEntityModal('${ent.id}')">✏</button>
                 <button class="btn btn-danger btn-sm" style="padding:0.2rem 0.45rem; font-size:0.68rem;" title="Delete entity" onclick="confirmDeleteEntity('${ent.id}', '${ent.name}')">🗑</button>
               </div>
@@ -2658,6 +2690,49 @@ entities:
         toast('All Channels switch added', 'ok');
         await refreshData();
       } catch (err) { toast('Could not add all-channels switch: ' + err.message, 'err'); }
+    }
+
+    function openR413e16ChannelAction(deviceId, channel, name) {
+      document.getElementById('r413e16-action-device-id').value = deviceId;
+      document.getElementById('r413e16-action-channel').value = channel;
+      document.getElementById('r413e16-action-title').textContent = `${name} — R413E16 action`;
+      document.getElementById('r413e16-action-kind').value = 'toggle';
+      document.getElementById('r413e16-delay-seconds').value = 1;
+      updateR413e16ActionForm();
+      openModal('modal-r413e16-channel-action');
+    }
+
+    function updateR413e16ActionForm() {
+      const action = document.getElementById('r413e16-action-kind').value;
+      const delay = document.getElementById('r413e16-delay-group');
+      const hint = document.getElementById('r413e16-action-hint');
+      delay.style.display = action === 'delay' ? 'block' : 'none';
+      hint.textContent = {
+        toggle: 'Sends the board’s toggle command to this channel.',
+        momentary: 'Sends the board’s documented one-second pulse command.',
+        delay: 'Sends the board’s documented timed action command.',
+        interlock: 'Warning: this turns this channel on and turns every other channel off.',
+      }[action];
+    }
+
+    async function runR413e16ChannelAction() {
+      const entry = getCurrentEntry();
+      const deviceId = document.getElementById('r413e16-action-device-id').value;
+      const channel = parseInt(document.getElementById('r413e16-action-channel').value, 10);
+      const action = document.getElementById('r413e16-action-kind').value;
+      const delaySeconds = parseInt(document.getElementById('r413e16-delay-seconds').value, 10);
+      if (!entry || !deviceId || !Number.isInteger(channel)) return;
+      if (action === 'delay' && (!Number.isInteger(delaySeconds) || delaySeconds < 0 || delaySeconds > 255)) { toast('Enter a delay from 0 to 255 seconds', 'err'); return; }
+      const extra = action === 'interlock' ? '\n\nThis will turn all other R413E16 channels OFF.' : action === 'delay' ? `\n\nTimed action: ${delaySeconds} seconds.` : '';
+      if (!confirm(`Run ${action} on channel ${channel}?${extra}`)) return;
+      const button = document.getElementById('r413e16-action-run'); button.disabled = true; button.textContent = 'Sending…';
+      try {
+        const payload = { entry_id: entry.entry_id, device_id: deviceId, command: 'channel_action', channel, action };
+        if (action === 'delay') payload.delay_seconds = delaySeconds;
+        await apiCall('r413e16_command', payload);
+        closeModal('modal-r413e16-channel-action'); toast(`Channel ${channel}: ${action} command sent`, 'ok'); setTimeout(refreshData, 500);
+      } catch (err) { toast('Channel action failed: ' + err.message, 'err'); }
+      finally { button.disabled = false; button.textContent = 'Run action'; }
     }
 
     async function runR413e16GroupCommand(command) {

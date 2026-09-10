@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.33
+
+### Board Debug Lab
+
+- Added Automatic Safe Discovery: it checks all four standard read functions at address 0, then automatically expands only the functions that answer to addresses 1–3.
+- Added plain-language next-step advice for detected discrete inputs, input registers, holding registers, and coils, without making unsafe assumptions about writes.
+- Improved discovery feedback with a clear two-step progress status and an independent stop control.
+
 ## 2.1.32
 
 ### Board Debug Lab

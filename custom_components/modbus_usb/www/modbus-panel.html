@@ -1471,6 +1471,23 @@
       <div class="card">
         <div class="card-header">
           <div>
+            <div class="card-title">Automatic safe discovery</div>
+            <div class="card-subtitle">One guided run checks the four standard read functions at addresses 0–3, then explains what to try next.</div>
+          </div>
+          <span class="badge badge-green">No writes</span>
+        </div>
+        <div class="debug-warning" role="note">Use this first for an unknown board. It only sends standard read commands and never changes board settings. It cannot discover undocumented write commands safely.</div>
+        <div class="flex gap-1 mt-2" style="flex-wrap:wrap;">
+          <button class="btn btn-primary" id="btn-auto-discover" onclick="runAutomaticDiscovery()">Run automatic discovery</button>
+          <button class="btn btn-secondary" id="btn-auto-stop" onclick="stopAutomaticDiscovery()" disabled>Stop discovery</button>
+        </div>
+        <div id="auto-discovery-status" class="text-muted text-sm mt-1" role="status" aria-atomic="true">Ready. It will use the Target Slave ID below.</div>
+        <div id="auto-discovery-advice" class="debug-output" aria-live="polite"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
             <div class="card-title">Board Debug Lab</div>
             <div class="card-subtitle">Read-only discovery for an unknown Modbus RTU board</div>
           </div>
@@ -2089,6 +2106,7 @@
     let _inputWatchActive = false;
     let _inputWatchTimer = null;
     const _inputWatchPrevious = new Map();
+    let _automaticDiscoveryActive = false;
 
     // Standalone fallback mock data for testing/preview outside Home Assistant
     const MOCK_DATA = {
@@ -4170,6 +4188,91 @@ entities:
     }
 
     // ─── UNKNOWN BOARD DEBUG LAB ───────────────────────────────
+    function renderAutomaticDiscoveryAdvice(results) {
+      const output = document.getElementById('auto-discovery-advice');
+      const responsive = results.filter(item => item.status === 'response');
+      if (!responsive.length) {
+        output.innerHTML = `<article class="debug-result error"><div class="debug-result-title"><span>No standard read reply found</span><span>Connection check</span></div><div class="debug-result-copy">Try the correct slave ID and baud rate first. Then check A/B wiring, common ground, parity, stop bits, and whether the board needs power separately from the USB adapter.</div></article>`;
+        return;
+      }
+      const byType = Object.groupBy
+        ? Object.groupBy(responsive, item => item.register_type)
+        : responsive.reduce((groups, item) => { (groups[item.register_type] ||= []).push(item); return groups; }, {});
+      const suggestions = [];
+      if (byType.discrete) suggestions.push(`Discrete inputs replied at ${byType.discrete.map(item => item.address).join(', ')}. These are good candidates for Home Assistant binary sensors; use Input Watch and change a physical input to confirm.`);
+      if (byType.input) suggestions.push(`Input registers replied at ${byType.input.map(item => item.address).join(', ')}. These may be measurements such as temperature, voltage, or counters. Their units and scaling still require the board manual.`);
+      if (byType.holding) suggestions.push(`Holding registers replied at ${byType.holding.map(item => item.address).join(', ')}. They can be values or configuration. Read them safely, but do not write them until you have documentation.`);
+      if (byType.coil) suggestions.push(`Coils replied at ${byType.coil.map(item => item.address).join(', ')}. They may show output state, but a coil response alone does not prove it is safe to control.`);
+      output.innerHTML = suggestions.map(text => `<article class="debug-result ok"><div class="debug-result-copy">${escapeHtml(text)}</div></article>`).join('');
+    }
+
+    async function runAutomaticDiscovery() {
+      const entry = getCurrentEntry();
+      const slave = parseInt(document.getElementById('debug-slave').value, 10);
+      const button = document.getElementById('btn-auto-discover');
+      const stopButton = document.getElementById('btn-auto-stop');
+      const status = document.getElementById('auto-discovery-status');
+      if (!entry || !Number.isInteger(slave) || slave < 1 || slave > 247) {
+        status.textContent = 'Enter a valid Target Slave ID below before starting discovery.';
+        return;
+      }
+      if (_inputWatchActive) {
+        status.textContent = 'Stop Input Watch before starting automatic discovery.';
+        return;
+      }
+      _automaticDiscoveryActive = true;
+      button.disabled = true;
+      stopButton.disabled = false;
+      document.getElementById('btn-debug-probe').disabled = true;
+      document.getElementById('auto-discovery-advice').innerHTML = '';
+      const allTypes = ['holding', 'input', 'coil', 'discrete'];
+      try {
+        status.textContent = 'Step 1 of 2: checking four standard read functions at address 0…';
+        const first = await apiCall('probe_registers', { entry_id: entry.entry_id, slave_id: slave, start_address: 0, end_address: 0, register_types: allTypes });
+        if (!_automaticDiscoveryActive || first.stopped) {
+          status.textContent = 'Discovery stopped after the current read.';
+          return;
+        }
+        const respondingTypes = [...new Set(first.results.filter(item => item.status === 'response').map(item => item.register_type))];
+        let results = first.results;
+        if (respondingTypes.length) {
+          status.textContent = `Step 2 of 2: checking addresses 1–3 with ${respondingTypes.length} responding function${respondingTypes.length === 1 ? '' : 's'}…`;
+          const second = await apiCall('probe_registers', { entry_id: entry.entry_id, slave_id: slave, start_address: 1, end_address: 3, register_types: respondingTypes });
+          results = [...results, ...second.results];
+          if (second.stopped || !_automaticDiscoveryActive) {
+            status.textContent = 'Discovery stopped after the current read.';
+            renderBoardProbeResults(results);
+            renderAutomaticDiscoveryAdvice(results);
+            return;
+          }
+        }
+        renderBoardProbeResults(results);
+        renderAutomaticDiscoveryAdvice(results);
+        const count = results.filter(item => item.status === 'response').length;
+        status.textContent = `Discovery complete: ${count} standard read response${count === 1 ? '' : 's'} found. Review the suggested next steps below.`;
+        setTimeout(refreshData, 200);
+      } catch (error) {
+        status.textContent = `Discovery failed: ${error.message}. Verify serial settings and try again.`;
+      } finally {
+        _automaticDiscoveryActive = false;
+        button.disabled = false;
+        stopButton.disabled = true;
+        document.getElementById('btn-debug-probe').disabled = _inputWatchActive;
+      }
+    }
+
+    async function stopAutomaticDiscovery() {
+      if (!_automaticDiscoveryActive) return;
+      _automaticDiscoveryActive = false;
+      document.getElementById('btn-auto-stop').disabled = true;
+      document.getElementById('auto-discovery-status').textContent = 'Stop requested. The current serial read must finish before queued discovery checks are cancelled.';
+      try {
+        await apiCall('stop_probe_registers', { entry_id: getCurrentEntry().entry_id });
+      } catch (error) {
+        document.getElementById('auto-discovery-status').textContent = `Could not stop discovery: ${error.message}`;
+      }
+    }
+
     function renderBoardProbeResults(results) {
       const box = document.getElementById('debug-probe-results');
       if (!results?.length) {

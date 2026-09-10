@@ -50,6 +50,7 @@ CONF_ENTITY_TYPE = "entity_type"  # "sensor" or "switch"
 CONF_NAME = "name"
 CONF_REGISTER_TYPE = "register_type"
 CONF_ADDRESS = "address"
+CONF_ADDRESSES = "addresses"  # Optional list of registers for a group switch
 CONF_DATA_TYPE = "data_type"
 CONF_SCALE = "scale"
 CONF_UNIT_OF_MEASUREMENT = "unit_of_measurement"

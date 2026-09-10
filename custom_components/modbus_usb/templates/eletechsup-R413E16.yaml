@@ -55,6 +55,14 @@ device_controls:
     minimum: 1
     maximum: 247
 entities:
+  - name: All Channels
+    entity_type: switch
+    register_type: holding
+    address: 0
+    data_type: uint16
+    on_value: 1792 # 0x0700 — turn all 16 outputs on
+    off_value: 2048 # 0x0800 — turn all 16 outputs off
+    assumed_state: true
   - name: CH-01
     entity_type: switch
     register_type: holding

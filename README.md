@@ -148,8 +148,9 @@ logger:
 
 1. Update the version in `custom_components/modbus_usb/manifest.json`.
 2. Update the matching panel cache version in `custom_components/modbus_usb/__init__.py`.
-3. Commit and push to `main`.
-4. GitHub Actions validates the integration and creates one release for that version.
+3. Add a clear user-facing entry under that version in `CHANGELOG.md`.
+4. Commit and push to `main`.
+5. GitHub Actions validates the integration and creates one release for that version. The matching changelog entry becomes the release description shown to update users.
 
 Every release requires a new manifest version. Pushing another commit with an existing version updates the code but cannot create a second release tag.
 

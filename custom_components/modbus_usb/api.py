@@ -25,6 +25,7 @@ from homeassistant.helpers import entity_registry as er
 
 from .const import (
     CONF_ADDRESS,
+    CONF_ADDRESSES,
     CONF_BAUDRATE,
     CONF_BYTESIZE,
     CONF_DATA_TYPE,
@@ -286,16 +287,18 @@ async def _async_write_configured_switch(
     """Write one configured switch and return its resolved slave ID."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
     slave_id = _entity_slave_id(entry, entity)
-    address = int(entity[CONF_ADDRESS])
+    addresses = entity.get(CONF_ADDRESSES) or [entity[CONF_ADDRESS]]
     if entity.get(CONF_REGISTER_TYPE) == REGISTER_TYPE_COIL:
-        await hass.async_add_executor_job(
-            coordinator.write_coil, address, state, slave_id
-        )
+        for address in addresses:
+            await hass.async_add_executor_job(
+                coordinator.write_coil, int(address), state, slave_id
+            )
     else:
         value = entity.get(CONF_ON_VALUE, 1) if state else entity.get(CONF_OFF_VALUE, 0)
-        await hass.async_add_executor_job(
-            coordinator.write_register, address, int(value), slave_id
-        )
+        for address in addresses:
+            await hass.async_add_executor_job(
+                coordinator.write_register, int(address), int(value), slave_id
+            )
     return slave_id
 
 
@@ -710,6 +713,13 @@ async def ws_save_entity(
         # Coerce numeric fields
         if CONF_ADDRESS in entity:
             entity[CONF_ADDRESS] = int(entity[CONF_ADDRESS])
+        if CONF_ADDRESSES in entity and entity[CONF_ADDRESSES] not in (None, ""):
+            if not isinstance(entity[CONF_ADDRESSES], list):
+                raise ValueError("Group switch addresses must be a list")
+            addresses = [int(address) for address in entity[CONF_ADDRESSES]]
+            if any(address < 0 or address > 65535 for address in addresses):
+                raise ValueError("Group switch addresses must be between 0 and 65535")
+            entity[CONF_ADDRESSES] = list(dict.fromkeys(addresses))
         if CONF_SCALE in entity and entity[CONF_SCALE] not in (None, ""):
             entity[CONF_SCALE] = float(entity[CONF_SCALE])
         if CONF_SLAVE_ID in entity and entity[CONF_SLAVE_ID] not in (None, ""):

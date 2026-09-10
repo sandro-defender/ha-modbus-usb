@@ -1586,14 +1586,7 @@
         <input type="hidden" id="r413e16-device-id" />
         <input type="hidden" id="r413e16-original-baud" />
         <input type="hidden" id="r413e16-original-slave" />
-        <p class="form-hint" style="margin:0 0 1rem; font-size:0.78rem; line-height:1.5;">These commands use the confirmed Eletechsup R413E16 protocol. All-channel commands affect every output on this board.</p>
-        <div class="device-command-panel" style="margin:0 0 1rem;">
-          <p>Control all 16 physical R413E16 outputs at once.</p>
-          <div class="device-command-actions">
-            <button class="btn btn-primary" id="r413e16-all-on" onclick="runR413e16GroupCommand('all_on')">Turn all ON</button>
-            <button class="btn btn-danger" id="r413e16-all-off" onclick="runR413e16GroupCommand('all_off')">Turn all OFF</button>
-          </div>
-        </div>
+        <p class="form-hint" style="margin:0 0 1rem; font-size:0.78rem; line-height:1.5;">These settings use the confirmed Eletechsup R413E16 protocol. The all-channel control is now a normal switch in the device’s switch list.</p>
         <div class="form-grid-2">
           <div class="form-group">
             <label class="form-label" for="r413e16-baud">Board baud rate</label>
@@ -1792,6 +1785,11 @@
               <label class="form-label">Off Value (Holding Mode)</label>
               <input class="form-input mono" type="number" id="ent-form-offval" value="0" />
             </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Group channel addresses (optional)</label>
+            <input class="form-input mono" type="text" id="ent-form-addresses" inputmode="numeric" placeholder="e.g. 1, 5, 6" />
+            <div class="form-hint">Leave empty for one register. For a group switch, enter the channel/register numbers to control together.</div>
           </div>
         </div>
 
@@ -2457,6 +2455,7 @@ entities:
         const switchCount = devEntities.filter(e => e.entity_type === 'switch').length;
         const slaveId = dev.slave_id != null ? dev.slave_id : (entry.hub?.slave_id || 1);
         const isR413e16 = dev.device_controls?.protocol === 'eletechsup_r413e16' || String(dev.model || '').toLowerCase().includes('r413e16');
+        const hasAllChannelsSwitch = devEntities.some(e => e.entity_type === 'switch' && e.address === 0 && e.on_value === 1792 && e.off_value === 2048);
         const health = (entry.diagnostics?.devices || []).find(item => item.device_id === dev.id);
         const healthBadge = !health || health.status === 'unknown'
           ? '<span class="badge badge-slate">No bus activity</span>'
@@ -2512,7 +2511,7 @@ entities:
                 <div class="ent-info">
                   <div class="ent-name" title="${ent.name}">${ent.name}</div>
                   <div class="ent-sub mono">
-                    <span>${ent.register_type || 'holding'} @ ${ent.address ?? 0}</span>
+                    <span>${ent.addresses?.length ? `group @ ${ent.addresses.join(', ')}` : `${ent.register_type || 'holding'} @ ${ent.address ?? 0}`}</span>
                     <span>•</span>
                     <span>${ent.data_type || (ent.register_type === 'holding' ? 'uint16' : (type === 'switch' || type === 'binary_sensor' ? 'bit' : 'uint16'))}</span>
                   </div>
@@ -2561,6 +2560,7 @@ entities:
                   ➕ Add Entity
                 </button>
                 ${devEntities.length ? `<button class="btn btn-secondary btn-sm" id="device-test-${dev.id}" onclick="runDeviceEntityTest('${dev.id}')" title="Read all configured entities and cycle switches one at a time">🧪 Test device</button>` : ''}
+                ${isR413e16 && !hasAllChannelsSwitch ? `<button class="btn btn-secondary btn-sm" onclick="addR413e16AllChannelsSwitch('${dev.id}')" title="Add the all-channels ON/OFF switch from the R413E16 template">Add all-channels switch</button>` : ''}
                 ${isR413e16 ? `<button class="btn btn-secondary btn-sm" onclick="openR413e16Controls('${dev.id}')" title="Control all channels or change this R413E16 board's communication settings">R413E16 controls</button>` : ''}
                 <button class="btn btn-ghost btn-sm" onclick="openEditDeviceModal('${dev.id}')" title="Rename or edit slave ID">
                   ✏ Edit
@@ -2574,7 +2574,7 @@ entities:
             <div class="device-entities-list">
               ${entitiesHtml}
             </div>
-            ${isR413e16 ? `<div class="device-command-panel"><p>Verified R413E16 commands are available for all 16 outputs, baud rate, and slave ID.</p><button class="btn btn-secondary btn-sm" onclick="openR413e16Controls('${dev.id}')">Open R413E16 controls</button></div>` : ''}
+            ${isR413e16 ? `<div class="device-command-panel"><p>Board communication settings: baud rate and slave ID.</p><button class="btn btn-secondary btn-sm" onclick="openR413e16Controls('${dev.id}')">Open R413E16 settings</button></div>` : ''}
             ${_deviceTestReports[dev.id] ? renderDeviceTestReport(_deviceTestReports[dev.id]) : ''}
           </div>
         `;
@@ -2641,6 +2641,23 @@ entities:
       document.getElementById('r413e16-baud').value = baud;
       document.getElementById('r413e16-slave').value = slave;
       openModal('modal-r413e16-controls');
+    }
+
+    async function addR413e16AllChannelsSwitch(deviceId) {
+      const entry = getCurrentEntry();
+      if (!entry || !confirm('Add an “All Channels” switch? It will turn every physical R413E16 output on or off.')) return;
+      try {
+        await apiCall('save_entity', {
+          entry_id: entry.entry_id,
+          entity: {
+            device_id: deviceId, name: 'All Channels', entity_type: 'switch',
+            register_type: 'holding', address: 0, data_type: 'uint16',
+            on_value: 1792, off_value: 2048, assumed_state: true,
+          },
+        });
+        toast('All Channels switch added', 'ok');
+        await refreshData();
+      } catch (err) { toast('Could not add all-channels switch: ' + err.message, 'err'); }
     }
 
     async function runR413e16GroupCommand(command) {
@@ -3543,6 +3560,7 @@ entities:
       document.getElementById('ent-form-type').value = 'sensor';
       document.getElementById('ent-form-regtype').value = 'holding';
       document.getElementById('ent-form-address').value = '0';
+      document.getElementById('ent-form-addresses').value = '';
       document.getElementById('ent-form-dtype').value = 'uint16';
       document.getElementById('ent-form-scale').value = '1';
       document.getElementById('ent-form-unit').value = '';
@@ -3571,6 +3589,7 @@ entities:
       document.getElementById('ent-form-type').value = ent.entity_type || 'sensor';
       document.getElementById('ent-form-regtype').value = ent.register_type || 'holding';
       document.getElementById('ent-form-address').value = ent.address ?? 0;
+      document.getElementById('ent-form-addresses').value = Array.isArray(ent.addresses) ? ent.addresses.join(', ') : '';
       document.getElementById('ent-form-dtype').value = ent.data_type || 'uint16';
       document.getElementById('ent-form-scale').value = ent.scale != null ? ent.scale : 1;
       document.getElementById('ent-form-unit').value = ent.unit_of_measurement || '';
@@ -3655,6 +3674,17 @@ entities:
         }
         entityData.on_value = parseInt(document.getElementById('ent-form-onval').value || 1, 10);
         entityData.off_value = parseInt(document.getElementById('ent-form-offval').value || 0, 10);
+        const groupText = document.getElementById('ent-form-addresses').value.trim();
+        if (groupText) {
+          const addresses = groupText.split(',').map(value => Number(value.trim()));
+          if (!addresses.length || addresses.some(value => !Number.isInteger(value) || value < 0 || value > 65535)) {
+            toast('Use comma-separated channel addresses from 0 to 65535', 'err');
+            return;
+          }
+          entityData.addresses = [...new Set(addresses)];
+          entityData.address = entityData.addresses[0];
+          entityData.assumed_state = true;
+        } else entityData.addresses = [];
       }
       if (type === 'number') {
         entityData.min_value = parseFloat(document.getElementById('ent-form-min').value || 0);

@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     CONF_ADDRESS,
+    CONF_ADDRESSES,
     CONF_ASSUMED_STATE,
     CONF_DEVICES,
     CONF_DEVICE_ID,
@@ -103,17 +104,19 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
         await self._write(False)
 
     async def _write(self, on: bool) -> None:
-        address = self._ent[CONF_ADDRESS]
+        addresses = self._ent.get(CONF_ADDRESSES) or [self._ent[CONF_ADDRESS]]
         slave = self._resolve_slave_id()
         if self._ent[CONF_REGISTER_TYPE] == REGISTER_TYPE_COIL:
-            await self.hass.async_add_executor_job(
-                self.coordinator.write_coil, address, on, slave
-            )
+            for address in addresses:
+                await self.hass.async_add_executor_job(
+                    self.coordinator.write_coil, int(address), on, slave
+                )
         else:
             value = self._ent.get(CONF_ON_VALUE, 1) if on else self._ent.get(CONF_OFF_VALUE, 0)
-            await self.hass.async_add_executor_job(
-                self.coordinator.write_register, address, value, slave
-            )
+            for address in addresses:
+                await self.hass.async_add_executor_job(
+                    self.coordinator.write_register, int(address), value, slave
+                )
         if self._attr_assumed_state:
             self._last_command = on
             self.async_write_ha_state()

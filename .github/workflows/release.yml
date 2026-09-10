@@ -35,13 +35,26 @@ jobs:
               fs.readFileSync("custom_components/modbus_usb/manifest.json", "utf8")
             );
             const tag = String(manifest.version);
+            let releaseNotes = "";
+            if (fs.existsSync("CHANGELOG.md")) {
+              const lines = fs.readFileSync("CHANGELOG.md", "utf8").split(/\r?\n/);
+              const start = lines.findIndex((line) => line.trim() === `## ${tag}`);
+              if (start !== -1) {
+                const end = lines.findIndex(
+                  (line, index) => index > start && line.startsWith("## ")
+                );
+                releaseNotes = lines.slice(start + 1, end === -1 ? lines.length : end).join("\n").trim();
+              }
+            }
             const release = {
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: tag,
               target_commitish: context.sha,
               name: tag,
-              generate_release_notes: true,
+              ...(releaseNotes
+                ? { body: releaseNotes, generate_release_notes: false }
+                : { generate_release_notes: true }),
             };
 
             try {

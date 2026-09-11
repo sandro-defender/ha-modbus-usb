@@ -605,6 +605,30 @@ async def ws_install_update(
         connection.send_error(msg["id"], "update_failed", str(err))
 
 
+@websocket_api.websocket_command({
+    vol.Required("type"): "modbus_usb/restart_home_assistant",
+})
+@websocket_api.async_response
+async def ws_restart_home_assistant(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Schedule a Home Assistant restart after an in-panel update."""
+    if not connection.user.is_admin:
+        connection.send_error(msg["id"], "unauthorized", "Administrator access is required")
+        return
+
+    async def _restart() -> None:
+        try:
+            await hass.services.async_call("homeassistant", "restart", blocking=True)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error("Home Assistant restart requested by Modbus USB panel failed: %s", err)
+
+    # Reply before scheduling the restart so the panel can give the user clear
+    # feedback instead of losing its WebSocket connection without an answer.
+    connection.send_result(msg["id"], {"restarting": True})
+    hass.async_create_task(_restart())
+
+
 def _get_r413e16_device(entry, device_id: str) -> dict[str, Any]:
     """Return a R413E16 device or reject a device-specific command."""
     device = next(
@@ -1470,6 +1494,7 @@ async def async_register_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_write_entity)
     websocket_api.async_register_command(hass, ws_check_update)
     websocket_api.async_register_command(hass, ws_install_update)
+    websocket_api.async_register_command(hass, ws_restart_home_assistant)
     websocket_api.async_register_command(hass, ws_r413e16_command)
     websocket_api.async_register_command(hass, ws_test_device_entities)
     websocket_api.async_register_command(hass, ws_clear_diagnostic_log)

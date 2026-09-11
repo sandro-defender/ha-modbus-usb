@@ -2648,21 +2648,31 @@ entities:
     }
 
     let _availableUpdate = null;
+    let _restartPending = false;
     const HACS_REPOSITORY = 'sandro-defender/ha-modbus-usb';
 
     function renderUpdateAction() {
       const button = document.getElementById('btn-check-update');
       if (!button) return;
       const updateAvailable = Boolean(_availableUpdate?.update_available);
-      button.classList.toggle('btn-primary', updateAvailable);
-      button.classList.toggle('btn-ghost', !updateAvailable);
-      button.textContent = updateAvailable ? `Update ${_availableUpdate.latest_version}` : 'Check update';
-      button.setAttribute('aria-label', updateAvailable ? `Install version ${_availableUpdate.latest_version}` : 'Check for integration update');
-      button.title = updateAvailable ? `Install version ${_availableUpdate.latest_version}` : 'Check HACS and GitHub for an update';
+      button.classList.toggle('btn-primary', updateAvailable && !_restartPending);
+      button.classList.toggle('btn-secondary', _restartPending);
+      button.classList.toggle('btn-ghost', !updateAvailable && !_restartPending);
+      button.textContent = _restartPending
+        ? 'Restart Home Assistant'
+        : updateAvailable ? `Update ${_availableUpdate.latest_version}` : 'Check update';
+      button.setAttribute('aria-label', _restartPending
+        ? 'Restart Home Assistant to finish the integration update'
+        : updateAvailable ? `Install version ${_availableUpdate.latest_version}` : 'Check for integration update');
+      button.title = _restartPending
+        ? 'Restart Home Assistant to load the installed update'
+        : updateAvailable ? `Install version ${_availableUpdate.latest_version}` : 'Check HACS and GitHub for an update';
     }
 
     async function handleUpdateAction() {
-      if (_availableUpdate?.update_available) {
+      if (_restartPending) {
+        await restartHomeAssistant();
+      } else if (_availableUpdate?.update_available) {
         await installAvailableUpdate();
       } else {
         await checkForUpdate();
@@ -2733,7 +2743,9 @@ entities:
       try {
         const result = await apiCall('install_update');
         if (result.started) {
-          toast('Update started in Home Assistant. Reload after it finishes.', 'ok');
+          _availableUpdate = null;
+          _restartPending = true;
+          toast('Update installed. Restart Home Assistant to load it.', 'ok');
         } else if (result.release_url) {
           window.open(result.release_url, '_blank', 'noopener,noreferrer');
           toast('Open the release page to update, then reload the integration.', 'ok');
@@ -2743,7 +2755,25 @@ entities:
       } finally {
         button.disabled = false;
         button.removeAttribute('aria-busy');
-        button.textContent = originalText;
+        if (_restartPending) renderUpdateAction();
+        else button.textContent = originalText;
+      }
+    }
+
+    async function restartHomeAssistant() {
+      if (!confirm('Restart Home Assistant now? Dashboards, automations, and this panel will be temporarily unavailable.')) return;
+      const button = document.getElementById('btn-check-update');
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      button.textContent = 'Restarting…';
+      try {
+        await apiCall('restart_home_assistant');
+        toast('Home Assistant is restarting. Please wait a moment, then reload this page.', 'ok');
+      } catch (error) {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        renderUpdateAction();
+        toast(`Could not restart Home Assistant: ${error.message}`, 'err');
       }
     }
 

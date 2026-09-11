@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.63
+
+### Restart after update
+
+- After a successful in-panel HACS update, the single action button now becomes
+  **Restart Home Assistant**. It restarts Home Assistant directly from the
+  panel after a clear confirmation.
+- Restart requests are limited to Home Assistant administrators.
+
 ## 2.1.62
 
 ### Accurate RS-485 connection health

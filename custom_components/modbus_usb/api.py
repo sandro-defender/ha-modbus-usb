@@ -10,9 +10,11 @@ Provides complete sidebar UI management for:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 import voluptuous as vol
@@ -22,6 +24,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     CONF_ADDRESS,
@@ -69,6 +72,69 @@ from .templates import (
 from .coordinator import is_r413e16_switch_config
 
 _LOGGER = logging.getLogger(__name__)
+
+_GITHUB_REPOSITORY = "sandro-defender/ha-modbus-usb"
+
+
+def _local_version() -> str:
+    """Return the version packaged with this installed custom component."""
+    manifest_path = Path(__file__).with_name("manifest.json")
+    with manifest_path.open(encoding="utf-8") as manifest_file:
+        return str(json.load(manifest_file)["version"])
+
+
+def _version_key(version: str) -> tuple[int, ...]:
+    """Convert a simple release version to comparable integer components."""
+    clean = version.strip().lstrip("vV").split("-", maxsplit=1)[0]
+    return tuple(int(part) for part in clean.split("."))
+
+
+def _find_hacs_update_entity(hass: HomeAssistant) -> str | None:
+    """Return this integration's HACS update entity when Home Assistant has one."""
+    for state in hass.states.async_all("update"):
+        attributes = state.attributes
+        searchable = " ".join(
+            str(value)
+            for value in (
+                state.entity_id,
+                attributes.get("friendly_name", ""),
+                attributes.get("repository", ""),
+                attributes.get("release_url", ""),
+                attributes.get("url", ""),
+            )
+        ).lower()
+        if "ha-modbus-usb" in searchable or "modbus usb controller" in searchable:
+            return state.entity_id
+    return None
+
+
+async def _async_update_status(hass: HomeAssistant) -> dict[str, Any]:
+    """Read the latest GitHub release and compare it to the installed version."""
+    current_version = _local_version()
+    session = async_get_clientsession(hass)
+    release_url = f"https://github.com/{_GITHUB_REPOSITORY}/releases/latest"
+    async with session.get(
+        f"https://api.github.com/repos/{_GITHUB_REPOSITORY}/releases/latest",
+        headers={"Accept": "application/vnd.github+json"},
+        timeout=10,
+    ) as response:
+        if response.status != 200:
+            raise ValueError(f"GitHub release check failed (HTTP {response.status})")
+        release = await response.json()
+    latest_version = str(release.get("tag_name", "")).lstrip("vV")
+    if not latest_version:
+        raise ValueError("GitHub's latest release has no version tag")
+    try:
+        update_available = _version_key(latest_version) > _version_key(current_version)
+    except ValueError as err:
+        raise ValueError("GitHub release version is not a supported numeric version") from err
+    return {
+        "current_version": current_version,
+        "latest_version": latest_version,
+        "update_available": update_available,
+        "release_url": release.get("html_url") or release_url,
+        "update_entity_id": _find_hacs_update_entity(hass),
+    }
 
 
 def _list_serial_ports() -> list[dict[str, str]]:
@@ -479,6 +545,47 @@ async def ws_write_entity(
     except Exception as err:  # noqa: BLE001
         _LOGGER.warning("Configured switch write failed: %s", err)
         connection.send_error(msg["id"], "write_failed", str(err))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "modbus_usb/check_update",
+})
+@websocket_api.async_response
+async def ws_check_update(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Check GitHub for a newer release without changing the installation."""
+    try:
+        connection.send_result(msg["id"], await _async_update_status(hass))
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.debug("GitHub update check failed: %s", err)
+        connection.send_error(msg["id"], "update_check_failed", str(err))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "modbus_usb/install_update",
+})
+@websocket_api.async_response
+async def ws_install_update(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Start the HACS update when available, otherwise return the release page."""
+    try:
+        status = await _async_update_status(hass)
+        if not status["update_available"]:
+            connection.send_result(msg["id"], {"started": False, **status})
+            return
+        update_entity_id = status.get("update_entity_id")
+        if update_entity_id:
+            await hass.services.async_call(
+                "update", "install", {"entity_id": update_entity_id}, blocking=True
+            )
+            connection.send_result(msg["id"], {"started": True, "method": "hacs", **status})
+            return
+        connection.send_result(msg["id"], {"started": False, "method": "release_page", **status})
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.debug("Integration update failed: %s", err)
+        connection.send_error(msg["id"], "update_failed", str(err))
 
 
 def _get_r413e16_device(entry, device_id: str) -> dict[str, Any]:
@@ -1344,6 +1451,8 @@ async def async_register_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_probe_registers)
     websocket_api.async_register_command(hass, ws_stop_probe_registers)
     websocket_api.async_register_command(hass, ws_write_entity)
+    websocket_api.async_register_command(hass, ws_check_update)
+    websocket_api.async_register_command(hass, ws_install_update)
     websocket_api.async_register_command(hass, ws_r413e16_command)
     websocket_api.async_register_command(hass, ws_test_device_entities)
     websocket_api.async_register_command(hass, ws_clear_diagnostic_log)

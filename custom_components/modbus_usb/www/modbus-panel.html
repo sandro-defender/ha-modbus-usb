@@ -1175,6 +1175,12 @@
         </div>
 
         <div class="header-actions">
+          <button class="btn btn-ghost" id="btn-check-update" onclick="checkForUpdate()" aria-label="Check for integration update" title="Check GitHub for an update">
+            <span>Check update</span>
+          </button>
+          <button class="btn btn-primary" id="btn-install-update" onclick="installAvailableUpdate()" hidden aria-live="polite">
+            <span>Update</span>
+          </button>
           <button class="btn btn-primary" onclick="openAddDeviceModal()">
             ➕ Add Device
           </button>
@@ -2591,6 +2597,64 @@ entities:
 
     function getCurrentEntry() {
       return _entries.find(e => e.entry_id === _currentEntryId) || _entries[0] || null;
+    }
+
+    let _availableUpdate = null;
+
+    async function checkForUpdate() {
+      const button = document.getElementById('btn-check-update');
+      const installButton = document.getElementById('btn-install-update');
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      const originalText = button.textContent;
+      button.textContent = 'Checking…';
+      try {
+        const update = await apiCall('check_update');
+        _availableUpdate = update;
+        if (update.update_available) {
+          installButton.hidden = false;
+          installButton.textContent = `Update ${update.latest_version}`;
+          toast(`Version ${update.latest_version} is available`, 'ok');
+        } else {
+          installButton.hidden = true;
+          toast(`You are up to date (${update.current_version})`, 'ok');
+        }
+      } catch (error) {
+        _availableUpdate = null;
+        installButton.hidden = true;
+        toast(`Could not check for an update: ${error.message}`, 'err');
+      } finally {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        button.textContent = originalText;
+      }
+    }
+
+    async function installAvailableUpdate() {
+      if (!_availableUpdate?.update_available) {
+        await checkForUpdate();
+        return;
+      }
+      const button = document.getElementById('btn-install-update');
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      const originalText = button.textContent;
+      button.textContent = 'Starting…';
+      try {
+        const result = await apiCall('install_update');
+        if (result.started) {
+          toast('Update started in Home Assistant. Reload after it finishes.', 'ok');
+        } else if (result.release_url) {
+          window.open(result.release_url, '_blank', 'noopener,noreferrer');
+          toast('Open the release page to update, then reload the integration.', 'ok');
+        }
+      } catch (error) {
+        toast(`Could not start the update: ${error.message}`, 'err');
+      } finally {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        button.textContent = originalText;
+      }
     }
 
     function renderHubSelector() {

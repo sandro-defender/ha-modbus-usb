@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.55
+
+### Manual update check
+
+- Added **Check update** to the controller header. It compares the installed
+  version with the latest GitHub release and reveals an Update button only
+  when a newer release exists.
+- Update starts through the matching HACS update entity when available; on
+  installations without HACS, it opens the verified GitHub release page.
+
 ## 2.1.54
 
 ### Direct selected-entity state publication

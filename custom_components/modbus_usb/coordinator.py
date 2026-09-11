@@ -211,19 +211,28 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         self, device_id: str, channel_states: dict[int, bool]
     ) -> None:
         """Publish confirmed R413E16 command states to matching channel switches."""
+        normalized_states = {
+            int(channel): bool(state) for channel, state in channel_states.items()
+        }
         updates: dict[str, bool] = {}
         for entity in self._get_entities():
             if (
                 str(entity.get(CONF_DEVICE_ID)) != str(device_id)
                 or entity.get(CONF_ENTITY_TYPE) != "switch"
+                # A Combined Switch has no register of its own. Its state is
+                # derived from the selected real channels below.
+                or entity.get(CONF_ASSUMED_STATE)
                 or entity.get(CONF_REGISTER_TYPE) != REGISTER_TYPE_HOLDING
                 or entity.get("on_value") != 0x0100
                 or entity.get("off_value") != 0x0200
             ):
                 continue
-            channel = entity.get(CONF_ADDRESS)
-            if channel in channel_states:
-                updates[str(entity["id"])] = channel_states[channel]
+            try:
+                channel = int(entity[CONF_ADDRESS])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if channel in normalized_states:
+                updates[str(entity["id"])] = normalized_states[channel]
         if updates:
             self._command_states.update(updates)
             # Publish an updated coordinator snapshot as well as the fallback
@@ -241,7 +250,10 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             # instances instead of relying on a browser refresh or a direct
             # write to HA's global state machine.
             async_dispatcher_send(
-                self.hass, self.r413e16_state_signal(), str(device_id)
+                self.hass,
+                self.r413e16_state_signal(),
+                str(device_id),
+                normalized_states,
             )
 
     def _ensure_connected(self) -> None:

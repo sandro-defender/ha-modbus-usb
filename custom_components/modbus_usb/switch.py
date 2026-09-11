@@ -57,6 +57,7 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
         self._attr_device_info = get_device_info(entry, ent)
         self._attr_assumed_state = bool(ent.get(CONF_ASSUMED_STATE, False))
         self._last_command: bool | None = None
+        self._confirmed_feedback_state: bool | None = None
         picture = get_entity_picture(entry, ent)
         if picture:
             self._attr_entity_picture = picture
@@ -85,10 +86,33 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
         )
 
     @callback
-    def _handle_r413e16_state(self, device_id: str) -> None:
+    def _handle_r413e16_state(
+        self, device_id: str, channel_states: dict[int, bool]
+    ) -> None:
         """Publish newly confirmed R413E16 feedback through this HA entity."""
-        if str(self._ent.get(CONF_DEVICE_ID)) == str(device_id):
-            self.async_write_ha_state()
+        if str(self._ent.get(CONF_DEVICE_ID)) != str(device_id):
+            return
+        try:
+            addresses = (
+                [int(address) for address in self._ent.get(CONF_ADDRESSES, [])]
+                if self._attr_assumed_state
+                else [int(self._ent[CONF_ADDRESS])]
+            )
+        except (KeyError, TypeError, ValueError):
+            return
+        states = [channel_states.get(address) for address in addresses]
+        if not states or any(state is None for state in states):
+            return
+        # Individual channels receive their exact reply. A Combined Switch is
+        # ON only when every selected output was confirmed ON.
+        self._confirmed_feedback_state = all(states)
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Use fresh polled feedback after an immediate command update."""
+        self._confirmed_feedback_state = None
+        super()._handle_coordinator_update()
 
     def _resolve_slave_id(self) -> int | None:
         slave = self._ent.get(CONF_SLAVE_ID)
@@ -104,6 +128,8 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
 
     @property
     def is_on(self) -> bool | None:
+        if self._confirmed_feedback_state is not None:
+            return self._confirmed_feedback_state
         if self._attr_assumed_state:
             # R413E16 Combined Switches have no separate status register.
             # Their state comes from the live feedback of every selected

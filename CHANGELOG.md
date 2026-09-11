@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.49
+
+### Combined Switch channel synchronization
+
+- Combined Switch commands now publish a confirmed per-channel state map to
+  every affected Home Assistant switch. The 16 individual CH entities update
+  immediately after a combined ON/OFF command.
+- Combined Switches are no longer treated as a physical channel; their state
+  is derived only from the selected channel feedback.
+
 ## 2.1.48
 
 ### Immediate R413E16 entity feedback

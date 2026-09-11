@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.51
+
+### Existing template-state compatibility
+
+- Normalize saved switch settings before recognizing the R413E16 protocol.
+  Combined Switch commands now synchronize the individual CH entities even if
+  an older sidebar edit stored addresses or command values as text.
+- Normalize `state_on_value` before calculating an HA switch state, fixing
+  existing configured channels without requiring them to be recreated.
+
 ## 2.1.50
 
 ### Stability rollback

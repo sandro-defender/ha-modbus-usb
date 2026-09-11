@@ -29,7 +29,12 @@ from .const import (
     DOMAIN,
     REGISTER_TYPE_COIL,
 )
-from .coordinator import ModbusUsbCoordinator, get_device_info, get_entity_picture
+from .coordinator import (
+    ModbusUsbCoordinator,
+    get_device_info,
+    get_entity_picture,
+    is_r413e16_switch_config,
+)
 
 
 async def async_setup_entry(
@@ -78,9 +83,7 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
     def _is_r413e16_switch(self) -> bool:
         """Return whether this entity uses the tested R413E16 register map."""
         return (
-            self._ent.get(CONF_REGISTER_TYPE) != REGISTER_TYPE_COIL
-            and self._ent.get(CONF_ON_VALUE) == 0x0100
-            and self._ent.get(CONF_OFF_VALUE) == 0x0200
+            is_r413e16_switch_config(self._ent)
             and bool(self._ent.get(CONF_DEVICE_ID))
         )
 
@@ -109,9 +112,7 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
             # Their state comes from the live feedback of every selected
             # channel, not merely from the last button press.
             if (
-                self._ent.get(CONF_REGISTER_TYPE) == "holding"
-                and self._ent.get(CONF_ON_VALUE) == 0x0100
-                and self._ent.get(CONF_OFF_VALUE) == 0x0200
+                is_r413e16_switch_config(self._ent)
                 and self._ent.get(CONF_DEVICE_ID)
             ):
                 group_state = self.coordinator.get_r413e16_group_state(
@@ -132,14 +133,16 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
         if self._ent[CONF_REGISTER_TYPE] == REGISTER_TYPE_COIL:
             return bool(value)
         state_on_value = self._ent.get(CONF_STATE_ON_VALUE, self._ent.get(CONF_ON_VALUE, 1))
+        try:
+            state_on_value = int(state_on_value)
+        except (TypeError, ValueError):
+            return None
         # R413E16 firmware variants report a channel as either 1 (state-bit
         # form) or 0x0100 / 256 (last-command form). Both are the documented
         # ON representation for a channel written with 0x0100; accepting both
         # prevents a physically ON output appearing OFF in Home Assistant.
         if (
-            state_on_value == 1
-            and self._ent.get(CONF_ON_VALUE) == 0x0100
-            and self._ent.get(CONF_OFF_VALUE) == 0x0200
+            state_on_value == 1 and is_r413e16_switch_config(self._ent)
         ):
             return value in (1, 0x0100)
         return value == state_on_value
@@ -165,9 +168,7 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
                     self.coordinator.write_register, int(address), value, slave
                 )
         if (
-            self._ent.get(CONF_REGISTER_TYPE) != REGISTER_TYPE_COIL
-            and self._ent.get(CONF_ON_VALUE) == 0x0100
-            and self._ent.get(CONF_OFF_VALUE) == 0x0200
+            is_r413e16_switch_config(self._ent)
             and self._ent.get(CONF_DEVICE_ID)
         ):
             self.coordinator.set_r413e16_channel_states(

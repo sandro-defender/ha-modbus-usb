@@ -73,6 +73,22 @@ def _decode_words(words: list[int], data_type: str) -> float | int:
     return words[0]
 
 
+def is_r413e16_switch_config(entity: dict[str, Any]) -> bool:
+    """Return whether a config uses the tested R413E16 register map.
+
+    Older panel versions could save numeric settings as JSON strings. Normalize
+    them here so existing configured boards do not need to be recreated.
+    """
+    try:
+        return (
+            entity.get(CONF_REGISTER_TYPE) == REGISTER_TYPE_HOLDING
+            and int(entity.get("on_value", 0)) == 0x0100
+            and int(entity.get("off_value", 0)) == 0x0200
+        )
+    except (TypeError, ValueError):
+        return False
+
+
 def get_device_info(entry: ConfigEntry, ent: dict) -> DeviceInfo:
     """Return DeviceInfo for an entity, linking it to a separated device or the hub."""
     device_id = ent.get(CONF_DEVICE_ID)
@@ -189,9 +205,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 str(entity.get(CONF_DEVICE_ID)) != str(device_id)
                 or entity.get(CONF_ENTITY_TYPE) != "switch"
                 or entity.get(CONF_ASSUMED_STATE)
-                or entity.get(CONF_REGISTER_TYPE) != REGISTER_TYPE_HOLDING
-                or entity.get("on_value") != 0x0100
-                or entity.get("off_value") != 0x0200
+                or not is_r413e16_switch_config(entity)
             ):
                 continue
             try:
@@ -216,12 +230,13 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             if (
                 str(entity.get(CONF_DEVICE_ID)) != str(device_id)
                 or entity.get(CONF_ENTITY_TYPE) != "switch"
-                or entity.get(CONF_REGISTER_TYPE) != REGISTER_TYPE_HOLDING
-                or entity.get("on_value") != 0x0100
-                or entity.get("off_value") != 0x0200
+                or not is_r413e16_switch_config(entity)
             ):
                 continue
-            channel = entity.get(CONF_ADDRESS)
+            try:
+                channel = int(entity[CONF_ADDRESS])
+            except (KeyError, TypeError, ValueError):
+                continue
             if channel in channel_states:
                 updates[str(entity["id"])] = channel_states[channel]
         if updates:
@@ -499,9 +514,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 # this real feedback so manual/external changes show in HA.
                 if (
                     ent.get(CONF_ENTITY_TYPE) == "switch"
-                    and ent.get(CONF_REGISTER_TYPE) == REGISTER_TYPE_HOLDING
-                    and ent.get(CONF_ON_VALUE) == 0x0100
-                    and ent.get(CONF_OFF_VALUE) == 0x0200
+                    and is_r413e16_switch_config(ent)
                 ):
                     self._command_states[ent_id] = value in (1, 0x0100)
                 self.diag[DIAG_CONSECUTIVE_FAILURES] = 0

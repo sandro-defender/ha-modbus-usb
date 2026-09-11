@@ -66,6 +66,7 @@ from .templates import (
     async_load_templates,
     async_save_template,
 )
+from .coordinator import is_r413e16_switch_config
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -434,9 +435,7 @@ async def _async_write_configured_switch(
                 coordinator.write_register, int(address), int(value), slave_id
             )
     if (
-        entity.get(CONF_REGISTER_TYPE) != REGISTER_TYPE_COIL
-        and entity.get(CONF_ON_VALUE) == 0x0100
-        and entity.get(CONF_OFF_VALUE) == 0x0200
+        is_r413e16_switch_config(entity)
         and entity.get(CONF_DEVICE_ID)
     ):
         coordinator.set_r413e16_channel_states(

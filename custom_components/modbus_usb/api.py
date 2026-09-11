@@ -86,7 +86,9 @@ def _local_version() -> str:
 def _version_key(version: str) -> tuple[int, ...]:
     """Convert a simple release version to comparable integer components."""
     clean = version.strip().lstrip("vV").split("-", maxsplit=1)[0]
-    return tuple(int(part) for part in clean.split("."))
+    parts = [int(part) for part in clean.split(".")]
+    # Treat equivalent short semantic versions consistently: 2.1 is 2.1.0.
+    return tuple((parts + [0, 0, 0])[:3])
 
 
 def _find_hacs_update_entity(hass: HomeAssistant) -> str | None:
@@ -571,6 +573,9 @@ async def ws_install_update(
 ) -> None:
     """Start the HACS update when available, otherwise return the release page."""
     try:
+        if not connection.user.is_admin:
+            connection.send_error(msg["id"], "unauthorized", "Administrator access is required")
+            return
         status = await _async_update_status(hass)
         if not status["update_available"]:
             connection.send_result(msg["id"], {"started": False, **status})

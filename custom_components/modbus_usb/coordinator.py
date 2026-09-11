@@ -248,6 +248,10 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 # all configured registers so HA reflects the board's actual
                 # state, including every channel controlled by a group switch.
                 await self.async_request_refresh()
+            except Exception as err:  # noqa: BLE001
+                # The next scheduled poll will retry. Never leave an unhandled
+                # task exception when a device is disconnected during reload.
+                _LOGGER.debug("Post-command R413E16 refresh failed: %s", err)
             finally:
                 self._r413e16_refresh_scheduled = False
 

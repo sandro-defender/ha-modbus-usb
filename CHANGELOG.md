@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.1.56
+
+### Reliability and safety audit
+
+- Fixed semantic-version comparison for the update check, including releases
+  with a shortened version such as `2.1`.
+- Restricted installation of an update to Home Assistant administrators.
+- Modbus write-service failures now fail the calling automation instead of
+  only writing a log message.
+- Prevented unhandled background refresh errors during device disconnects or
+  integration reloads.
+
 ## 2.1.55
 
 ### Manual update check

@@ -5,7 +5,8 @@ from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -59,6 +60,35 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
         picture = get_entity_picture(entry, ent)
         if picture:
             self._attr_entity_picture = picture
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe an R413E16 switch to verified board-state updates."""
+        await super().async_added_to_hass()
+        if not self._is_r413e16_switch:
+            return
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                self.coordinator.r413e16_state_signal(),
+                self._handle_r413e16_state,
+            )
+        )
+
+    @property
+    def _is_r413e16_switch(self) -> bool:
+        """Return whether this entity uses the tested R413E16 register map."""
+        return (
+            self._ent.get(CONF_REGISTER_TYPE) != REGISTER_TYPE_COIL
+            and self._ent.get(CONF_ON_VALUE) == 0x0100
+            and self._ent.get(CONF_OFF_VALUE) == 0x0200
+            and bool(self._ent.get(CONF_DEVICE_ID))
+        )
+
+    @callback
+    def _handle_r413e16_state(self, device_id: str) -> None:
+        """Publish newly confirmed R413E16 feedback through this HA entity."""
+        if str(self._ent.get(CONF_DEVICE_ID)) == str(device_id):
+            self.async_write_ha_state()
 
     def _resolve_slave_id(self) -> int | None:
         slave = self._ent.get(CONF_SLAVE_ID)

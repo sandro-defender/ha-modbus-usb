@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.48
+
+### Immediate R413E16 entity feedback
+
+- R413E16 switches now subscribe directly to verified board-state updates.
+  A manual **Read channel states**, panel command, or combined command writes
+  the updated state through each real Home Assistant entity immediately.
+
 ## 2.1.47
 
 ### Reliable Home Assistant state synchronization

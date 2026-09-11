@@ -10,6 +10,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -168,6 +169,10 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         """Return the last known state when a board read is temporarily unavailable."""
         return self._command_states.get(entity_id)
 
+    def r413e16_state_signal(self) -> str:
+        """Return this hub's private signal for verified R413E16 feedback."""
+        return f"{DOMAIN}_{self.entry_id}_r413e16_state"
+
     def get_r413e16_group_state(
         self, device_id: str, addresses: list[int]
     ) -> bool | None:
@@ -230,6 +235,14 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 for entity_id, state in updates.items()
             })
             self.async_set_updated_data(updated_data)
+            # A coordinator refresh is sufficient for regular polling. An
+            # on-demand board read, however, must also wake each loaded HA
+            # switch immediately. The dispatcher reaches the actual entity
+            # instances instead of relying on a browser refresh or a direct
+            # write to HA's global state machine.
+            async_dispatcher_send(
+                self.hass, self.r413e16_state_signal(), str(device_id)
+            )
 
     def _ensure_connected(self) -> None:
         """Open the serial adapter or raise a useful error before a request."""

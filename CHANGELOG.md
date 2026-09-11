@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.53
+
+### Full device state read-back after switching
+
+- Every successful R413E16 switch command now schedules a complete device
+  refresh. HA reads all configured channel states from the board after a
+  Combined Switch command instead of relying only on the accepted write.
+- Panel-originated switch commands wait for the same full refresh before they
+  report success. No sidebar UI changes were made.
+
 ## 2.1.52
 
 ### Targeted Combined Switch entity updates

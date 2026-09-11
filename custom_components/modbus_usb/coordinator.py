@@ -180,6 +180,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         # them. This lets a successful Combined Switch command immediately
         # publish only its affected real channel entities to HA.
         self._switch_entities: set[Any] = set()
+        self._r413e16_refresh_scheduled = False
         # Modbus RTU is request/response based: concurrent access to one serial
         # adapter can pair a response with the wrong request. Every I/O operation
         # must therefore own this lock for its entire transaction.
@@ -218,6 +219,23 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 continue
             if address in channel_states:
                 switch_entity.async_write_ha_state()
+
+    def _schedule_r413e16_full_refresh(self) -> None:
+        """Read every configured entity after an R413E16 switch command."""
+        if self._r413e16_refresh_scheduled:
+            return
+        self._r413e16_refresh_scheduled = True
+
+        async def _refresh() -> None:
+            try:
+                # Do not trust an accepted FC06 write as output feedback. Read
+                # all configured registers so HA reflects the board's actual
+                # state, including every channel controlled by a group switch.
+                await self.async_request_refresh()
+            finally:
+                self._r413e16_refresh_scheduled = False
+
+        self.hass.async_create_task(_refresh())
 
     def get_r413e16_group_state(
         self, device_id: str, addresses: list[int]
@@ -281,6 +299,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             })
             self.async_set_updated_data(updated_data)
             self._publish_r413e16_channel_entities(device_id, channel_states)
+            self._schedule_r413e16_full_refresh()
             # A coordinator refresh is sufficient for regular polling. An
             # on-demand board read, however, must also wake each loaded HA
             # switch immediately. The dispatcher reaches the actual entity

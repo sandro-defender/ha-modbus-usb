@@ -472,6 +472,9 @@ async def ws_write_entity(
         slave_id = await _async_write_configured_switch(
             hass, entry, entity, msg["state"]
         )
+        # The sidebar must not leave HA entities at an accepted-command state.
+        # Read every configured entity after any panel switch command.
+        await hass.data[DOMAIN][entry.entry_id].async_request_refresh()
         connection.send_result(msg["id"], {"success": True, "slave_id": slave_id})
     except Exception as err:  # noqa: BLE001
         _LOGGER.warning("Configured switch write failed: %s", err)

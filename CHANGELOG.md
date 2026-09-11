@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.57
+
+### HACS update fallback
+
+- Fixed the Update button when GitHub has published a release before HACS has
+  refreshed its update entity. It now opens the verified GitHub release page
+  instead of reporting a failed HACS update.
+
 ## 2.1.56
 
 ### Reliability and safety audit

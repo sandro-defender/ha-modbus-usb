@@ -105,7 +105,13 @@ def _find_hacs_update_entity(hass: HomeAssistant) -> str | None:
                 attributes.get("url", ""),
             )
         ).lower()
-        if "ha-modbus-usb" in searchable or "modbus usb controller" in searchable:
+        # An update entity reports "on" only after HACS has discovered a
+        # package update. GitHub can publish a release a few minutes earlier,
+        # so do not ask HACS to install while it still reports no update.
+        if (
+            state.state == "on"
+            and ("ha-modbus-usb" in searchable or "modbus usb controller" in searchable)
+        ):
             return state.entity_id
     return None
 
@@ -582,11 +588,17 @@ async def ws_install_update(
             return
         update_entity_id = status.get("update_entity_id")
         if update_entity_id:
-            await hass.services.async_call(
-                "update", "install", {"entity_id": update_entity_id}, blocking=True
-            )
-            connection.send_result(msg["id"], {"started": True, "method": "hacs", **status})
-            return
+            try:
+                await hass.services.async_call(
+                    "update", "install", {"entity_id": update_entity_id}, blocking=True
+                )
+                connection.send_result(msg["id"], {"started": True, "method": "hacs", **status})
+                return
+            except Exception as err:  # noqa: BLE001
+                # HACS can finish its refresh between the check and install.
+                # Offer the verified release page rather than showing a failed
+                # update action to the user.
+                _LOGGER.debug("HACS update could not start: %s", err)
         connection.send_result(msg["id"], {"started": False, "method": "release_page", **status})
     except Exception as err:  # noqa: BLE001
         _LOGGER.debug("Integration update failed: %s", err)

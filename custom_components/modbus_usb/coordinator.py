@@ -9,6 +9,7 @@ from threading import Lock
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity import DeviceInfo
@@ -219,6 +220,21 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 continue
             if address in channel_states:
                 switch_entity.async_write_ha_state()
+                # Coordinator listeners can be delayed or coalesced by HA.
+                # Set the exact loaded entity ID as well, so a successful
+                # Combined Switch command immediately changes the selected
+                # child entities in HA. The scheduled full read below remains
+                # the authoritative reconciliation with the physical board.
+                entity_id = getattr(switch_entity, "entity_id", None)
+                if entity_id:
+                    current = self.hass.states.get(entity_id)
+                    attributes = dict(current.attributes) if current else {}
+                    self.hass.states.async_set(
+                        entity_id,
+                        STATE_ON if channel_states[address] else STATE_OFF,
+                        attributes,
+                        force_update=True,
+                    )
 
     def _schedule_r413e16_full_refresh(self) -> None:
         """Read every configured entity after an R413E16 switch command."""

@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.54
+
+### Direct selected-entity state publication
+
+- Combined Switch now directly publishes ON/OFF to the exact loaded HA channel
+  entities it controls after all writes succeed. This bypasses delayed
+  coordinator callbacks; the existing full board refresh still reconciles the
+  state with the physical device.
+
 ## 2.1.53
 
 ### Full device state read-back after switching

@@ -3485,6 +3485,7 @@ entities:
       renderScanProgress(diag.scan || {});
       const health = diag.health || {};
       const connected = Boolean(diag.connected);
+      const latestTransaction = Array.isArray(diag.transactions) ? diag.transactions[0] : null;
       const status = document.getElementById('diag-connection-status');
       status.className = `serial-status ${connected ? 'ok' : ''}`;
       status.innerHTML = `<span class="dot"></span><span>${connected ? 'Serial port connected' : 'Serial port unavailable'}</span>`;
@@ -3494,14 +3495,16 @@ entities:
       const successRate = total ? `${Math.max(0, ((total - failed) / total * 100)).toFixed(1)}%` : '—';
       const fields = [
         ['Connection', connected ? 'Connected' : 'Disconnected'],
-        ['Successful reads', Math.max(0, total - failed)],
-        ['Failed reads', failed],
+        ['Latest activity', latestTransaction ? `${latestTransaction.operation} · slave ${latestTransaction.slave}` : 'No Modbus traffic yet'],
+        ['Last activity', latestTransaction?.timestamp ? formatLogTime(latestTransaction.timestamp) : '—'],
+        ['Successful requests', Math.max(0, total - failed)],
+        ['Failed requests', failed],
         ['Success rate', successRate],
         ['Consecutive failures', health.consecutive_failures || 0],
         ['Last good response', health.last_success ? formatLogTime(health.last_success) : '—'],
       ];
       document.getElementById('diag-health-grid').innerHTML = fields.map(([label, value]) => `
-        <div class="diag-metric"><div class="label">${label}</div><div class="value">${escapeHtml(value)}</div></div>
+        <div class="diag-metric"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value)}</div></div>
       `).join('');
 
       const errorBox = document.getElementById('diag-last-error');

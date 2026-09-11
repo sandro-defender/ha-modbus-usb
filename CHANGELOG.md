@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.62
+
+### Accurate RS-485 connection health
+
+- Fixed the diagnostic health counters to include every logged Modbus request,
+  including switch writes, instead of only scheduled polling reads.
+- Added the most recent operation and its time to the Connection Health cards,
+  so accepted R413E16 commands immediately appear as real serial activity.
+
 ## 2.1.61
 
 ### Mobile header redesign

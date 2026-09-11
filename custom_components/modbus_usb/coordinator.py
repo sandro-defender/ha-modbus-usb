@@ -490,9 +490,10 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         error: Exception | str | None = None,
         duration_ms: float | None = None,
     ) -> None:
-        """Keep a rolling, UI-safe record of every RS-485 operation."""
+        """Keep a rolling, UI-safe record of every RS-485 operation and health."""
+        timestamp = datetime.now().astimezone().isoformat()
         item: dict[str, Any] = {
-            "timestamp": datetime.now().astimezone().isoformat(),
+            "timestamp": timestamp,
             "operation": operation,
             "slave": slave,
             "address": address,
@@ -506,12 +507,23 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         if error:
             item["error"] = str(error)
         self.transaction_log.appendleft(item)
+
+        # Health must reflect every real wire transaction, not just coordinator
+        # polling. Boards with assumed-state switches (including R413E16) are
+        # controlled mainly through writes, so counting reads alone leaves the
+        # diagnostic page at zero despite successful RS-485 traffic.
+        self.diag[DIAG_TOTAL_READS] += 1
         if error:
+            self.diag[DIAG_FAILED_READS] += 1
+            self.diag[DIAG_CONSECUTIVE_FAILURES] += 1
+            self.diag[DIAG_LAST_ERROR] = str(error)
             _LOGGER.warning(
                 "RS-485 %s failed: slave=%s address=%s error=%s",
                 operation, slave, address, error,
             )
         else:
+            self.diag[DIAG_CONSECUTIVE_FAILURES] = 0
+            self.diag[DIAG_LAST_SUCCESS] = timestamp
             _LOGGER.debug(
                 "RS-485 %s: slave=%s address=%s value=%s result=%s duration=%.1fms",
                 operation, slave, address, value, result, duration_ms or 0,
@@ -575,7 +587,6 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             ent_id = ent["id"]
             if ent.get(CONF_ASSUMED_STATE):
                 continue
-            self.diag[DIAG_TOTAL_READS] += 1
             try:
                 value = self._read_one(ent, device_slave_map)
                 data[ent_id] = value
@@ -587,14 +598,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                     and is_r413e16_switch_config(ent)
                 ):
                     self._command_states[ent_id] = value in (1, 0x0100)
-                self.diag[DIAG_CONSECUTIVE_FAILURES] = 0
-                self.diag[DIAG_LAST_SUCCESS] = datetime.now().isoformat()
             except Exception as err:  # noqa: BLE001
                 _LOGGER.warning("Failed reading %s: %s", ent.get("name", ent_id), err)
                 data[ent_id] = None
-                self.diag[DIAG_FAILED_READS] += 1
-                self.diag[DIAG_CONSECUTIVE_FAILURES] += 1
-                self.diag[DIAG_LAST_ERROR] = str(err)
         return data
 
     def _read_one(self, ent: dict, device_slave_map: dict[str, int] | None = None) -> Any:
@@ -736,22 +742,12 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         self, address: int, register_type: str, data_type: str, slave: int | None = None
     ) -> Any:
         """Perform a one-shot read of a register for the diagnostics/service call."""
-        self.diag[DIAG_TOTAL_READS] += 1
-        try:
-            value = self._read_one({
-                CONF_REGISTER_TYPE: register_type,
-                CONF_ADDRESS: address,
-                CONF_DATA_TYPE: data_type,
-                CONF_SLAVE_ID: slave if slave is not None else self.slave_id,
-            })
-            self.diag[DIAG_CONSECUTIVE_FAILURES] = 0
-            self.diag[DIAG_LAST_SUCCESS] = datetime.now().isoformat()
-            return value
-        except Exception as err:
-            self.diag[DIAG_FAILED_READS] += 1
-            self.diag[DIAG_CONSECUTIVE_FAILURES] += 1
-            self.diag[DIAG_LAST_ERROR] = str(err)
-            raise
+        return self._read_one({
+            CONF_REGISTER_TYPE: register_type,
+            CONF_ADDRESS: address,
+            CONF_DATA_TYPE: data_type,
+            CONF_SLAVE_ID: slave if slave is not None else self.slave_id,
+        })
 
 
 # Changelog:

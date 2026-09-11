@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.50
+
+### Stability rollback
+
+- Reverted the 2.1.49 per-channel callback change, which could disrupt normal
+  Home Assistant switch updates. Restored the proven 2.1.48 entity-feedback
+  path while retaining the R413E16 coordinator synchronization fixes.
+
 ## 2.1.49
 
 ### Combined Switch channel synchronization

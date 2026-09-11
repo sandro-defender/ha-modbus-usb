@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.52
+
+### Targeted Combined Switch entity updates
+
+- After a successful Combined Switch command, the backend now explicitly
+  writes the Home Assistant state of each selected CH entity. The sidebar UI
+  is unchanged; this affects only the actual HA entities controlled by the
+  Combined Switch.
+
 ## 2.1.51
 
 ### Existing template-state compatibility

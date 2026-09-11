@@ -71,6 +71,10 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
         await super().async_added_to_hass()
         if not self._is_r413e16_switch:
             return
+        self.coordinator.register_switch_entity(self)
+        self.async_on_remove(
+            lambda: self.coordinator.unregister_switch_entity(self)
+        )
         self.async_on_remove(
             async_dispatcher_connect(
                 self.hass,

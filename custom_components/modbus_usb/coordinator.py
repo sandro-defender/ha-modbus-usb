@@ -176,6 +176,10 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         # channel read fails. R413E16 holding-register feedback is otherwise
         # authoritative and refreshes this cache on every successful poll.
         self._command_states: dict[str, bool] = {}
+        # Loaded switch entities register after Home Assistant has attached
+        # them. This lets a successful Combined Switch command immediately
+        # publish only its affected real channel entities to HA.
+        self._switch_entities: set[Any] = set()
         # Modbus RTU is request/response based: concurrent access to one serial
         # adapter can pair a response with the wrong request. Every I/O operation
         # must therefore own this lock for its entire transaction.
@@ -188,6 +192,32 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
     def r413e16_state_signal(self) -> str:
         """Return this hub's private signal for verified R413E16 feedback."""
         return f"{DOMAIN}_{self.entry_id}_r413e16_state"
+
+    def register_switch_entity(self, switch_entity: Any) -> None:
+        """Register a loaded switch entity for targeted HA state publication."""
+        self._switch_entities.add(switch_entity)
+
+    def unregister_switch_entity(self, switch_entity: Any) -> None:
+        """Remove a switch entity that Home Assistant has unloaded."""
+        self._switch_entities.discard(switch_entity)
+
+    def _publish_r413e16_channel_entities(
+        self, device_id: str, channel_states: dict[int, bool]
+    ) -> None:
+        """Ask HA to write only the R413E16 channels changed by this command."""
+        for switch_entity in tuple(self._switch_entities):
+            config = getattr(switch_entity, "_ent", {})
+            if (
+                str(config.get(CONF_DEVICE_ID)) != str(device_id)
+                or config.get(CONF_ASSUMED_STATE)
+            ):
+                continue
+            try:
+                address = int(config[CONF_ADDRESS])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if address in channel_states:
+                switch_entity.async_write_ha_state()
 
     def get_r413e16_group_state(
         self, device_id: str, addresses: list[int]
@@ -250,6 +280,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 for entity_id, state in updates.items()
             })
             self.async_set_updated_data(updated_data)
+            self._publish_r413e16_channel_entities(device_id, channel_states)
             # A coordinator refresh is sufficient for regular polling. An
             # on-demand board read, however, must also wake each loaded HA
             # switch immediately. The dispatcher reaches the actual entity

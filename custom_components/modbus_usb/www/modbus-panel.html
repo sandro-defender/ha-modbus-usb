@@ -1175,11 +1175,8 @@
         </div>
 
         <div class="header-actions">
-          <button class="btn btn-ghost" id="btn-check-update" onclick="checkForUpdate()" aria-label="Check for integration update" title="Check GitHub for an update">
+          <button class="btn btn-ghost" id="btn-check-update" onclick="handleUpdateAction()" aria-label="Check for integration update" title="Check HACS and GitHub for an update" aria-live="polite">
             <span>Check update</span>
-          </button>
-          <button class="btn btn-primary" id="btn-install-update" onclick="installAvailableUpdate()" hidden aria-live="polite">
-            <span>Update</span>
           </button>
           <button class="btn btn-primary" onclick="openAddDeviceModal()">
             ➕ Add Device
@@ -2645,6 +2642,25 @@ entities:
     let _availableUpdate = null;
     const HACS_REPOSITORY = 'sandro-defender/ha-modbus-usb';
 
+    function renderUpdateAction() {
+      const button = document.getElementById('btn-check-update');
+      if (!button) return;
+      const updateAvailable = Boolean(_availableUpdate?.update_available);
+      button.classList.toggle('btn-primary', updateAvailable);
+      button.classList.toggle('btn-ghost', !updateAvailable);
+      button.textContent = updateAvailable ? `Update ${_availableUpdate.latest_version}` : 'Check update';
+      button.setAttribute('aria-label', updateAvailable ? `Install version ${_availableUpdate.latest_version}` : 'Check for integration update');
+      button.title = updateAvailable ? `Install version ${_availableUpdate.latest_version}` : 'Check HACS and GitHub for an update';
+    }
+
+    async function handleUpdateAction() {
+      if (_availableUpdate?.update_available) {
+        await installAvailableUpdate();
+      } else {
+        await checkForUpdate();
+      }
+    }
+
     async function refreshHacsRepositoryInformation() {
       if (!_isLiveHA || !_hass?.callWS) return false;
 
@@ -2673,10 +2689,8 @@ entities:
 
     async function checkForUpdate() {
       const button = document.getElementById('btn-check-update');
-      const installButton = document.getElementById('btn-install-update');
       button.disabled = true;
       button.setAttribute('aria-busy', 'true');
-      const originalText = button.textContent;
       button.textContent = 'Refreshing HACS…';
       try {
         const hacsRefreshed = await refreshHacsRepositoryInformation();
@@ -2684,21 +2698,17 @@ entities:
         const update = await apiCall('check_update');
         _availableUpdate = update;
         if (update.update_available) {
-          installButton.hidden = false;
-          installButton.textContent = `Update ${update.latest_version}`;
           toast(`${hacsRefreshed ? 'HACS refreshed. ' : ''}Version ${update.latest_version} is available`, 'ok');
         } else {
-          installButton.hidden = true;
           toast(`${hacsRefreshed ? 'HACS refreshed — ' : ''}you are up to date (${update.current_version})`, 'ok');
         }
       } catch (error) {
         _availableUpdate = null;
-        installButton.hidden = true;
         toast(`Could not check for an update: ${error.message}`, 'err');
       } finally {
         button.disabled = false;
         button.removeAttribute('aria-busy');
-        button.textContent = originalText;
+        renderUpdateAction();
       }
     }
 
@@ -2707,7 +2717,7 @@ entities:
         await checkForUpdate();
         return;
       }
-      const button = document.getElementById('btn-install-update');
+      const button = document.getElementById('btn-check-update');
       button.disabled = true;
       button.setAttribute('aria-busy', 'true');
       const originalText = button.textContent;

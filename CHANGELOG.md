@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.60
+
+### Simpler update action
+
+- Replaced the separate **Check update** and **Update** buttons with one stable
+  action. It says **Check update** until a release is found, then becomes
+  **Update <version>**.
+
 ## 2.1.59
 
 ### HACS-aware update check

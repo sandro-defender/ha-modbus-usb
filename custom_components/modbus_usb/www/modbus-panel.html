@@ -150,13 +150,12 @@
 
     /* ── Header ────────────────────────────────────────────────── */
     .header {
-      display: flex;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto auto;
       align-items: center;
-      justify-content: space-between;
       padding: 1.25rem 0 1.1rem;
       border-bottom: 1px solid var(--border-subtle);
       margin-bottom: 1.25rem;
-      flex-wrap: wrap;
       gap: 1rem;
       position: sticky;
       top: 0;
@@ -164,10 +163,11 @@
       background: linear-gradient(180deg, rgba(7,11,20,0.97) 72%, rgba(7,11,20,0));
       backdrop-filter: blur(16px);
     }
-    .header-left {
+    .header-brand {
       display: flex;
       align-items: center;
       gap: 0.85rem;
+      min-width: 0;
     }
     .header-icon {
       width: 44px;
@@ -203,11 +203,14 @@
       align-items: center;
       gap: 0.5rem;
     }
-    .header-right {
+    .header-status {
+      display: flex;
+      align-items: center;
+    }
+    .header-controls {
       display: flex;
       align-items: center;
       gap: 0.75rem;
-      flex-wrap: wrap;
     }
 
     .header-actions {
@@ -1080,18 +1083,22 @@
     /* ── Responsive ─────────────────────────────────────────────── */
     @media (max-width: 768px) {
       .app { padding: 0 0.7rem 1.25rem; }
-      .header { padding: 0.75rem 0; margin-bottom: 0.8rem; gap: 0.65rem; }
-      .header-left { gap: 0.6rem; min-width: 0; }
+      .header { grid-template-columns: minmax(0, 1fr) auto; padding: 0.75rem 0; margin-bottom: 0.8rem; gap: 0.65rem; }
+      .header-brand { gap: 0.6rem; min-width: 0; }
       .header-icon { width: 38px; height: 38px; border-radius: 10px; }
       .header-title h1 { font-size: 1.08rem; }
-      .header-title p { font-size: 0.68rem; line-height: 1.3; }
-      .header-right { width: 100%; gap: 0.5rem; }
-      .header-actions { padding-left: 0; border-left: 0; margin-left: auto; }
-      .hub-select-wrapper { flex: 1; min-width: 0; }
+      .header-title { min-width: 0; }
+      .header-title p { font-size: 0.68rem; line-height: 1.3; overflow-wrap: anywhere; }
+      .header-controls { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.55rem; }
+      .header-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px; gap: 0.5rem; padding: 0; border: 0; }
+      .header-actions .btn { min-width: 0; padding-inline: 0.5rem; }
+      .header-actions #btn-refresh { min-width: 44px; padding: 0; }
+      .header-actions #btn-refresh .refresh-label { display: none; }
+      .hub-select-wrapper { min-width: 0; }
       .hub-select { width: 100%; min-width: 0; }
       .status-badge { padding: 0.35rem 0.55rem; font-size: 0.67rem; }
-      .nav-tabs { margin: 0 -0.1rem 1rem; padding: 0.25rem; gap: 0.25rem; flex-wrap: wrap; overflow: visible; }
-      .nav-tab { flex: 1 1 calc(33.333% - 0.25rem); min-width: 0; font-size: 0.7rem; padding: 0.55rem 0.3rem; }
+      .nav-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0 -0.1rem 1rem; padding: 0.25rem; gap: 0.25rem; overflow: visible; }
+      .nav-tab { min-width: 0; font-size: 0.7rem; padding: 0.55rem 0.3rem; }
       .nav-tab .tab-count { padding: 0.08rem 0.35rem; }
       .card { padding: 0.9rem; border-radius: 12px; margin-bottom: 0.85rem; }
       .card-title { font-size: 0.92rem; }
@@ -1140,7 +1147,7 @@
       .modal-body { max-height: calc(92vh - 130px); overflow-y: auto; }
     }
     @media (max-width: 390px) {
-      .nav-tab { flex-basis: calc(50% - 0.25rem); }
+      .nav-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .diag-read-write-actions { grid-template-columns: 1fr; }
     }
   </style>
@@ -1150,7 +1157,7 @@
   <div class="app">
     <!-- Header -->
     <header class="header">
-      <div class="header-left">
+      <div class="header-brand">
         <div class="header-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none"><path d="M8 7v4a4 4 0 0 0 8 0V7M10 4v4M14 4v4M12 15v5M8 20h8" /></svg>
         </div>
@@ -1161,7 +1168,13 @@
           </p>
         </div>
       </div>
-      <div class="header-right">
+      <div class="header-status">
+        <div class="status-badge local" id="status-badge">
+          <div class="status-dot"></div>
+          <span id="status-text">Connecting…</span>
+        </div>
+      </div>
+      <div class="header-controls">
         <!-- Hub selector -->
         <div class="hub-select-wrapper" id="hub-select-wrap" style="display:none;">
           <select class="hub-select" id="hub-select" onchange="onHubChange(this.value)">
@@ -1169,17 +1182,12 @@
           </select>
         </div>
 
-        <div class="status-badge local" id="status-badge">
-          <div class="status-dot"></div>
-          <span id="status-text">Connecting…</span>
-        </div>
-
         <div class="header-actions">
           <button class="btn btn-ghost" id="btn-check-update" onclick="handleUpdateAction()" aria-label="Check for integration update" title="Check HACS and GitHub for an update" aria-live="polite">
             <span>Check update</span>
           </button>
           <button class="btn btn-primary" onclick="openAddDeviceModal()">
-            ➕ Add Device
+            Add device
           </button>
 
           <button class="btn btn-ghost" id="btn-refresh" onclick="refreshData()" aria-label="Refresh controller data" title="Refresh controller data">

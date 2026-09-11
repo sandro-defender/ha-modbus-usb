@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.1.61
+
+### Mobile header redesign
+
+- Rebuilt the header for phones: connection status stays beside the controller
+  name, the hub selector gets its own row, and the core actions form a clear,
+  touch-friendly action row.
+- The refresh action is an accessible icon button on small screens, preserving
+  space for **Check update** and **Add device** without horizontal overflow.
+- Made mobile navigation tabs a consistent grid so they stay readable and do
+  not create a horizontal scrolling menu.
+
 ## 2.1.60
 
 ### Simpler update action

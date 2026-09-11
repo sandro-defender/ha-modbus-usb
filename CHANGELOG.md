@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.1.59
+
+### HACS-aware update check
+
+- The panel's **Check update** button now refreshes this repository's HACS
+  information first, so HACS receives the latest release and update-entity
+  state before the update result is shown.
+- The normal GitHub check still works when HACS is not installed or the user
+  does not have permission to refresh HACS.
+
+### Faster live switch state
+
+- The panel now listens directly for Home Assistant state-change events for
+  its configured entities. Switches, sensors, and dashboard cards update
+  immediately after a state changes, without waiting for the next full refresh.
+
 ## 2.1.57
 
 ### HACS update fallback

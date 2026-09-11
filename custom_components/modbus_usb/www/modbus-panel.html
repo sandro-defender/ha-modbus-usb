@@ -2140,6 +2140,8 @@
     let _currentEntryId = null;
     let _templates = [];
     let _statesCache = {};
+    let _unsubscribeStateChanges = null;
+    let _liveStateRenderTimer = null;
     let _dashboardFilter = 'all';
     const _deviceTestReports = {};
     const _r413e16StateReports = {};
@@ -2395,10 +2397,51 @@ entities:
       }
 
       await refreshData();
+      await subscribeToLiveStateChanges();
       setInterval(refreshData, 15000);
       setInterval(() => {
         if (document.getElementById('pane-diag')?.classList.contains('active')) refreshData();
       }, 5000);
+    }
+
+    function isConfiguredHaEntity(entityId) {
+      return _entries.some((entry) => (entry.entities || []).some(
+        (entity) => entity.ha_entity_id === entityId,
+      ));
+    }
+
+    function scheduleLiveStateRender() {
+      if (_liveStateRenderTimer) return;
+      _liveStateRenderTimer = setTimeout(() => {
+        _liveStateRenderTimer = null;
+        renderDevicesTab();
+        renderDashboardTab();
+        renderEntitiesTab();
+      }, 60);
+    }
+
+    async function subscribeToLiveStateChanges() {
+      if (!_isLiveHA || !_hass?.connection?.subscribeEvents || _unsubscribeStateChanges) return;
+
+      try {
+        _unsubscribeStateChanges = await _hass.connection.subscribeEvents((event) => {
+          const entityId = event?.data?.entity_id;
+          if (!entityId || !isConfiguredHaEntity(entityId)) return;
+
+          const newState = event.data.new_state;
+          if (newState) {
+            _statesCache = { ..._statesCache, [entityId]: newState };
+          } else {
+            const { [entityId]: _removedState, ...remainingStates } = _statesCache;
+            _statesCache = remainingStates;
+          }
+          scheduleLiveStateRender();
+        }, 'state_changed');
+      } catch (error) {
+        // The regular refresh remains a fallback if the embedded HA client
+        // does not expose its event stream.
+        console.debug('Could not subscribe to Home Assistant state changes:', error);
+      }
     }
 
     // ─── Backend API Client ─────────────────────────────────────
@@ -2600,6 +2643,33 @@ entities:
     }
 
     let _availableUpdate = null;
+    const HACS_REPOSITORY = 'sandro-defender/ha-modbus-usb';
+
+    async function refreshHacsRepositoryInformation() {
+      if (!_isLiveHA || !_hass?.callWS) return false;
+
+      try {
+        const repositories = await _hass.callWS({
+          type: 'hacs/repositories/list',
+          categories: ['integration'],
+        });
+        const repository = (Array.isArray(repositories) ? repositories : []).find((item) =>
+          String(item.full_name || '').toLowerCase() === HACS_REPOSITORY,
+        );
+        if (!repository?.id) return false;
+
+        await _hass.callWS({
+          type: 'hacs/repository/refresh',
+          repository: String(repository.id),
+        });
+        return true;
+      } catch (error) {
+        // HACS is optional and refresh requires an administrator. The GitHub
+        // check below remains useful when either condition is not met.
+        console.debug('Could not refresh HACS repository information:', error);
+        return false;
+      }
+    }
 
     async function checkForUpdate() {
       const button = document.getElementById('btn-check-update');
@@ -2607,17 +2677,19 @@ entities:
       button.disabled = true;
       button.setAttribute('aria-busy', 'true');
       const originalText = button.textContent;
-      button.textContent = 'Checking…';
+      button.textContent = 'Refreshing HACS…';
       try {
+        const hacsRefreshed = await refreshHacsRepositoryInformation();
+        button.textContent = 'Checking…';
         const update = await apiCall('check_update');
         _availableUpdate = update;
         if (update.update_available) {
           installButton.hidden = false;
           installButton.textContent = `Update ${update.latest_version}`;
-          toast(`Version ${update.latest_version} is available`, 'ok');
+          toast(`${hacsRefreshed ? 'HACS refreshed. ' : ''}Version ${update.latest_version} is available`, 'ok');
         } else {
           installButton.hidden = true;
-          toast(`You are up to date (${update.current_version})`, 'ok');
+          toast(`${hacsRefreshed ? 'HACS refreshed — ' : ''}you are up to date (${update.current_version})`, 'ok');
         }
       } catch (error) {
         _availableUpdate = null;

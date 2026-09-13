@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.77
+
+### Discovery to Board Tools workflow
+
+- Changed **Use this target** in Find RS-485 Devices to open Board Tools with
+  a non-sending discovered target. It now clearly offers the next choice:
+  select a configured board for template commands, or explicitly open the
+  documented custom-command form.
+
 ## 2.1.76
 
 ### Template controls and discovered targets

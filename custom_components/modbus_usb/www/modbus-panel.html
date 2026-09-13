@@ -2307,6 +2307,7 @@
     let _inputWatchTimer = null;
     const _inputWatchPrevious = new Map();
     let _automaticDiscoveryActive = false;
+    let _discoveredTarget = null;
 
     // Standalone fallback mock data for testing/preview outside Home Assistant
     const MOCK_DATA = {
@@ -3734,7 +3735,10 @@ entities:
       const entry = getCurrentEntry();
       if (!select || !entry) return;
       const selected = select.value;
-      select.innerHTML = `<option value="">Select a configured board…</option>${(entry.devices || []).map(device =>
+      const discoveredOption = _discoveredTarget
+        ? `<option value="__discovered__">Discovered target · slave ${escapeHtml(_discoveredTarget.slave)} · ${escapeHtml(_discoveredTarget.baudrate)} baud</option>`
+        : '';
+      select.innerHTML = `<option value="">Select a configured board…</option>${discoveredOption}${(entry.devices || []).map(device =>
         `<option value="${escapeHtml(device.id)}">${escapeHtml(device.name || device.model || 'Modbus board')} · slave ${escapeHtml(device.slave_id ?? entry.hub?.slave_id ?? 1)}</option>`
       ).join('')}`;
       if ([...select.options].some(option => option.value === selected)) select.value = selected;
@@ -3744,7 +3748,7 @@ entities:
     function getBoardToolsDevice() {
       const entry = getCurrentEntry();
       const id = document.getElementById('board-tools-device')?.value;
-      return [entry, (entry?.devices || []).find(device => device.id === id)];
+      return [entry, (entry?.devices || []).find(device => device.id === id), id === '__discovered__' ? _discoveredTarget : null];
     }
 
     function findStandardControlTemplate(device) {
@@ -3760,9 +3764,13 @@ entities:
     }
 
     function describeBoardTools() {
-      const [, device] = getBoardToolsDevice();
+      const [, device, discovered] = getBoardToolsDevice();
       const description = document.getElementById('board-tools-description');
       if (!description) return;
+      if (discovered) {
+        description.textContent = `Discovered target: slave ${discovered.slave} at ${discovered.baudrate} baud. Choose a configured board for template commands, or use the custom-command button. Nothing has been sent.`;
+        return;
+      }
       if (!device) {
         description.textContent = 'Select a board to load its saved template controls.';
         return;
@@ -3791,32 +3799,37 @@ entities:
     }
 
     function useSelectedBoardForCustomCommand() {
-      const [entry, device] = getBoardToolsDevice();
-      if (!entry || !device) { toast('Select a board first', 'err'); return; }
-      const slave = device.slave_id ?? entry.hub?.slave_id ?? 1;
+      const [entry, device, discovered] = getBoardToolsDevice();
+      if (!entry || (!device && !discovered)) { toast('Select a board or discovered target first', 'err'); return; }
+      const slave = discovered?.slave ?? device.slave_id ?? entry.hub?.slave_id ?? 1;
       document.getElementById('diag-slave').value = slave;
       document.getElementById('debug-slave').value = slave;
-      toast(`Custom command target set to ${device.name || device.model || 'board'} (slave ${slave})`, 'ok');
+      document.getElementById('btn-diag-read').closest('.card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      document.getElementById('diag-address').focus();
+      toast(`Custom command target set to slave ${slave}. Nothing has been sent.`, 'ok');
     }
 
     function useDiscoveredTarget(slave, baudrate) {
+      _discoveredTarget = { slave, baudrate };
       document.getElementById('diag-slave').value = slave;
       document.getElementById('debug-slave').value = slave;
       const rates = document.getElementById('scan-baudrates');
       const configured = rates.value.split(',').map(value => value.trim()).filter(Boolean);
       if (!configured.includes(String(baudrate))) rates.value = [baudrate, ...configured].join(',');
-      const entry = getCurrentEntry();
-      const matchingDevice = (entry?.devices || []).find(device => Number(device.slave_id) === Number(slave));
       const select = document.getElementById('board-tools-device');
-      if (matchingDevice && select) {
-        select.value = matchingDevice.id;
+      if (select) {
+        renderBoardTools();
+        select.value = '__discovered__';
         describeBoardTools();
+        select.closest('.card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        select.focus();
       }
-      toast(`Target set to slave ${slave} at ${baudrate} baud. Configure the hub to this baud rate before sending board commands.`, 'ok');
+      toast(`Discovered target loaded into Board Tools: slave ${slave} at ${baudrate} baud. Nothing has been sent.`, 'ok');
     }
 
     function openSelectedBoardTools() {
-      const [, device] = getBoardToolsDevice();
+      const [, device, discovered] = getBoardToolsDevice();
+      if (discovered) { toast('Choose a configured board for template controls, or use the custom-command button. Nothing has been sent.', 'ok'); return; }
       if (!device) { toast('Select a board first', 'err'); return; }
       const protocol = boardControlProtocol(device);
       if (protocol === 'eletechsup_r413e16') return openR413e16Controls(device.id);

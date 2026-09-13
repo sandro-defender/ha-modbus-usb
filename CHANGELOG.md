@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.64
+
+### Compact devices and saved-template priority
+
+- Templates saved in Home Assistant now appear first and show a **Saved in HA**
+  badge.
+- Combined Switch channel lists stay on one compact line with a focusable,
+  horizontal scroll area, preventing long channel selections from making device
+  cards excessively tall.
+
 ## 2.1.63
 
 ### Restart after update

@@ -615,6 +615,27 @@
       display: flex;
       align-items: center;
       gap: 0.35rem;
+      min-width: 0;
+    }
+    .combined-channel-list {
+      flex: 1 1 auto;
+      min-width: 0;
+      max-width: 100%;
+      overflow-x: auto;
+      overflow-y: hidden;
+      overscroll-behavior-x: contain;
+      padding-bottom: 2px;
+      white-space: nowrap;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(148,163,184,0.65) transparent;
+    }
+    .combined-channel-list:focus {
+      outline: 2px solid rgba(96,165,250,0.9);
+      outline-offset: 2px;
+      border-radius: 3px;
+    }
+    .ent-data-type {
+      flex: 0 0 auto;
     }
     .ent-right {
       display: flex;
@@ -2920,6 +2941,11 @@ entities:
           const type = ent.entity_type || 'sensor';
           const isR413Channel = isR413e16 && type === 'switch' && Number.isInteger(ent.address) && ent.address >= 1 && ent.address <= 16;
           const typeIcon = { sensor: '📈', switch: '💡', binary_sensor: '🔵', number: '🔢' }[type] || '📊';
+          const combinedAddresses = Array.isArray(ent.addresses)
+            ? ent.addresses
+            : String(ent.addresses || '').split(',').map(value => value.trim()).filter(Boolean);
+          const isCombinedSwitch = combinedAddresses.length > 1;
+          const combinedChannelText = combinedAddresses.join(', ');
           const state = getLiveState(ent, dev);
           const val = state ? state.state : '—';
           const unit = ent.unit_of_measurement || state?.attributes?.unit_of_measurement || '';
@@ -2957,9 +2983,11 @@ entities:
                 <div class="ent-info">
                   <div class="ent-name" title="${ent.name}">${ent.name}</div>
                   <div class="ent-sub mono">
-                    <span>${ent.addresses?.length ? `group @ ${ent.addresses.join(', ')}` : `${ent.register_type || 'holding'} @ ${ent.address ?? 0}`}</span>
-                    <span>•</span>
-                    <span>${ent.data_type || (ent.register_type === 'holding' ? 'uint16' : (type === 'switch' || type === 'binary_sensor' ? 'bit' : 'uint16'))}</span>
+                    ${isCombinedSwitch
+                      ? `<span class="combined-channel-list" tabindex="0" title="Channels: ${escapeHtml(combinedChannelText)}" aria-label="Combined channels: ${escapeHtml(combinedChannelText)}">Channels: ${escapeHtml(combinedChannelText)}</span>`
+                      : `<span>${ent.register_type || 'holding'} @ ${ent.address ?? 0}</span>`}
+                    <span aria-hidden="true">•</span>
+                    <span class="ent-data-type">${ent.data_type || (ent.register_type === 'holding' ? 'uint16' : (type === 'switch' || type === 'binary_sensor' ? 'bit' : 'uint16'))}</span>
                   </div>
                 </div>
               </div>
@@ -3243,7 +3271,16 @@ entities:
         return;
       }
 
-      container.innerHTML = _templates.map(tpl => {
+      const templates = [..._templates].sort((left, right) => {
+        const leftSaved = left.source === 'user' ? 0 : 1;
+        const rightSaved = right.source === 'user' ? 0 : 1;
+        if (leftSaved !== rightSaved) return leftSaved - rightSaved;
+        return String(left.name || left.filename || '').localeCompare(
+          String(right.name || right.filename || ''), undefined, { sensitivity: 'base' },
+        );
+      });
+
+      container.innerHTML = templates.map(tpl => {
         const entCount = (tpl.entities || []).length;
         const previewItems = (tpl.entities || []).slice(0, 5).map(e => `
           <div class="preview-pill">
@@ -3268,6 +3305,7 @@ entities:
                   <div class="template-filename">${tpl.filename}</div>
                 </div>
                 <div class="flex gap-1" style="flex-direction:column; align-items:flex-end;">
+                  ${isSavedInHa ? '<span class="badge badge-blue">Saved in HA</span>' : ''}
                   ${validationBadge}
                   <span class="badge badge-purple mono">Default Slave: ${tpl.default_slave_id || 1}</span>
                   <span class="badge badge-blue">${entCount} entities</span>

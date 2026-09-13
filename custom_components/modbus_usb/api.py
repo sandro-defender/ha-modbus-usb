@@ -1570,6 +1570,7 @@ async def ws_delete_template(
     vol.Optional("template_id"): cv.string,
     vol.Optional("selected_entities"): list,
     vol.Optional("address_offset", default=0): vol.Coerce(int),
+    vol.Optional("m0_short", default=False): bool,
 })
 @websocket_api.async_response
 async def ws_apply_template(
@@ -1613,7 +1614,7 @@ async def ws_apply_template(
                 "image": target_tpl.get(CONF_IMAGE) or "",
                 "info_url": target_tpl.get(CONF_INFO_URL) or "",
                 CONF_DEVICE_CONTROLS: target_tpl.get(CONF_DEVICE_CONTROLS, {}),
-                CONF_M0_SHORT: bool(target_tpl.get(CONF_M0_SHORT, False)),
+                CONF_M0_SHORT: bool(msg.get("m0_short", target_tpl.get(CONF_M0_SHORT, False))),
                 CONF_ENABLED: True,
             }
             devices.append(new_device)

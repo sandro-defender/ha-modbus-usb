@@ -1780,6 +1780,11 @@
             <div class="form-hint">Shifts all template register addresses by this amount (usually 0).</div>
           </div>
 
+          <div class="form-group" id="add-dev-m0-group" style="display:none;">
+            <label class="debug-ack-label"><input type="checkbox" id="add-dev-m0-short" /> <span id="add-dev-m0-label">M0 jumper is shorted</span></label>
+            <div class="form-hint" id="add-dev-m0-help"></div>
+          </div>
+
           <div class="form-group">
             <div class="flex items-center justify-between" style="margin-bottom:0.4rem;">
               <label class="form-label" style="margin-bottom:0;">Entities to Create (<span id="tpl-selected-count">0</span>)</label>
@@ -2741,7 +2746,8 @@ entities:
             model: tpl.model,
             manufacturer: tpl.manufacturer,
             description: tpl.description,
-            image: tpl.image || ''
+            image: tpl.image || '',
+            m0_short: Boolean(payload.m0_short)
           });
         }
         const offset = parseInt(payload.address_offset || 0, 10);
@@ -4104,6 +4110,22 @@ entities:
       document.getElementById('add-dev-tpl-desc').textContent = tpl.description || '';
       document.getElementById('add-dev-name').value = tpl.name || 'New Device';
       document.getElementById('add-dev-slave').value = tpl.default_slave_id || 1;
+      const m0Group = document.getElementById('add-dev-m0-group');
+      const m0Checkbox = document.getElementById('add-dev-m0-short');
+      const m0Label = document.getElementById('add-dev-m0-label');
+      const m0Help = document.getElementById('add-dev-m0-help');
+      const controls = tpl.device_controls || {};
+      const isR4d6f20 = controls.protocol === 'eletechsup_r4d6f20' || String(tpl.model || '').toLowerCase().includes('r4d6f20');
+      const isR413e16 = controls.protocol === 'eletechsup_r413e16' || String(tpl.model || '').toLowerCase().includes('r413e16');
+      m0Group.style.display = (isR4d6f20 || isR413e16) ? 'block' : 'none';
+      m0Checkbox.checked = Boolean(tpl.m0_short);
+      if (isR4d6f20) {
+        m0Label.textContent = 'M0 jumper is shorted (Command 2 mode)';
+        m0Help.textContent = 'Unchecked installs Command 1 holding-register relays. Checked installs Command 2 relay coils and discrete inputs. Match the physical jumper; no command is sent while creating the device.';
+      } else if (isR413e16) {
+        m0Label.textContent = 'M0 is connected (high-level TTL outputs)';
+        m0Help.textContent = 'Unchecked records the default low-level outputs. Checked records high-level outputs. This changes output polarity only, not the Modbus protocol, and sends no M0 command.';
+      }
 
       // Populate entities checklist
       _selectedTemplateEntities.clear();
@@ -4150,18 +4172,27 @@ entities:
         const devName = document.getElementById('add-dev-name').value.trim();
         const slaveId = parseInt(document.getElementById('add-dev-slave').value, 10);
         const offset = parseInt(document.getElementById('add-dev-offset').value || 0, 10);
+        const m0Short = document.getElementById('add-dev-m0-group').style.display !== 'none' && document.getElementById('add-dev-m0-short').checked;
 
         if (!devName) { toast('Please enter a device name', 'err'); return; }
 
         try {
-          await apiCall('apply_template', {
+          const template = _templates.find(item => item.filename === sel);
+          const isR4d6f20 = template?.device_controls?.protocol === 'eletechsup_r4d6f20' || String(template?.model || '').toLowerCase().includes('r4d6f20');
+          const response = await apiCall('apply_template', {
             entry_id: entry.entry_id,
             template_filename: sel,
             device_name: devName,
             slave_id: slaveId,
             address_offset: offset,
+            // R4D6F20 switches its entity map immediately after creation, so
+            // start in Command 1 and let the mode endpoint install Command 2.
+            m0_short: isR4d6f20 ? false : m0Short,
             selected_entities: Array.from(_selectedTemplateEntities)
           });
+          if (m0Short && isR4d6f20) {
+            await apiCall('r4d6f20_set_mode', { entry_id: entry.entry_id, device_id: response.device_id, m0_short: true });
+          }
           toast(`Device "${devName}" created from template!`, 'ok');
           closeModal('modal-add-device');
           await refreshData();

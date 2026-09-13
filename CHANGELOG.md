@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.80
+
+### M0 selection while adding a board
+
+- Added the appropriate M0 checkbox directly to **Add Device from YAML
+  Template** for R4D6F20 and R413E16.
+- Creating an R4D6F20 with M0 shorted immediately installs its Command 2 coil
+  and discrete-input profile. Creating an R413E16 records only its selected
+  low- or high-level TTL output polarity.
+
 ## 2.1.79
 
 ### Combined R4D6F20 M0 templates

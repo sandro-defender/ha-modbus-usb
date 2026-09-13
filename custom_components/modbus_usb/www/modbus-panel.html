@@ -4030,13 +4030,10 @@ entities:
       }
       try {
         await apiCall('set_device_enabled', { entry_id: entry.entry_id, device_id: deviceId, enabled });
-        toast(enabled ? 'Device enabled. Reloading entities…' : 'Device disabled. Reloading entities…', 'ok');
-        // The entry update listener reloads platforms asynchronously. Retry
-        // once so the panel does not show an error during that brief window.
-        await new Promise(resolve => setTimeout(resolve, 500));
+        toast(enabled ? 'Device enabled. Polling resumed.' : 'Device disabled. Polling stopped.', 'ok');
         await refreshData();
       } catch (error) {
-        toast(`Could not ${enabled ? 'enable' : 'disable'} device: ${error.message}. Try again after Home Assistant finishes reloading.`, 'err');
+        toast(`Could not ${enabled ? 'enable' : 'disable'} device: ${error.message}`, 'err');
       } finally {
         if (button) {
           button.disabled = false;

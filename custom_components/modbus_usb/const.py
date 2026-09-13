@@ -41,6 +41,7 @@ CONF_INFO_URL = "info_url"
 CONF_DEVICE_CONTROLS = "device_controls"
 CONF_ASSUMED_STATE = "assumed_state"
 CONF_ENABLED = "enabled"
+DATA_SKIP_DEVICE_RELOAD = "skip_device_enable_reload"
 
 TEMPLATES_DIR_NAME = "modbus_usb_templates"
 

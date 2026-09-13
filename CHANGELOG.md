@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.71
+
+### Reliable device toggles
+
+- Fixed Enable / Disable so it no longer reloads the full integration or closes
+  the shared serial port.
+- Disabled-device entities now become unavailable in place and resume normally
+  when the device is enabled again.
+
 ## 2.1.70
 
 ### Per-device enable control

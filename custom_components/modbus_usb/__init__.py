@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 
 from .api import async_register_api
 from .const import (
+    DATA_SKIP_DEVICE_RELOAD,
     CONF_BAUDRATE,
     CONF_BYTESIZE,
     CONF_DEVICES,
@@ -82,7 +83,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
             frontend_url_path="modbus-usb",
             # Change this asset version when the standalone sidebar HTML changes.
             # It prevents an already-open browser from retaining an old panel.
-            config={"url": "/modbus_usb_panel/modbus-panel.html?v=2.1.70"},
+            config={"url": "/modbus_usb_panel/modbus-panel.html?v=2.1.71"},
             require_admin=False,
         )
         _LOGGER.debug("Modbus USB sidebar panel registered")
@@ -176,6 +177,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload the integration when options (e.g. entity list) change."""
+    skip_reloads = hass.data.get(DOMAIN, {}).get(DATA_SKIP_DEVICE_RELOAD, set())
+    if entry.entry_id in skip_reloads:
+        skip_reloads.discard(entry.entry_id)
+        coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        if coordinator is not None:
+            # Device enablement changes availability and polling filters only;
+            # do not close/reopen the shared serial adapter for that change.
+            coordinator.async_set_updated_data(dict(coordinator.data or {}))
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 

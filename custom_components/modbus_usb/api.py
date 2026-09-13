@@ -41,6 +41,7 @@ from .const import (
     CONF_ENTITY_ID,
     CONF_ENTITY_TYPE,
     CONF_ENABLED,
+    DATA_SKIP_DEVICE_RELOAD,
     CONF_MANUFACTURER,
     CONF_MAX_VALUE,
     CONF_MIN_VALUE,
@@ -1059,6 +1060,7 @@ async def ws_set_device_enabled(
             if device.get("id") == device_id else device
             for device in devices
         ]
+        hass.data.setdefault(DOMAIN, {}).setdefault(DATA_SKIP_DEVICE_RELOAD, set()).add(entry.entry_id)
         hass.config_entries.async_update_entry(entry, options=new_options)
         connection.send_result(msg["id"], {"success": True, "enabled": enabled})
     except Exception as err:  # noqa: BLE001

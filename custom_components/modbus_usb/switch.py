@@ -17,7 +17,6 @@ from .const import (
     CONF_ASSUMED_STATE,
     CONF_DEVICES,
     CONF_DEVICE_ID,
-    CONF_ENABLED,
     CONF_ENTITIES,
     CONF_ENTITY_ID,
     CONF_ENTITY_TYPE,
@@ -43,16 +42,10 @@ async def async_setup_entry(
 ) -> None:
     coordinator: ModbusUsbCoordinator = hass.data[DOMAIN][entry.entry_id]
     entities = entry.options.get(CONF_ENTITIES, [])
-    enabled_devices = {
-        str(device.get("id")): device.get(CONF_ENABLED, True)
-        for device in entry.options.get(CONF_DEVICES, [])
-        if device.get("id")
-    }
     switches = [
         ModbusUsbSwitch(coordinator, entry, ent)
         for ent in entities
         if ent[CONF_ENTITY_TYPE] == "switch"
-        and enabled_devices.get(str(ent.get(CONF_DEVICE_ID)), True)
     ]
     async_add_entities(switches)
 
@@ -72,6 +65,17 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
         picture = get_entity_picture(entry, ent)
         if picture:
             self._attr_entity_picture = picture
+
+    @property
+    def available(self) -> bool:
+        """Make a disabled device unavailable without resetting the USB adapter."""
+        device_id = self._ent.get(CONF_DEVICE_ID)
+        device = next(
+            (item for item in self._entry.options.get(CONF_DEVICES, [])
+             if str(item.get("id")) == str(device_id)),
+            None,
+        )
+        return (device is None or device.get("enabled", True)) and super().available
 
     async def async_added_to_hass(self) -> None:
         """Subscribe an R413E16 switch to verified board-state updates."""

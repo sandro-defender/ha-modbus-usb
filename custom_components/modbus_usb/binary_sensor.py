@@ -15,7 +15,6 @@ from .const import (
     CONF_DEVICE_CLASS,
     CONF_DEVICE_ID,
     CONF_DEVICES,
-    CONF_ENABLED,
     CONF_ENTITIES,
     CONF_ENTITY_ID,
     CONF_ENTITY_TYPE,
@@ -31,16 +30,10 @@ async def async_setup_entry(
     """Set up binary sensor entities from config entry."""
     coordinator: ModbusUsbCoordinator = hass.data[DOMAIN][entry.entry_id]
     entities = entry.options.get(CONF_ENTITIES, [])
-    enabled_devices = {
-        str(device.get("id")): device.get(CONF_ENABLED, True)
-        for device in entry.options.get(CONF_DEVICES, [])
-        if device.get("id")
-    }
     binary_sensors = [
         ModbusUsbBinarySensor(coordinator, entry, ent)
         for ent in entities
         if ent[CONF_ENTITY_TYPE] == "binary_sensor"
-        and enabled_devices.get(str(ent.get(CONF_DEVICE_ID)), True)
     ]
     async_add_entities(binary_sensors)
 
@@ -62,6 +55,16 @@ class ModbusUsbBinarySensor(CoordinatorEntity[ModbusUsbCoordinator], BinarySenso
         picture = get_entity_picture(entry, ent)
         if picture:
             self._attr_entity_picture = picture
+
+    @property
+    def available(self) -> bool:
+        device_id = self._ent.get(CONF_DEVICE_ID)
+        device = next(
+            (item for item in self._entry.options.get(CONF_DEVICES, [])
+             if str(item.get("id")) == str(device_id)),
+            None,
+        )
+        return (device is None or device.get("enabled", True)) and super().available
 
     @property
     def is_on(self) -> bool | None:

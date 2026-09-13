@@ -27,7 +27,7 @@ Modbus USB Controller lets you connect energy meters, relay boards, temperature 
 - Check connection health, recent reads/writes, and errors in Diagnostics
 - Use direct register reads and writes when testing a device
 
-The integration includes starter templates for popular energy meters, relay boards, temperature/humidity sensors, and the **eletechsup R413E16** 16-channel I/O board.
+The integration includes starter templates for popular energy meters, relay boards, temperature/humidity sensors, the tested **eletechsup R413E16** 16-channel I/O board, and the untested **eletechsup R4D6F20** 20-channel relay and I/O board.
 
 ## Before you begin
 

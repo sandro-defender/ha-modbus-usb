@@ -1,0 +1,214 @@
+# Eletechsup R4D6F20 — 20-channel RS-485 Modbus RTU relay / I/O board
+#
+# This template implements the factory-default Command 1 protocol: M0 OPEN.
+# It uses FC03 for status reads and FC06 for single-register writes. Do not use
+# the Command 2 (M0-shorted) coil map with this template.
+#
+# Channel writes: 0x0100 (256) = OPEN / ON, 0x0200 (512) = CLOSE / OFF.
+# Channel reads: FC03 returns 1 = ON and 0 = OFF.
+#
+# Source: Eletechsup R4D6F20 Command 1 manual (see the matching .md file).
+
+id: eletechsup-R4D6F20
+name: eletechsup R4D6F20 Multifunction Relay Board
+manufacturer: eletechsup
+model: R4D6F20
+tested: false
+default_slave_id: 1
+info_url: "https://eletechsup.com/products/r4d6f20-smart-20-channel-rs485-relay-board-with-plc-io-module-modbus-for-multifunction-control"
+description: >
+  Unverified template for Eletechsup's 20-relay R4D6F20 PLC I/O board. It uses
+  the documented factory-default Command 1 protocol (M0 open): FC03 reads and
+  FC06 writes holding registers. Includes 20 relay outputs with live state
+  reads, two PNP digital inputs, one 4–20 mA input, and one 0–10 V input.
+  Default serial setup is 9600 baud, 8N1. Verify it on a non-critical load
+  before relying on the configuration.
+entities:
+  - name: CH-01
+    entity_type: switch
+    register_type: holding
+    address: 0
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-02
+    entity_type: switch
+    register_type: holding
+    address: 1
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-03
+    entity_type: switch
+    register_type: holding
+    address: 2
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-04
+    entity_type: switch
+    register_type: holding
+    address: 3
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-05
+    entity_type: switch
+    register_type: holding
+    address: 4
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-06
+    entity_type: switch
+    register_type: holding
+    address: 5
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-07
+    entity_type: switch
+    register_type: holding
+    address: 6
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-08
+    entity_type: switch
+    register_type: holding
+    address: 7
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-09
+    entity_type: switch
+    register_type: holding
+    address: 8
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-10
+    entity_type: switch
+    register_type: holding
+    address: 9
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-11
+    entity_type: switch
+    register_type: holding
+    address: 10
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-12
+    entity_type: switch
+    register_type: holding
+    address: 11
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-13
+    entity_type: switch
+    register_type: holding
+    address: 12
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-14
+    entity_type: switch
+    register_type: holding
+    address: 13
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-15
+    entity_type: switch
+    register_type: holding
+    address: 14
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-16
+    entity_type: switch
+    register_type: holding
+    address: 15
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-17
+    entity_type: switch
+    register_type: holding
+    address: 16
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-18
+    entity_type: switch
+    register_type: holding
+    address: 17
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-19
+    entity_type: switch
+    register_type: holding
+    address: 18
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-20
+    entity_type: switch
+    register_type: holding
+    address: 19
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: DI-01
+    entity_type: binary_sensor
+    register_type: holding
+    address: 128
+    data_type: uint16
+  - name: DI-02
+    entity_type: binary_sensor
+    register_type: holding
+    address: 129
+    data_type: uint16
+  - name: Current Input
+    entity_type: sensor
+    register_type: holding
+    address: 160
+    data_type: uint16
+    scale: 0.01
+    unit_of_measurement: "mA"
+    device_class: current
+    state_class: measurement
+  - name: Voltage Input
+    entity_type: sensor
+    register_type: holding
+    address: 161
+    data_type: uint16
+    scale: 0.01
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement

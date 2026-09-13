@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1.65
+
+### Eletechsup R4D6F20 template
+
+- Added an **untested** factory-default (Command 1 / M0 open) template for
+  Eletechsup's R4D6F20 20-channel RS-485 relay and I/O board.
+- The template adds all 20 relay channels with documented FC03 state feedback,
+  two PNP digital inputs, a 4–20 mA input, and a 0–10 V input.
+- Included a concise register-map reference beside the template, including the
+  official manufacturer manual and product-page links.
+
 ## 2.1.64
 
 ### Compact devices and saved-template priority

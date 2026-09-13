@@ -41,6 +41,7 @@ CONF_INFO_URL = "info_url"
 CONF_DEVICE_CONTROLS = "device_controls"
 CONF_ASSUMED_STATE = "assumed_state"
 CONF_ENABLED = "enabled"
+CONF_M0_SHORT = "m0_short"
 DATA_SKIP_DEVICE_RELOAD = "skip_device_enable_reload"
 # Board edits must reload entity platforms so Home Assistant discovers or removes
 # entities. Keep the hub coordinator alive during that reload, however: closing

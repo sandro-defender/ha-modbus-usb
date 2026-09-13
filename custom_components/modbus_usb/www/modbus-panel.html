@@ -1909,6 +1909,9 @@
       <div class="modal-body">
         <input type="hidden" id="r4d6f20-device-id" />
         <p class="form-hint" style="margin:0 0 1rem; line-height:1.5;">Commands come from the saved R4D6F20 template. This board reads its slave ID and uses DIP switches to set it; the template does not expose an unsafe slave-ID write.</p>
+        <label class="debug-ack-label"><input type="checkbox" id="r4d6f20-m0-short" /> M0 jumper is shorted (Command 2 mode)</label>
+        <div class="form-hint" style="color:#fbbf24; line-height:1.5;">The current template is Command 1 / M0 open. Saving M0 shorted suspends its reads and board commands so it cannot send the wrong protocol. A verified Command 2 template is required before using that mode.</div>
+        <button class="btn btn-secondary btn-sm mt-1" onclick="saveR4d6f20Mode()">Save M0 mode</button>
         <div class="form-grid-2">
           <div class="form-group">
             <label class="form-label" for="r4d6f20-baud">Board baud rate</label>
@@ -4198,6 +4201,7 @@ entities:
       document.getElementById('r4d6f20-device-id').value = deviceId;
       document.getElementById('r4d6f20-baud').value = String(entry.hub?.baudrate || 9600);
       document.getElementById('r4d6f20-parity').value = entry.hub?.parity || 'N';
+      document.getElementById('r4d6f20-m0-short').checked = Boolean(dev.m0_short);
       document.getElementById('r4d6f20-result').textContent = `Target: ${dev.name || dev.model || 'R4D6F20'} · slave ${dev.slave_id ?? entry.hub?.slave_id ?? 1}`;
       openModal('modal-r4d6f20-controls');
     }
@@ -4217,6 +4221,20 @@ entities:
         toast('R4D6F20 command sent', 'ok');
         await refreshData();
       } catch (err) { result.textContent = `Command failed: ${err.message}`; toast('R4D6F20 command failed: ' + err.message, 'err'); }
+    }
+
+    async function saveR4d6f20Mode() {
+      const entry = getCurrentEntry();
+      const deviceId = document.getElementById('r4d6f20-device-id').value;
+      const device = (entry?.devices || []).find(item => item.id === deviceId);
+      const m0Short = document.getElementById('r4d6f20-m0-short').checked;
+      if (!entry || !device) return;
+      if (m0Short && !confirm('Save M0 shorted mode? Command 1 reads and board commands will be suspended until you uncheck it.')) return;
+      try {
+        await apiCall('save_device', { entry_id: entry.entry_id, device: { ...device, m0_short: m0Short } });
+        document.getElementById('r4d6f20-result').textContent = m0Short ? 'M0 shorted mode saved. Command 1 polling and board commands are suspended.' : 'M0 open mode saved. Command 1 polling is enabled.';
+        await refreshData();
+      } catch (err) { document.getElementById('r4d6f20-result').textContent = `Could not save M0 mode: ${err.message}`; }
     }
 
     async function saveR4d6f20Serial() {

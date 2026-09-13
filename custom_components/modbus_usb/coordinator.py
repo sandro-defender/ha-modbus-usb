@@ -30,6 +30,7 @@ from .const import (
     CONF_IMAGE,
     CONF_MANUFACTURER,
     CONF_MODEL,
+    CONF_M0_SHORT,
     CONF_NAME,
     CONF_PARITY,
     CONF_PORT,
@@ -624,8 +625,27 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
     ) -> dict[str, Any]:
         device_slave_map = device_slave_map or {}
         data: dict[str, Any] = {}
+        entry = self.hass.config_entries.async_get_entry(self.entry_id)
+        devices = {str(item.get("id")): item for item in (entry.options.get(CONF_DEVICES, []) if entry else [])}
+        handled: set[str] = set()
+        for device_id, device in devices.items():
+            controls = device.get("device_controls", {})
+            is_r4d6f20 = controls.get("protocol") == "eletechsup_r4d6f20" or "r4d6f20" in str(device.get(CONF_MODEL, "")).lower()
+            members = [item for item in entities if str(item.get(CONF_DEVICE_ID)) == device_id]
+            if not is_r4d6f20 or not members:
+                continue
+            if device.get(CONF_M0_SHORT, False):
+                for item in members:
+                    data[item["id"]] = None
+                    handled.add(item["id"])
+                _LOGGER.warning("R4D6F20 %s is configured with M0 shorted; Command 1 template polling is suspended", device.get(CONF_NAME, device_id))
+                continue
+            data.update(self._read_r4d6f20_blocks(members, int(device.get(CONF_SLAVE_ID, self.slave_id))))
+            handled.update(item["id"] for item in members if item[CONF_ADDRESS] in set(range(20)) | {128, 129, 160, 161})
         for ent in entities:
             ent_id = ent["id"]
+            if ent_id in handled:
+                continue
             if ent.get(CONF_ASSUMED_STATE):
                 continue
             try:
@@ -642,6 +662,31 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             except Exception as err:  # noqa: BLE001
                 _LOGGER.warning("Failed reading %s: %s", ent.get("name", ent_id), err)
                 data[ent_id] = None
+        return data
+
+    def _read_r4d6f20_blocks(self, entities: list[dict], slave: int) -> dict[str, Any]:
+        """Read the standard R4D6F20 Command 1 ranges in three RTU requests."""
+        data: dict[str, Any] = {}
+        for start, count in ((0, 20), (128, 2), (160, 2)):
+            members = [item for item in entities if item.get(CONF_REGISTER_TYPE) == REGISTER_TYPE_HOLDING and item.get(CONF_DATA_TYPE, DATA_TYPE_UINT16) == DATA_TYPE_UINT16 and start <= int(item.get(CONF_ADDRESS, -1)) < start + count]
+            if not members:
+                continue
+            started = datetime.now()
+            try:
+                with self._serial_lock:
+                    self._ensure_connected()
+                    result = self._call_modbus("read_holding_registers", start, count=count, slave=slave)
+                    if result.isError():
+                        raise UpdateFailed(str(result))
+                for item in members:
+                    value = result.registers[int(item[CONF_ADDRESS]) - start]
+                    scale = item.get(CONF_SCALE, 1)
+                    data[item["id"]] = value if scale in (1, None) else value * scale
+                self._record_transaction("read_holding", slave=slave, address=start, count=count, result="block", duration_ms=(datetime.now() - started).total_seconds() * 1000)
+            except Exception as err:  # noqa: BLE001
+                for item in members:
+                    data[item["id"]] = None
+                self._record_transaction("read_holding", slave=slave, address=start, count=count, error=err, duration_ms=(datetime.now() - started).total_seconds() * 1000)
         return data
 
     def _read_one(self, ent: dict, device_slave_map: dict[str, int] | None = None) -> Any:

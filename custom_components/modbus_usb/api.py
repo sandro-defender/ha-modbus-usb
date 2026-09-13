@@ -49,6 +49,7 @@ from .const import (
     CONF_MIN_VALUE,
     CONF_MODE,
     CONF_MODEL,
+    CONF_M0_SHORT,
     CONF_NAME,
     CONF_OFF_VALUE,
     CONF_ON_VALUE,
@@ -658,6 +659,8 @@ def _get_r4d6f20_device(entry, device_id: str) -> dict[str, Any]:
     controls = device.get(CONF_DEVICE_CONTROLS, {})
     if controls.get("protocol") != "eletechsup_r4d6f20" and "r4d6f20" not in str(device.get(CONF_MODEL, "")).lower():
         raise ValueError("These controls are available only for an eletechsup R4D6F20 device")
+    if device.get(CONF_M0_SHORT, False):
+        raise ValueError("M0 is marked shorted. This Command 1 template is disabled until M0 is open again.")
     return device
 
 
@@ -1516,6 +1519,7 @@ async def ws_apply_template(
                 "image": target_tpl.get(CONF_IMAGE) or "",
                 "info_url": target_tpl.get(CONF_INFO_URL) or "",
                 CONF_DEVICE_CONTROLS: target_tpl.get(CONF_DEVICE_CONTROLS, {}),
+                CONF_M0_SHORT: bool(target_tpl.get(CONF_M0_SHORT, False)),
                 CONF_ENABLED: True,
             }
             devices.append(new_device)

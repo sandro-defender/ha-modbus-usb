@@ -18,6 +18,7 @@ model: R4D6F20
 tested: false
 default_slave_id: 1
 default_baudrate: 9600
+m0_short: false  # Command 1 template requires M0 open.
 info_url: "https://eletechsup.com/products/r4d6f20-smart-20-channel-rs485-relay-board-with-plc-io-module-modbus-for-multifunction-control"
 description: >
   Unverified template for Eletechsup's 20-relay R4D6F20 PLC I/O board. It uses

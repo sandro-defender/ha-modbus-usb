@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.78
+
+### Faster R4D6F20 polling and M0 safety
+
+- Reduced standard R4D6F20 Command 1 polling from 24 serial requests to three
+  contiguous holding-register reads.
+- Added an M0-short checkbox. The existing Command 1 template suspends reads
+  and board commands when M0 is shorted, preventing an unsafe protocol mismatch.
+
 ## 2.1.77
 
 ### Discovery to Board Tools workflow

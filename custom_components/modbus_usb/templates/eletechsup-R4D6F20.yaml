@@ -30,6 +30,20 @@ description: >
   before relying on the configuration.
 device_controls:
   protocol: eletechsup_r4d6f20
+  m0:
+    label: "M0 jumper is shorted (Command 2 mode)"
+    description: >
+      M0 open installs Command 1 holding-register relays. M0 shorted installs
+      Command 2 relay coils and discrete inputs. Match the physical jumper;
+      saving changes the Home Assistant profile and sends no M0 command.
+    open_description: >
+      Command 1 / M0 open: CH-01–CH-20 use holding registers 0–19 and the
+      relay action controls are available. Saving installs this profile only.
+    shorted_description: >
+      Command 2 / M0 shorted: CH-01–CH-20 use coils 0–19 and DI-01–DI-02 use
+      discrete inputs 0–1. Saving installs this profile only.
+    save_command: r4d6f20_set_mode
+    install_profile_on_create: true
   command_modes:
     command_1:
       m0_short: false

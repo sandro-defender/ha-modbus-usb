@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.81
+
+### Template-driven M0 settings
+
+- Made the Add Device M0 checkbox generic: it appears for every template that
+  declares `device_controls.m0`.
+- Moved M0 labels, explanations, profile behavior, and R413E16 polarity details
+  into the matching template YAML files instead of model checks in the panel.
+
 ## 2.1.80
 
 ### M0 selection while adding a board

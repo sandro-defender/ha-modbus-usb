@@ -33,11 +33,14 @@ description: >
 # Values are decimal forms of the verified Modbus FC06 register words.
 device_controls:
   protocol: eletechsup_r413e16
-  m0_output_polarity:
-    open: low
-    shorted: high
-    # M0 changes the physical TTL output polarity only. It does not change the
-    # Modbus register map or function codes on this R413E16 control core.
+  m0:
+    label: "M0 is connected (high-level TTL outputs)"
+    description: >
+      M0 open is the default low-level output. M0 connected is high-level
+      output. This hardware jumper changes output polarity only, not the Modbus
+      protocol; saving records the wiring state and sends no M0 command.
+    open_description: "M0 open: low-level TTL outputs (default)."
+    shorted_description: "M0 connected: high-level TTL outputs."
   all_on:
     register_type: holding
     address: 0

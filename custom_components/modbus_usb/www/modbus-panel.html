@@ -1899,8 +1899,8 @@
             <div class="form-hint">This updates the device and all its configured entities.</div>
           </div>
         </div>
-        <label class="debug-ack-label"><input type="checkbox" id="r413e16-m0-short" /> M0 is connected (high-level TTL outputs)</label>
-        <div class="form-hint" style="line-height:1.5;">M0 open is the default low-level output. This hardware jumper changes output polarity only; it does not change the R413E16 Modbus protocol. Saving records the wiring state and sends no M0 command.</div>
+        <label class="debug-ack-label"><input type="checkbox" id="r413e16-m0-short" /> <span id="r413e16-m0-label">M0 hardware setting</span></label>
+        <div class="form-hint" id="r413e16-m0-help" style="line-height:1.5;"></div>
         <div class="form-hint" style="color:#fbbf24; line-height:1.5;">A slave-ID change takes effect immediately. After a baud-rate change, power-cycle the board; the hub is saved with the new rate and reconnects after the restart.</div>
       </div>
       <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('modal-r413e16-controls')">Cancel</button><button class="btn btn-primary" id="r413e16-save" onclick="saveR413e16Settings()">Save board settings</button></div>
@@ -3284,6 +3284,9 @@ entities:
       document.getElementById('r413e16-baud').value = baud;
       document.getElementById('r413e16-slave').value = slave;
       document.getElementById('r413e16-m0-short').checked = Boolean(dev.m0_short);
+      const m0 = dev.device_controls?.m0 || findStandardControlTemplate(dev)?.device_controls?.m0 || {};
+      document.getElementById('r413e16-m0-label').textContent = m0.label || 'M0 hardware setting';
+      document.getElementById('r413e16-m0-help').textContent = m0.description || '';
       openModal('modal-r413e16-controls');
     }
 
@@ -4115,17 +4118,11 @@ entities:
       const m0Label = document.getElementById('add-dev-m0-label');
       const m0Help = document.getElementById('add-dev-m0-help');
       const controls = tpl.device_controls || {};
-      const isR4d6f20 = controls.protocol === 'eletechsup_r4d6f20' || String(tpl.model || '').toLowerCase().includes('r4d6f20');
-      const isR413e16 = controls.protocol === 'eletechsup_r413e16' || String(tpl.model || '').toLowerCase().includes('r413e16');
-      m0Group.style.display = (isR4d6f20 || isR413e16) ? 'block' : 'none';
+      const m0 = controls.m0;
+      m0Group.style.display = m0 ? 'block' : 'none';
       m0Checkbox.checked = Boolean(tpl.m0_short);
-      if (isR4d6f20) {
-        m0Label.textContent = 'M0 jumper is shorted (Command 2 mode)';
-        m0Help.textContent = 'Unchecked installs Command 1 holding-register relays. Checked installs Command 2 relay coils and discrete inputs. Match the physical jumper; no command is sent while creating the device.';
-      } else if (isR413e16) {
-        m0Label.textContent = 'M0 is connected (high-level TTL outputs)';
-        m0Help.textContent = 'Unchecked records the default low-level outputs. Checked records high-level outputs. This changes output polarity only, not the Modbus protocol, and sends no M0 command.';
-      }
+      m0Label.textContent = m0?.label || 'M0 jumper is shorted';
+      m0Help.textContent = m0?.description || '';
 
       // Populate entities checklist
       _selectedTemplateEntities.clear();
@@ -4178,20 +4175,22 @@ entities:
 
         try {
           const template = _templates.find(item => item.filename === sel);
-          const isR4d6f20 = template?.device_controls?.protocol === 'eletechsup_r4d6f20' || String(template?.model || '').toLowerCase().includes('r4d6f20');
+          const m0Config = template?.device_controls?.m0 || {};
+          const m0SaveCommand = m0Config.save_command;
+          const installM0Profile = Boolean(m0Config.install_profile_on_create);
           const response = await apiCall('apply_template', {
             entry_id: entry.entry_id,
             template_filename: sel,
             device_name: devName,
             slave_id: slaveId,
             address_offset: offset,
-            // R4D6F20 switches its entity map immediately after creation, so
-            // start in Command 1 and let the mode endpoint install Command 2.
-            m0_short: isR4d6f20 ? false : m0Short,
+            // A profile-changing M0 template starts in its default entity map,
+            // then runs the template-declared mode command below.
+            m0_short: installM0Profile ? false : m0Short,
             selected_entities: Array.from(_selectedTemplateEntities)
           });
-          if (m0Short && isR4d6f20) {
-            await apiCall('r4d6f20_set_mode', { entry_id: entry.entry_id, device_id: response.device_id, m0_short: true });
+          if (m0Short && installM0Profile && m0SaveCommand) {
+            await apiCall(m0SaveCommand, { entry_id: entry.entry_id, device_id: response.device_id, m0_short: true });
           }
           toast(`Device "${devName}" created from template!`, 'ok');
           closeModal('modal-add-device');
@@ -4249,12 +4248,16 @@ entities:
 
     function updateR4d6f20ModeUi() {
       const m0Short = document.getElementById('r4d6f20-m0-short').checked;
+      const entry = getCurrentEntry();
+      const deviceId = document.getElementById('r4d6f20-device-id').value;
+      const device = (entry?.devices || []).find(item => item.id === deviceId);
+      const m0 = device?.device_controls?.m0 || findStandardControlTemplate(device)?.device_controls?.m0 || {};
       const command1Actions = ['r4d6f20-command1-actions', 'r4d6f20-command1-delay'];
       command1Actions.forEach(id => { document.getElementById(id).style.display = m0Short ? 'none' : ''; });
       document.getElementById('r4d6f20-run-action').style.display = m0Short ? 'none' : '';
       document.getElementById('r4d6f20-mode-help').textContent = m0Short
-        ? 'Command 2 / M0 shorted: CH-01–CH-20 become coils 0–19 and DI-01–DI-02 become discrete inputs 0–1. All-relay and serial/reset controls use the documented Command 2 map. Save to install this profile; no command is sent while saving.'
-        : 'Command 1 / M0 open: CH-01–CH-20 use holding registers 0–19, and the relay action controls below are available. Save to install this profile; no command is sent while saving.';
+        ? (m0.shorted_description || m0.description || '')
+        : (m0.open_description || m0.description || '');
     }
 
     async function runR4d6f20Command(command) {
@@ -4279,11 +4282,12 @@ entities:
       const deviceId = document.getElementById('r4d6f20-device-id').value;
       const device = (entry?.devices || []).find(item => item.id === deviceId);
       const m0Short = document.getElementById('r4d6f20-m0-short').checked;
+      const m0Config = device?.device_controls?.m0 || findStandardControlTemplate(device)?.device_controls?.m0 || {};
       if (!entry || !device) return;
-      if (m0Short && !confirm('Save M0 shorted / Command 2 mode? The integration will replace this board’s entities with the documented coil and discrete-input profile. No command will be sent to the board.')) return;
+      if (m0Short && !confirm(m0Config.shorted_description || m0Config.description || 'Save the selected M0 mode?')) return;
       try {
-        await apiCall('r4d6f20_set_mode', { entry_id: entry.entry_id, device_id: deviceId, m0_short: m0Short });
-        document.getElementById('r4d6f20-result').textContent = m0Short ? 'Command 2 / M0 shorted profile installed. Relay coils and discrete inputs are now active.' : 'Command 1 / M0 open profile installed. Holding-register relay actions are now active.';
+        await apiCall(m0Config.save_command || 'r4d6f20_set_mode', { entry_id: entry.entry_id, device_id: deviceId, m0_short: m0Short });
+        document.getElementById('r4d6f20-result').textContent = m0Short ? (m0Config.shorted_description || 'M0 mode saved.') : (m0Config.open_description || 'M0 mode saved.');
         updateR4d6f20ModeUi();
         await refreshData();
       } catch (err) { document.getElementById('r4d6f20-result').textContent = `Could not save M0 mode: ${err.message}`; }

@@ -13,6 +13,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     CONF_DEVICE_CLASS,
+    CONF_DEVICE_ID,
+    CONF_DEVICES,
+    CONF_ENABLED,
     CONF_ENTITIES,
     CONF_ENTITY_ID,
     CONF_ENTITY_TYPE,
@@ -28,10 +31,16 @@ async def async_setup_entry(
     """Set up binary sensor entities from config entry."""
     coordinator: ModbusUsbCoordinator = hass.data[DOMAIN][entry.entry_id]
     entities = entry.options.get(CONF_ENTITIES, [])
+    enabled_devices = {
+        str(device.get("id")): device.get(CONF_ENABLED, True)
+        for device in entry.options.get(CONF_DEVICES, [])
+        if device.get("id")
+    }
     binary_sensors = [
         ModbusUsbBinarySensor(coordinator, entry, ent)
         for ent in entities
         if ent[CONF_ENTITY_TYPE] == "binary_sensor"
+        and enabled_devices.get(str(ent.get(CONF_DEVICE_ID)), True)
     ]
     async_add_entities(binary_sensors)
 

@@ -82,7 +82,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
             frontend_url_path="modbus-usb",
             # Change this asset version when the standalone sidebar HTML changes.
             # It prevents an already-open browser from retaining an old panel.
-            config={"url": "/modbus_usb_panel/modbus-panel.html?v=2.1.67"},
+            config={"url": "/modbus_usb_panel/modbus-panel.html?v=2.1.70"},
             require_admin=False,
         )
         _LOGGER.debug("Modbus USB sidebar panel registered")
@@ -128,15 +128,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         },
     )
 
-    # If the first refresh fails (e.g. raises ConfigEntryNotReady because the
-    # device isn't reachable yet), HA will retry async_setup_entry later.
-    # Without closing the client here first, the already-opened serial port
-    # is leaked and a new client/port is opened on every retry.
-    try:
-        await coordinator.async_config_entry_first_refresh()
-    except Exception:
-        await hass.async_add_executor_job(client.close)
-        raise
+    # An offline RS-485 board must not block Home Assistant setup. The normal
+    # coordinator interval starts after entity setup and retries in background.
+    coordinator.async_set_updated_data({})
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = coordinator

@@ -489,6 +489,15 @@
       transition: all 0.22s;
     }
     .device-card:hover { border-color: rgba(99, 102, 241, 0.35); }
+    .device-card.is-disabled { opacity: 0.62; }
+    .device-disabled-notice {
+      margin: 0.85rem 1rem;
+      padding: 0.7rem 0.8rem;
+      border: 1px solid rgba(251, 191, 36, 0.35);
+      border-radius: 9px;
+      color: #fcd34d;
+      font-size: 0.78rem;
+    }
     .device-card-header {
       display: flex;
       align-items: center;
@@ -2982,10 +2991,13 @@ entities:
         const devEntities = entities.filter(e => e.device_id === dev.id);
         const switchCount = devEntities.filter(e => e.entity_type === 'switch').length;
         const slaveId = dev.slave_id != null ? dev.slave_id : (entry.hub?.slave_id || 1);
+        const isEnabled = dev.enabled !== false;
         const isR413e16 = dev.device_controls?.protocol === 'eletechsup_r413e16' || String(dev.model || '').toLowerCase().includes('r413e16');
         const legacyAllChannelsSwitch = devEntities.find(e => e.entity_type === 'switch' && e.address === 0 && e.on_value === 1792 && e.off_value === 2048);
         const health = (entry.diagnostics?.devices || []).find(item => item.device_id === dev.id);
-        const healthBadge = !health || health.status === 'unknown'
+        const healthBadge = !isEnabled
+          ? '<span class="badge badge-amber">Disabled — polling off</span>'
+          : !health || health.status === 'unknown'
           ? '<span class="badge badge-slate">No bus activity</span>'
           : health.status === 'error'
             ? '<span class="badge badge-amber" title="Latest request failed">⚠ Communication error</span>'
@@ -3017,7 +3029,7 @@ entities:
             const isOn = val === 'on';
             controlHtml = `
               <label class="switch-toggle" title="Toggle switch">
-                <input type="checkbox" ${isOn ? 'checked' : ''} onchange="toggleEntitySwitch('${ent.id}', this.checked)">
+                <input type="checkbox" ${isOn ? 'checked' : ''} ${isEnabled ? '' : 'disabled'} onchange="toggleEntitySwitch('${ent.id}', this.checked)">
                 <span class="switch-slider"></span>
               </label>
             `;
@@ -3025,7 +3037,7 @@ entities:
             controlHtml = `
               <div class="flex items-center gap-1">
                 <span class="mono text-sm" style="font-weight:700; color:#34d399;">${val}</span>
-                <button class="btn btn-ghost btn-sm" style="padding:0.2rem 0.4rem; font-size:0.68rem;" onclick="promptWriteNumber('${ent.id}', '${ent.name}', ${val})">✏</button>
+                <button class="btn btn-ghost btn-sm" style="padding:0.2rem 0.4rem; font-size:0.68rem;" ${isEnabled ? '' : 'disabled'} onclick="promptWriteNumber('${ent.id}', '${ent.name}', ${val})">✏</button>
               </div>
             `;
           } else {
@@ -3071,7 +3083,7 @@ entities:
           : avatarImage;
 
         return `
-          <div class="device-card" id="dev-card-${dev.id}">
+          <div class="device-card ${isEnabled ? '' : 'is-disabled'}" id="dev-card-${dev.id}">
             <div class="device-card-header">
               <div class="device-header-left">
                 ${avatar}
@@ -3096,13 +3108,16 @@ entities:
                 <button class="btn btn-primary btn-sm" onclick="openAddEntityModal('${dev.id}')" title="Add a custom entity to this device">
                   ➕ Add Entity
                 </button>
-                ${devEntities.length ? `<button class="btn btn-secondary btn-sm" id="device-test-${dev.id}" onclick="runDeviceEntityTest('${dev.id}')" title="Read all configured entities and cycle switches one at a time">🧪 Test device</button>` : ''}
+                ${devEntities.length ? `<button class="btn btn-secondary btn-sm" id="device-test-${dev.id}" ${isEnabled ? '' : 'disabled'} onclick="runDeviceEntityTest('${dev.id}')" title="Read all configured entities and cycle switches one at a time">🧪 Test device</button>` : ''}
                 ${isR413e16 ? (legacyAllChannelsSwitch
                   ? `<button class="btn btn-secondary btn-sm" onclick="convertR413e16AllChannelsSwitch('${dev.id}', '${legacyAllChannelsSwitch.id}')" title="Replace the legacy all-channel command with a selectable combined switch">Convert to Combined Switch</button>`
                   : `<button class="btn btn-secondary btn-sm" onclick="openAddR413e16CombinedSwitch('${dev.id}')" title="Create another switch for selected R413E16 channels">Add Combined Switch</button>`) : ''}
                 ${isR413e16 ? `<button class="btn btn-secondary btn-sm" onclick="openR413e16Documentation()" title="Open verified R413E16 wiring and command reference">Documentation</button>` : ''}
                 ${isR413e16 ? `<button class="btn btn-secondary btn-sm" id="r413e16-read-${dev.id}" onclick="readR413e16States('${dev.id}')" title="Read every reported R413E16 channel state now">Read channel states</button>` : ''}
                 ${isR413e16 ? `<button class="btn btn-secondary btn-sm" onclick="openR413e16Controls('${dev.id}')" title="Control all channels or change this R413E16 board's communication settings">R413E16 controls</button>` : ''}
+                <button class="btn btn-ghost btn-sm" id="device-enabled-${dev.id}" aria-pressed="${isEnabled}" onclick="toggleDeviceEnabled('${dev.id}', ${isEnabled ? 'false' : 'true'})" title="${isEnabled ? 'Stop polling and make this device unavailable' : 'Resume polling and restore this device'}">
+                  ${isEnabled ? 'Disable device' : 'Enable device'}
+                </button>
                 <button class="btn btn-ghost btn-sm" onclick="openEditDeviceModal('${dev.id}')" title="Rename or edit slave ID">
                   ✏ Edit
                 </button>
@@ -3115,6 +3130,7 @@ entities:
             <div class="device-entities-list">
               ${entitiesHtml}
             </div>
+            ${isEnabled ? '' : '<div class="device-disabled-notice">Disabled: its entities are unavailable in Home Assistant and no RS-485 requests are sent for this device.</div>'}
             ${isR413e16 ? `<div class="device-command-panel"><p>Board communication settings: baud rate and slave ID.</p><button class="btn btn-secondary btn-sm" onclick="openR413e16Controls('${dev.id}')">Open R413E16 settings</button></div>` : ''}
             ${_r413e16StateReports[dev.id] ? renderR413e16StateReport(_r413e16StateReports[dev.id]) : ''}
             ${_deviceTestReports[dev.id] ? renderDeviceTestReport(_deviceTestReports[dev.id]) : ''}
@@ -4000,6 +4016,33 @@ entities:
     function useTemplateToCreateDevice(filename) {
       openAddDeviceModal('template');
       populateTemplateSelectInAddDevice(filename);
+    }
+
+    async function toggleDeviceEnabled(deviceId, enabled) {
+      const entry = getCurrentEntry();
+      const device = (entry?.devices || []).find(item => item.id === deviceId);
+      if (!entry || !device) return;
+      if (!enabled && !confirm(`Disable "${device.name}"?\n\nIts entities will become unavailable in Home Assistant and no requests will be sent to this device.`)) return;
+      const button = document.getElementById(`device-enabled-${deviceId}`);
+      if (button) {
+        button.disabled = true;
+        button.textContent = enabled ? 'Enabling…' : 'Disabling…';
+      }
+      try {
+        await apiCall('set_device_enabled', { entry_id: entry.entry_id, device_id: deviceId, enabled });
+        toast(enabled ? 'Device enabled. Reloading entities…' : 'Device disabled. Reloading entities…', 'ok');
+        // The entry update listener reloads platforms asynchronously. Retry
+        // once so the panel does not show an error during that brief window.
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await refreshData();
+      } catch (error) {
+        toast(`Could not ${enabled ? 'enable' : 'disable'} device: ${error.message}. Try again after Home Assistant finishes reloading.`, 'err');
+      } finally {
+        if (button) {
+          button.disabled = false;
+          button.textContent = enabled ? 'Enable device' : 'Disable device';
+        }
+      }
     }
 
     // ─── EDIT DEVICE MODAL ──────────────────────────────────────

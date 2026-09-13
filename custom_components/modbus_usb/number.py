@@ -19,6 +19,7 @@ from .const import (
     CONF_DATA_TYPE,
     CONF_DEVICES,
     CONF_DEVICE_ID,
+    CONF_ENABLED,
     CONF_ENTITIES,
     CONF_ENTITY_ID,
     CONF_ENTITY_TYPE,
@@ -45,10 +46,16 @@ async def async_setup_entry(
     """Set up number entities from config entry."""
     coordinator: ModbusUsbCoordinator = hass.data[DOMAIN][entry.entry_id]
     entities = entry.options.get(CONF_ENTITIES, [])
+    enabled_devices = {
+        str(device.get("id")): device.get(CONF_ENABLED, True)
+        for device in entry.options.get(CONF_DEVICES, [])
+        if device.get("id")
+    }
     numbers = [
         ModbusUsbNumber(coordinator, entry, ent)
         for ent in entities
         if ent[CONF_ENTITY_TYPE] == "number"
+        and enabled_devices.get(str(ent.get(CONF_DEVICE_ID)), True)
     ]
     async_add_entities(numbers)
 

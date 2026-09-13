@@ -40,6 +40,7 @@ from .const import (
     CONF_ENTITIES,
     CONF_ENTITY_ID,
     CONF_ENTITY_TYPE,
+    CONF_ENABLED,
     CONF_MANUFACTURER,
     CONF_MAX_VALUE,
     CONF_MIN_VALUE,
@@ -1004,6 +1005,9 @@ async def ws_save_device(
 
         existing_idx = next((i for i, d in enumerate(devices) if d.get("id") == device_id), None)
         if existing_idx is not None:
+            # The editor only sends editable fields. Keep device metadata and
+            # the enabled state so an edit cannot accidentally re-enable it.
+            device = {**devices[existing_idx], **device}
             devices[existing_idx] = device
             # A sidebar device owns the address of its attached entities. The
             # template copies this value into each entity on creation, so sync
@@ -1029,6 +1033,37 @@ async def ws_save_device(
     except Exception as err:
         _LOGGER.error("ws_save_device failed: %s", err, exc_info=True)
         connection.send_error(msg["id"], "error", str(err))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "modbus_usb/set_device_enabled",
+    vol.Required("entry_id"): cv.string,
+    vol.Required("device_id"): cv.string,
+    vol.Required("enabled"): cv.boolean,
+})
+@websocket_api.async_response
+async def ws_set_device_enabled(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Persist one device's enabled state; the entry listener reloads platforms."""
+    try:
+        entry = _get_entry(hass, msg["entry_id"])
+        device_id = msg["device_id"]
+        devices = [dict(device) for device in entry.options.get(CONF_DEVICES, [])]
+        if not any(device.get("id") == device_id for device in devices):
+            raise ValueError("Configured device was not found")
+        enabled = bool(msg["enabled"])
+        new_options = dict(entry.options or {})
+        new_options[CONF_DEVICES] = [
+            {**device, CONF_ENABLED: enabled}
+            if device.get("id") == device_id else device
+            for device in devices
+        ]
+        hass.config_entries.async_update_entry(entry, options=new_options)
+        connection.send_result(msg["id"], {"success": True, "enabled": enabled})
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("set_device_enabled failed: %s", err)
+        connection.send_error(msg["id"], "set_device_enabled_failed", str(err))
 
 
 @websocket_api.websocket_command({
@@ -1339,6 +1374,7 @@ async def ws_apply_template(
                 "image": target_tpl.get(CONF_IMAGE) or "",
                 "info_url": target_tpl.get(CONF_INFO_URL) or "",
                 CONF_DEVICE_CONTROLS: target_tpl.get(CONF_DEVICE_CONTROLS, {}),
+                CONF_ENABLED: True,
             }
             devices.append(new_device)
         else:
@@ -1501,6 +1537,7 @@ async def async_register_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_scan_bus)
     websocket_api.async_register_command(hass, ws_scan_usb_ports)
     websocket_api.async_register_command(hass, ws_save_device)
+    websocket_api.async_register_command(hass, ws_set_device_enabled)
     websocket_api.async_register_command(hass, ws_delete_device)
     websocket_api.async_register_command(hass, ws_save_entity)
     websocket_api.async_register_command(hass, ws_delete_entity)

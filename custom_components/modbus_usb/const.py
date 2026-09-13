@@ -40,6 +40,7 @@ CONF_IMAGE = "image"
 CONF_INFO_URL = "info_url"
 CONF_DEVICE_CONTROLS = "device_controls"
 CONF_ASSUMED_STATE = "assumed_state"
+CONF_ENABLED = "enabled"
 
 TEMPLATES_DIR_NAME = "modbus_usb_templates"
 

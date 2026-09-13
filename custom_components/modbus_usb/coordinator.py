@@ -25,6 +25,7 @@ from .const import (
     CONF_DEVICE_ID,
     CONF_ENTITIES,
     CONF_ENTITY_TYPE,
+    CONF_ENABLED,
     CONF_IMAGE,
     CONF_MANUFACTURER,
     CONF_MODEL,
@@ -553,7 +554,16 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         entry = self.hass.config_entries.async_get_entry(self.entry_id)
         if entry is None:
             return []
-        return entry.options.get(CONF_ENTITIES, [])
+        enabled_devices = {
+            str(device.get("id")): device.get(CONF_ENABLED, True)
+            for device in entry.options.get(CONF_DEVICES, [])
+            if device.get("id")
+        }
+        return [
+            entity for entity in entry.options.get(CONF_ENTITIES, [])
+            if entity.get(CONF_DEVICE_ID) is None
+            or enabled_devices.get(str(entity.get(CONF_DEVICE_ID)), True)
+        ]
 
     def _get_device_slave_map(self) -> dict[str, int]:
         entry = self.hass.config_entries.async_get_entry(self.entry_id)
@@ -563,7 +573,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         return {
             str(d.get("id")): int(d.get(CONF_SLAVE_ID, self.slave_id))
             for d in devices
-            if "id" in d and d.get(CONF_SLAVE_ID) is not None
+            if d.get(CONF_ENABLED, True) and "id" in d and d.get(CONF_SLAVE_ID) is not None
         }
 
     async def _async_update_data(self) -> dict[str, Any]:

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.70
+
+### Per-device enable control
+
+- Added **Enable device** / **Disable device** controls on every device card.
+- Disabled devices are excluded from RS-485 polling and their Home Assistant
+  entities become unavailable until enabled again.
+- Integration reload no longer waits for every Modbus register to answer, so
+  an offline board cannot hold up Home Assistant startup.
+
 ## 2.1.67
 
 ### Brand-organized template browser

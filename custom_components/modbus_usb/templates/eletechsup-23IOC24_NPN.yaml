@@ -1,0 +1,336 @@
+# Eletechsup 23IOC24_NPN — 24DI / 24DO NPN RS-485 remote I/O module
+#
+# Factory-default Command 1 protocol: M0 OPEN, FC03 reads and FC06 writes.
+# Output registers are zero-based: 0–23 for CH-01–CH-24.
+# Write values: 0x0100 (256) = ON, 0x0200 (512) = OFF.
+# Input registers are 0x0080–0x0097 (128–151) for DI-01–DI-24.
+#
+# This untested template intentionally does not use Command 2 / M0 shorted.
+
+id: eletechsup-23IOC24_NPN
+name: eletechsup 23IOC24_NPN I/O Board
+manufacturer: eletechsup
+model: 23IOC24_NPN
+tested: false
+default_slave_id: 1
+info_url: "https://eletechsup.com/products/23ioa08-23iob16-23ioc24-23ioe48-8-16-24-32-48ch-multifunction-rs485-remote-io-module-plc-di-do-expansion-board-din-rail-box-standard-modbus-rtu-protocol"
+description: >
+  Unverified template for Eletechsup's 23IOC24_NPN 24DI / 24DO RS-485 remote
+  I/O board. It uses the documented factory-default Command 1 protocol (M0
+  open): FC03 reads and FC06 writes holding registers. Includes 24 NPN
+  transistor outputs and 24 optically isolated NPN inputs. Default serial
+  setup is 9600 baud, 8N1. Verify the wiring and outputs on a non-critical
+  load before using it in automations.
+entities:
+  - name: CH-01
+    entity_type: switch
+    register_type: holding
+    address: 0
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-02
+    entity_type: switch
+    register_type: holding
+    address: 1
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-03
+    entity_type: switch
+    register_type: holding
+    address: 2
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-04
+    entity_type: switch
+    register_type: holding
+    address: 3
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-05
+    entity_type: switch
+    register_type: holding
+    address: 4
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-06
+    entity_type: switch
+    register_type: holding
+    address: 5
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-07
+    entity_type: switch
+    register_type: holding
+    address: 6
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-08
+    entity_type: switch
+    register_type: holding
+    address: 7
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-09
+    entity_type: switch
+    register_type: holding
+    address: 8
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-10
+    entity_type: switch
+    register_type: holding
+    address: 9
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-11
+    entity_type: switch
+    register_type: holding
+    address: 10
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-12
+    entity_type: switch
+    register_type: holding
+    address: 11
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-13
+    entity_type: switch
+    register_type: holding
+    address: 12
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-14
+    entity_type: switch
+    register_type: holding
+    address: 13
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-15
+    entity_type: switch
+    register_type: holding
+    address: 14
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-16
+    entity_type: switch
+    register_type: holding
+    address: 15
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-17
+    entity_type: switch
+    register_type: holding
+    address: 16
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-18
+    entity_type: switch
+    register_type: holding
+    address: 17
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-19
+    entity_type: switch
+    register_type: holding
+    address: 18
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-20
+    entity_type: switch
+    register_type: holding
+    address: 19
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-21
+    entity_type: switch
+    register_type: holding
+    address: 20
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-22
+    entity_type: switch
+    register_type: holding
+    address: 21
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-23
+    entity_type: switch
+    register_type: holding
+    address: 22
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: CH-24
+    entity_type: switch
+    register_type: holding
+    address: 23
+    data_type: uint16
+    on_value: 256
+    off_value: 512
+    state_on_value: 1
+  - name: DI-01
+    entity_type: binary_sensor
+    register_type: holding
+    address: 128
+    data_type: uint16
+  - name: DI-02
+    entity_type: binary_sensor
+    register_type: holding
+    address: 129
+    data_type: uint16
+  - name: DI-03
+    entity_type: binary_sensor
+    register_type: holding
+    address: 130
+    data_type: uint16
+  - name: DI-04
+    entity_type: binary_sensor
+    register_type: holding
+    address: 131
+    data_type: uint16
+  - name: DI-05
+    entity_type: binary_sensor
+    register_type: holding
+    address: 132
+    data_type: uint16
+  - name: DI-06
+    entity_type: binary_sensor
+    register_type: holding
+    address: 133
+    data_type: uint16
+  - name: DI-07
+    entity_type: binary_sensor
+    register_type: holding
+    address: 134
+    data_type: uint16
+  - name: DI-08
+    entity_type: binary_sensor
+    register_type: holding
+    address: 135
+    data_type: uint16
+  - name: DI-09
+    entity_type: binary_sensor
+    register_type: holding
+    address: 136
+    data_type: uint16
+  - name: DI-10
+    entity_type: binary_sensor
+    register_type: holding
+    address: 137
+    data_type: uint16
+  - name: DI-11
+    entity_type: binary_sensor
+    register_type: holding
+    address: 138
+    data_type: uint16
+  - name: DI-12
+    entity_type: binary_sensor
+    register_type: holding
+    address: 139
+    data_type: uint16
+  - name: DI-13
+    entity_type: binary_sensor
+    register_type: holding
+    address: 140
+    data_type: uint16
+  - name: DI-14
+    entity_type: binary_sensor
+    register_type: holding
+    address: 141
+    data_type: uint16
+  - name: DI-15
+    entity_type: binary_sensor
+    register_type: holding
+    address: 142
+    data_type: uint16
+  - name: DI-16
+    entity_type: binary_sensor
+    register_type: holding
+    address: 143
+    data_type: uint16
+  - name: DI-17
+    entity_type: binary_sensor
+    register_type: holding
+    address: 144
+    data_type: uint16
+  - name: DI-18
+    entity_type: binary_sensor
+    register_type: holding
+    address: 145
+    data_type: uint16
+  - name: DI-19
+    entity_type: binary_sensor
+    register_type: holding
+    address: 146
+    data_type: uint16
+  - name: DI-20
+    entity_type: binary_sensor
+    register_type: holding
+    address: 147
+    data_type: uint16
+  - name: DI-21
+    entity_type: binary_sensor
+    register_type: holding
+    address: 148
+    data_type: uint16
+  - name: DI-22
+    entity_type: binary_sensor
+    register_type: holding
+    address: 149
+    data_type: uint16
+  - name: DI-23
+    entity_type: binary_sensor
+    register_type: holding
+    address: 150
+    data_type: uint16
+  - name: DI-24
+    entity_type: binary_sensor
+    register_type: holding
+    address: 151
+    data_type: uint16

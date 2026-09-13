@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1.66
+
+### Eletechsup 23IOC24 NPN template
+
+- Added an **untested** factory-default (Command 1 / M0 open) template for
+  Eletechsup's 23IOC24_NPN 24DI / 24DO RS-485 remote I/O board.
+- The template creates 24 live-feedback NPN output switches and 24 NPN digital
+  input entities from the manufacturer’s documented holding-register map.
+- Included a concise command reference with the manufacturer product and manual
+  links, while leaving untested board-wide control modes disabled.
+
 ## 2.1.65
 
 ### Eletechsup R4D6F20 template

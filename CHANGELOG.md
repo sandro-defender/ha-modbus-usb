@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.76
+
+### Template controls and discovered targets
+
+- Added **Restore standard template controls** for existing devices created
+  before their template command metadata was saved. This restores R4D6F20 and
+  R413E16 board tools without changing the device's working entities.
+- Scan results now include **Use this target**, which transfers the discovered
+  slave ID and baud rate into Board Tools and the custom-command workspace.
+
 ## 2.1.75
 
 ### R4D6F20 product image

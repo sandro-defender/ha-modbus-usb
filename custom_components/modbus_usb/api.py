@@ -1056,6 +1056,58 @@ async def ws_scan_usb_ports(
 
 
 @websocket_api.websocket_command({
+    vol.Required("type"): "modbus_usb/restore_device_template_controls",
+    vol.Required("entry_id"): cv.string,
+    vol.Required("device_id"): cv.string,
+})
+@websocket_api.async_response
+async def ws_restore_device_template_controls(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Restore command metadata from the matching built-in template.
+
+    Older devices created before command metadata existed keep their working
+    entities, but lack the controls object used by the board-tools page.
+    """
+    try:
+        entry = _get_entry(hass, msg["entry_id"])
+        devices = [dict(device) for device in entry.options.get(CONF_DEVICES, [])]
+        device = next((item for item in devices if item.get("id") == msg["device_id"]), None)
+        if device is None:
+            raise ValueError("Configured device was not found")
+        model = str(device.get(CONF_MODEL, "")).strip().lower()
+        manufacturer = str(device.get(CONF_MANUFACTURER, "")).strip().lower()
+        templates = await async_load_templates(hass)
+        template = next(
+            (
+                item for item in templates
+                if item.get(CONF_DEVICE_CONTROLS)
+                and str(item.get(CONF_MODEL, "")).strip().lower() == model
+                and (not manufacturer or str(item.get(CONF_MANUFACTURER, "")).strip().lower() == manufacturer)
+            ),
+            None,
+        )
+        if template is None:
+            raise ValueError("No standard command template matches this device model")
+        restored = {
+            **device,
+            CONF_DEVICE_CONTROLS: template[CONF_DEVICE_CONTROLS],
+            CONF_IMAGE: template.get(CONF_IMAGE) or device.get(CONF_IMAGE, ""),
+            CONF_INFO_URL: template.get(CONF_INFO_URL) or device.get(CONF_INFO_URL, ""),
+        }
+        new_options = dict(entry.options or {})
+        new_options[CONF_DEVICES] = [
+            restored if item.get("id") == device["id"] else item for item in devices
+        ]
+        hass.data.setdefault(DOMAIN, {}).setdefault(DATA_PRESERVE_SERIAL_RELOAD, set()).add(entry.entry_id)
+        hass.config_entries.async_update_entry(entry, options=new_options)
+        connection.send_result(msg["id"], {"success": True, "template": template.get("filename")})
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("restore_device_template_controls failed: %s", err)
+        connection.send_error(msg["id"], "restore_template_controls_failed", str(err))
+
+
+@websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/save_device",
     vol.Required("entry_id"): cv.string,
     vol.Required("device"): dict,
@@ -1630,6 +1682,7 @@ async def async_register_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_clear_diagnostic_log)
     websocket_api.async_register_command(hass, ws_scan_bus)
     websocket_api.async_register_command(hass, ws_scan_usb_ports)
+    websocket_api.async_register_command(hass, ws_restore_device_template_controls)
     websocket_api.async_register_command(hass, ws_save_device)
     websocket_api.async_register_command(hass, ws_set_device_enabled)
     websocket_api.async_register_command(hass, ws_delete_device)

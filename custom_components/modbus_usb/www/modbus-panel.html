@@ -1471,7 +1471,7 @@
         <div class="card-header">
           <div>
             <div class="card-title">🔎 Find RS-485 Devices</div>
-            <div class="card-subtitle">Probes holding register 0 across slave IDs. Normal polling pauses during the scan.</div>
+            <div class="card-subtitle">Probes holding register 0 across slave IDs and baud rates. Use a found target to prefill Board Tools or a documented custom command.</div>
           </div>
         </div>
         <div class="form-grid-3">
@@ -3747,6 +3747,18 @@ entities:
       return [entry, (entry?.devices || []).find(device => device.id === id)];
     }
 
+    function findStandardControlTemplate(device) {
+      const model = String(device?.model || '').trim().toLowerCase();
+      const manufacturer = String(device?.manufacturer || '').trim().toLowerCase();
+      return _templates.find(template => template.device_controls &&
+        String(template.model || '').trim().toLowerCase() === model &&
+        (!manufacturer || String(template.manufacturer || '').trim().toLowerCase() === manufacturer));
+    }
+
+    function boardControlProtocol(device) {
+      return device?.device_controls?.protocol || findStandardControlTemplate(device)?.device_controls?.protocol || '';
+    }
+
     function describeBoardTools() {
       const [, device] = getBoardToolsDevice();
       const description = document.getElementById('board-tools-description');
@@ -3755,15 +3767,27 @@ entities:
         description.textContent = 'Select a board to load its saved template controls.';
         return;
       }
-      const controls = device.device_controls || {};
-      const protocol = controls.protocol;
+      const protocol = boardControlProtocol(device);
+      const standard = findStandardControlTemplate(device);
       if (protocol === 'eletechsup_r413e16') {
-        description.textContent = 'Template controls: baud rate, slave ID, factory reset, all-channel operations, and per-channel actions.';
+        description.innerHTML = `Template controls: baud rate, slave ID, factory reset, all-channel operations, and per-channel actions.${device.device_controls ? '' : ' <button class="btn btn-secondary btn-sm" onclick="restoreSelectedTemplateControls()">Restore standard template controls</button>'}`;
       } else if (protocol === 'eletechsup_r4d6f20') {
-        description.textContent = 'Template controls: relay actions, board ID readback, baud rate, parity, and factory reset.';
+        description.innerHTML = `Template controls: relay actions, board ID readback, baud rate, parity, and factory reset.${device.device_controls ? '' : ' <button class="btn btn-secondary btn-sm" onclick="restoreSelectedTemplateControls()">Restore standard template controls</button>'}`;
+      } else if (standard) {
+        description.innerHTML = `A standard template was found for this board. <button class="btn btn-secondary btn-sm" onclick="restoreSelectedTemplateControls()">Restore template controls</button>`;
       } else {
         description.textContent = 'No command template is saved for this board. Use the documented custom command fields above; every write requires confirmation.';
       }
+    }
+
+    async function restoreSelectedTemplateControls() {
+      const [entry, device] = getBoardToolsDevice();
+      if (!entry || !device) return;
+      try {
+        const result = await apiCall('restore_device_template_controls', { entry_id: entry.entry_id, device_id: device.id });
+        toast(`Restored command controls from ${result.template}`, 'ok');
+        await refreshData();
+      } catch (error) { toast(`Could not restore template controls: ${error.message}`, 'err'); }
     }
 
     function useSelectedBoardForCustomCommand() {
@@ -3775,10 +3799,26 @@ entities:
       toast(`Custom command target set to ${device.name || device.model || 'board'} (slave ${slave})`, 'ok');
     }
 
+    function useDiscoveredTarget(slave, baudrate) {
+      document.getElementById('diag-slave').value = slave;
+      document.getElementById('debug-slave').value = slave;
+      const rates = document.getElementById('scan-baudrates');
+      const configured = rates.value.split(',').map(value => value.trim()).filter(Boolean);
+      if (!configured.includes(String(baudrate))) rates.value = [baudrate, ...configured].join(',');
+      const entry = getCurrentEntry();
+      const matchingDevice = (entry?.devices || []).find(device => Number(device.slave_id) === Number(slave));
+      const select = document.getElementById('board-tools-device');
+      if (matchingDevice && select) {
+        select.value = matchingDevice.id;
+        describeBoardTools();
+      }
+      toast(`Target set to slave ${slave} at ${baudrate} baud. Configure the hub to this baud rate before sending board commands.`, 'ok');
+    }
+
     function openSelectedBoardTools() {
       const [, device] = getBoardToolsDevice();
       if (!device) { toast('Select a board first', 'err'); return; }
-      const protocol = device.device_controls?.protocol;
+      const protocol = boardControlProtocol(device);
       if (protocol === 'eletechsup_r413e16') return openR413e16Controls(device.id);
       if (protocol === 'eletechsup_r4d6f20') return openR4d6f20Controls(device.id);
       useSelectedBoardForCustomCommand();
@@ -5186,13 +5226,13 @@ entities:
           start_slave: startSlave, end_slave: endSlave,
         });
         box.style.color = result.found?.length ? '#34d399' : '#fcd34d';
-        box.textContent = result.found?.length
+        box.innerHTML = result.found?.length
           ? `Found: ${result.found.map(item => {
               const suggestion = item.suggestions?.length
-                ? ` — suggested template: ${item.suggestions.join(', ')}`
+                ? ` — suggested template: ${escapeHtml(item.suggestions.join(', '))}`
                 : '';
-              return `slave ${item.slave_id} at ${item.baudrate} baud (${item.response})${suggestion}`;
-            }).join('; ')}`
+              return `<div style="margin-bottom:0.55rem;">slave ${escapeHtml(item.slave_id)} at ${escapeHtml(item.baudrate)} baud (${escapeHtml(item.response)})${suggestion} <button class="btn btn-secondary btn-sm" onclick="useDiscoveredTarget(${Number(item.slave_id)}, ${Number(item.baudrate)})">Use this target</button></div>`;
+            }).join('')}`
           : `No responding devices found after ${result.probed || 0} probes. Check A/B wires, power, baud rate, and slave ID.`;
         await refreshData();
       } catch (error) {

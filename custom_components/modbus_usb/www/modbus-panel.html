@@ -490,6 +490,7 @@
     }
     .device-card:hover { border-color: rgba(99, 102, 241, 0.35); }
     .device-card.is-disabled { opacity: 0.62; }
+    .device-card:not(.is-expanded) .device-card-header { border-bottom-color: transparent; }
     .device-disabled-notice {
       margin: 0.85rem 1rem;
       padding: 0.7rem 0.8rem;
@@ -512,7 +513,17 @@
       display: flex;
       align-items: center;
       gap: 0.85rem;
+      min-width: 0;
+      cursor: pointer;
+      text-align: left;
+      background: transparent;
+      border: 0;
+      color: inherit;
+      padding: 0;
     }
+    .device-header-left:focus-visible { outline: 2px solid #818cf8; outline-offset: 3px; border-radius: 8px; }
+    .device-collapse-chevron { color: var(--text-dim); font-size: 0.9rem; transition: transform 0.18s ease; }
+    .device-card.is-expanded .device-collapse-chevron { transform: rotate(90deg); }
     .device-avatar {
       width: 48px;
       height: 48px;
@@ -2314,6 +2325,10 @@
     let _dashboardFilter = 'all';
     const _deviceTestReports = {};
     const _r413e16StateReports = {};
+    const _expandedDeviceCards = new Set();
+    try {
+      JSON.parse(localStorage.getItem('modbus_usb_expanded_devices') || '[]').forEach(id => _expandedDeviceCards.add(id));
+    } catch (_) { /* Ignore unavailable or malformed browser storage. */ }
     let _inputWatchActive = false;
     let _inputWatchTimer = null;
     const _inputWatchPrevious = new Map();
@@ -3158,9 +3173,10 @@ entities:
           : avatarImage;
 
         return `
-          <div class="device-card ${isEnabled ? '' : 'is-disabled'}" id="dev-card-${dev.id}">
+          <div class="device-card ${isEnabled ? '' : 'is-disabled'} ${_expandedDeviceCards.has(dev.id) ? 'is-expanded' : ''}" id="dev-card-${dev.id}">
             <div class="device-card-header">
-              <div class="device-header-left">
+              <div class="device-header-left" role="button" tabindex="0" aria-expanded="${_expandedDeviceCards.has(dev.id)}" aria-controls="dev-content-${dev.id}" onclick="toggleDeviceCard(event, '${dev.id}')" onkeydown="toggleDeviceCardKey(event, '${dev.id}')">
+                <span class="device-collapse-chevron" aria-hidden="true">›</span>
                 ${avatar}
                 <div class="device-meta">
                   <h3>
@@ -3203,6 +3219,7 @@ entities:
               </div>
             </div>
 
+            <div class="device-card-content" id="dev-content-${dev.id}" ${_expandedDeviceCards.has(dev.id) ? '' : 'hidden'}>
             <div class="device-entities-list">
               ${entitiesHtml}
             </div>
@@ -3211,9 +3228,24 @@ entities:
             ${isR4d6f20 ? `<div class="device-command-panel"><p>All relays, per-channel actions, board ID, serial settings, and reset.</p><button class="btn btn-secondary btn-sm" ${isEnabled ? '' : 'disabled'} onclick="openR4d6f20Controls('${dev.id}')">Open R4D6F20 controls</button></div>` : ''}
             ${_r413e16StateReports[dev.id] ? renderR413e16StateReport(_r413e16StateReports[dev.id]) : ''}
             ${_deviceTestReports[dev.id] ? renderDeviceTestReport(_deviceTestReports[dev.id]) : ''}
+            </div>
           </div>
         `;
       }).join('');
+    }
+
+    function toggleDeviceCard(event, deviceId) {
+      if (event?.target?.closest('a, button, input, select, textarea')) return;
+      if (_expandedDeviceCards.has(deviceId)) _expandedDeviceCards.delete(deviceId);
+      else _expandedDeviceCards.add(deviceId);
+      try { localStorage.setItem('modbus_usb_expanded_devices', JSON.stringify([..._expandedDeviceCards])); } catch (_) { /* Expansion still works for this session. */ }
+      renderDevicesTab();
+    }
+
+    function toggleDeviceCardKey(event, deviceId) {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      toggleDeviceCard(event, deviceId);
     }
 
     function renderDeviceTestReport(report) {

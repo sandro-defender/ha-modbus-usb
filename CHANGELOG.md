@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.83
+
+### Collapsible device cards
+
+- Device cards now start collapsed, with their contents available from an
+  accessible header control.
+- The device cards a user expands remain expanded through automatic updates and
+  browser-panel reloads.
+
 ## 2.1.82
 
 ### R4D6F20 testing status

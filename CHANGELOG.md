@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.75
+
+### R4D6F20 product image
+
+- Replaced the Eletechsup R4D6F20 multifunction relay-board image with the
+  supplied current board illustration in the saved template and device card.
+
 ## 2.1.74
 
 ### Unified board diagnostics and tools

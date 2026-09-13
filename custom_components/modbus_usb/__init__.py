@@ -10,6 +10,8 @@ from homeassistant.core import HomeAssistant
 from .api import async_register_api
 from .const import (
     DATA_SKIP_DEVICE_RELOAD,
+    DATA_PRESERVE_SERIAL_RELOAD,
+    DATA_SKIP_SERIAL_RELOAD,
     CONF_BAUDRATE,
     CONF_BYTESIZE,
     CONF_DEVICES,
@@ -83,7 +85,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
             frontend_url_path="modbus-usb",
             # Change this asset version when the standalone sidebar HTML changes.
             # It prevents an already-open browser from retaining an old panel.
-            config={"url": "/modbus_usb_panel/modbus-panel.html?v=2.1.72"},
+            config={"url": "/modbus_usb_panel/modbus-panel.html?v=2.1.73"},
             require_admin=False,
         )
         _LOGGER.debug("Modbus USB sidebar panel registered")
@@ -93,48 +95,49 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Modbus USB Controller from a config entry."""
-    from pymodbus.client import ModbusSerialClient
-
-    def _build_client() -> ModbusSerialClient:
-        return ModbusSerialClient(
-            port=entry.data[CONF_PORT],
-            baudrate=entry.data[CONF_BAUDRATE],
-            bytesize=entry.data[CONF_BYTESIZE],
-            parity=entry.data[CONF_PARITY],
-            stopbits=entry.data[CONF_STOPBITS],
-            timeout=3,
-        )
-
-    client = await hass.async_add_executor_job(_build_client)
-    connected = await hass.async_add_executor_job(client.connect)
-    if not connected:
-        _LOGGER.warning(
-            "Could not open serial port %s on initial connect; will keep retrying",
-            entry.data[CONF_PORT],
-        )
-
-    scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
-    coordinator = ModbusUsbCoordinator(
-        hass=hass,
-        client=client,
-        slave_id=entry.data[CONF_SLAVE_ID],
-        scan_interval=scan_interval,
-        entry_id=entry.entry_id,
-        serial_config={
-            CONF_PORT: entry.data[CONF_PORT],
-            CONF_BAUDRATE: entry.data[CONF_BAUDRATE],
-            CONF_BYTESIZE: entry.data[CONF_BYTESIZE],
-            CONF_PARITY: entry.data[CONF_PARITY],
-            CONF_STOPBITS: entry.data[CONF_STOPBITS],
-        },
-    )
-
-    # An offline RS-485 board must not block Home Assistant setup. The normal
-    # coordinator interval starts after entity setup and retries in background.
-    coordinator.async_set_updated_data({})
-
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = coordinator
+    coordinator = hass.data[DOMAIN].get(entry.entry_id)
+    if coordinator is None:
+        from pymodbus.client import ModbusSerialClient
+
+        def _build_client() -> ModbusSerialClient:
+            return ModbusSerialClient(
+                port=entry.data[CONF_PORT],
+                baudrate=entry.data[CONF_BAUDRATE],
+                bytesize=entry.data[CONF_BYTESIZE],
+                parity=entry.data[CONF_PARITY],
+                stopbits=entry.data[CONF_STOPBITS],
+                timeout=3,
+            )
+
+        client = await hass.async_add_executor_job(_build_client)
+        connected = await hass.async_add_executor_job(client.connect)
+        if not connected:
+            _LOGGER.warning(
+                "Could not open serial port %s on initial connect; will keep retrying",
+                entry.data[CONF_PORT],
+            )
+
+        scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        coordinator = ModbusUsbCoordinator(
+            hass=hass,
+            client=client,
+            slave_id=entry.data[CONF_SLAVE_ID],
+            scan_interval=scan_interval,
+            entry_id=entry.entry_id,
+            serial_config={
+                CONF_PORT: entry.data[CONF_PORT],
+                CONF_BAUDRATE: entry.data[CONF_BAUDRATE],
+                CONF_BYTESIZE: entry.data[CONF_BYTESIZE],
+                CONF_PARITY: entry.data[CONF_PARITY],
+                CONF_STOPBITS: entry.data[CONF_STOPBITS],
+            },
+        )
+
+        # An offline RS-485 board must not block Home Assistant setup. The normal
+        # coordinator interval starts after entity setup and retries in background.
+        coordinator.async_set_updated_data({})
+        hass.data[DOMAIN][entry.entry_id] = coordinator
 
     # Register hub and child devices in HA Device Registry
     from homeassistant.helpers import device_registry as dr
@@ -186,6 +189,15 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
             # do not close/reopen the shared serial adapter for that change.
             coordinator.async_set_updated_data(dict(coordinator.data or {}))
         return
+    serial_reloads = hass.data.get(DOMAIN, {}).get(DATA_SKIP_SERIAL_RELOAD, set())
+    if entry.entry_id in serial_reloads:
+        serial_reloads.discard(entry.entry_id)
+        coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+        if coordinator is not None:
+            # The coordinator already replaced and reopened its serial client.
+            # Avoid unloading it a second time while the OS releases the port.
+            coordinator.async_set_updated_data(dict(coordinator.data or {}))
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 
@@ -193,6 +205,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
+        preserve_reloads = hass.data.get(DOMAIN, {}).get(DATA_PRESERVE_SERIAL_RELOAD, set())
+        if entry.entry_id in preserve_reloads:
+            # Board create/delete reloads platform entities only. Reusing this
+            # coordinator avoids a close/open race on USB serial adapters.
+            preserve_reloads.discard(entry.entry_id)
+            return True
         coordinator: ModbusUsbCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
         await hass.async_add_executor_job(coordinator.close)
 

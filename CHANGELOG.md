@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.73
+
+### Serial connection stability
+
+- Fixed an RS-485/USB serial disconnect that could occur when adding, deleting,
+  or applying a board template. Home Assistant now rebuilds the affected
+  entities without closing the active shared serial connection.
+- Improved reconnecting after serial-configuration changes: the adapter now
+  retries briefly while the operating system releases the previous port handle.
+
 ## 2.1.72
 
 ### Eletechsup R4D6F20 board controls

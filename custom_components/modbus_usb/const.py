@@ -42,6 +42,13 @@ CONF_DEVICE_CONTROLS = "device_controls"
 CONF_ASSUMED_STATE = "assumed_state"
 CONF_ENABLED = "enabled"
 DATA_SKIP_DEVICE_RELOAD = "skip_device_enable_reload"
+# Board edits must reload entity platforms so Home Assistant discovers or removes
+# entities. Keep the hub coordinator alive during that reload, however: closing
+# and immediately reopening a USB serial adapter can leave its port unavailable.
+DATA_PRESERVE_SERIAL_RELOAD = "preserve_serial_during_device_reload"
+# A serial-setting command replaces the coordinator's client in place. Reloading
+# at the same time can race the operating system while it releases the USB port.
+DATA_SKIP_SERIAL_RELOAD = "skip_serial_reconfigure_reload"
 
 TEMPLATES_DIR_NAME = "modbus_usb_templates"
 

@@ -6,6 +6,7 @@ import struct
 from collections import deque
 from datetime import datetime, timedelta
 from threading import Lock
+from time import sleep
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -336,8 +337,38 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         """Open the serial adapter or raise a useful error before a request."""
         if self.client.connected:
             return
-        if not self.client.connect():
+        if not self._connect_with_retries():
             raise UpdateFailed("Could not open the configured serial port")
+
+    def _connect_with_retries(self, attempts: int = 3) -> bool:
+        """Connect a USB serial client, allowing Windows time to release COM ports."""
+        for attempt in range(attempts):
+            if self.client.connect():
+                return True
+            # pyserial can briefly retain a handle after the old Modbus client
+            # closes. Retrying here avoids a false unavailable-port result
+            # immediately after changing baud rate or parity.
+            if attempt < attempts - 1:
+                sleep(0.25)
+        return False
+
+    def reconfigure_serial(self, serial_config: dict[str, Any]) -> bool:
+        """Replace the serial client in place without unloading HA entities."""
+        from pymodbus.client import ModbusSerialClient
+
+        config = {**self.serial_config, **serial_config}
+        with self._serial_lock:
+            self.client.close()
+            self.client = ModbusSerialClient(
+                port=config[CONF_PORT],
+                baudrate=config[CONF_BAUDRATE],
+                bytesize=config[CONF_BYTESIZE],
+                parity=config[CONF_PARITY],
+                stopbits=config[CONF_STOPBITS],
+                timeout=3,
+            )
+            self.serial_config = config
+            return self._connect_with_retries()
 
     @staticmethod
     def _call_modbus_on_client(

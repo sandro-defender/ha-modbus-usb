@@ -101,6 +101,7 @@ def test_failed_connection_is_logged_and_counted() -> None:
     with pytest.raises(UpdateFailed, match="Could not open"):
         coordinator.read_register_raw(0, REGISTER_TYPE_HOLDING, DATA_TYPE_UINT16)
 
+    assert coordinator.client.connect_calls == 3
     assert coordinator.diag[DIAG_FAILED_READS] == 1
     assert coordinator.diag[DIAG_LAST_ERROR] == "Could not open the configured serial port"
     assert coordinator.transaction_log[0]["status"] == "error"

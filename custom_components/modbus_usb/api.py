@@ -43,6 +43,7 @@ from .const import (
     CONF_ENTITY_TYPE,
     CONF_ENABLED,
     DATA_SKIP_DEVICE_RELOAD,
+    DATA_PRESERVE_SERIAL_RELOAD,
     CONF_MANUFACTURER,
     CONF_MAX_VALUE,
     CONF_MIN_VALUE,
@@ -1106,6 +1107,10 @@ async def ws_save_device(
 
         new_options[CONF_DEVICES] = devices
         new_options[CONF_ENTITIES] = entities
+        # A device edit reloads entity platforms so HA can add/remove entities.
+        # Preserve the shared coordinator during that reload to avoid dropping
+        # the serial bus just because the sidebar device list changed.
+        hass.data.setdefault(DOMAIN, {}).setdefault(DATA_PRESERVE_SERIAL_RELOAD, set()).add(entry.entry_id)
         hass.config_entries.async_update_entry(entry, options=new_options)
 
         connection.send_result(msg["id"], {"success": True, "device": device})
@@ -1190,6 +1195,9 @@ async def ws_delete_device(
                         entity_registry.async_remove(registry_entity.entity_id)
                 device_registry.async_remove_device(registry_device.id)
 
+        # Entity removal needs a platform reload, but the bus itself has not
+        # changed. Keep its current serial client open across that reload.
+        hass.data.setdefault(DOMAIN, {}).setdefault(DATA_PRESERVE_SERIAL_RELOAD, set()).add(entry.entry_id)
         hass.config_entries.async_update_entry(entry, options=new_options)
         connection.send_result(msg["id"], {"success": True})
     except Exception as err:
@@ -1256,6 +1264,7 @@ async def ws_save_entity(
             entities.append(entity)
 
         new_options[CONF_ENTITIES] = entities
+        hass.data.setdefault(DOMAIN, {}).setdefault(DATA_PRESERVE_SERIAL_RELOAD, set()).add(entry.entry_id)
         hass.config_entries.async_update_entry(entry, options=new_options)
 
         connection.send_result(msg["id"], {"success": True, "entity": entity})
@@ -1304,6 +1313,7 @@ async def ws_delete_entity(
         if ha_entity_id:
             entity_registry.async_remove(ha_entity_id)
 
+        hass.data.setdefault(DOMAIN, {}).setdefault(DATA_PRESERVE_SERIAL_RELOAD, set()).add(entry.entry_id)
         hass.config_entries.async_update_entry(entry, options=new_options)
         connection.send_result(msg["id"], {"success": True})
     except Exception as err:
@@ -1515,6 +1525,9 @@ async def ws_apply_template(
         new_options[CONF_DEVICES] = devices
         new_options[CONF_ENTITIES] = entities
 
+        # Applying a board template changes only entity configuration. Keep the
+        # already-open USB serial client while HA rebuilds those entities.
+        hass.data.setdefault(DOMAIN, {}).setdefault(DATA_PRESERVE_SERIAL_RELOAD, set()).add(entry.entry_id)
         hass.config_entries.async_update_entry(entry, options=new_options)
 
         connection.send_result(

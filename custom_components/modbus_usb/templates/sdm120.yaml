@@ -3,6 +3,7 @@ name: Eastron SDM120 Energy Meter
 manufacturer: Eastron
 model: SDM120
 default_slave_id: 1
+image: "/modbus_usb_panel/images/eastron-sdm120.jpg"
 description: Single-phase DIN rail energy meter with Modbus RTU communication
 # Safe identification checks: input-register voltage and frequency in normal ranges.
 fingerprint:

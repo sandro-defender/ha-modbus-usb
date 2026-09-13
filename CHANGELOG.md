@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.1.67
+
+### Brand-organized template browser
+
+- Added bundled product or representative device images for every built-in template;
+  the browser no longer depends on remote image links.
+- Grouped templates by manufacturer in accessible, collapsed-by-default sections.
+  A section keeps its expanded state while the panel refreshes, and manufacturers
+  containing saved Home Assistant templates remain first.
+- Added a purpose-built local illustration for the Generic Modbus template.
+
 ## 2.1.66
 
 ### Eletechsup 23IOC24 NPN template

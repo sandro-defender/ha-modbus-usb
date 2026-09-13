@@ -692,6 +692,61 @@
     }
 
     /* ── TEMPLATES VIEW ─────────────────────────────────────────── */
+    .template-brand-list {
+      display: flex;
+      flex-direction: column;
+      gap: 0.9rem;
+      min-width: 0;
+    }
+    .template-brand-group {
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid var(--border-subtle);
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    .template-brand-summary {
+      min-height: 52px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.8rem 1.15rem;
+      cursor: pointer;
+      list-style: none;
+      touch-action: manipulation;
+      user-select: none;
+    }
+    .template-brand-summary::-webkit-details-marker { display: none; }
+    .template-brand-summary:hover { background: rgba(99, 102, 241, 0.07); }
+    .template-brand-summary:focus-visible {
+      outline: 2px solid #818cf8;
+      outline-offset: -2px;
+    }
+    .template-brand-summary-copy {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.16rem;
+    }
+    .template-brand-name {
+      color: #f8fafc;
+      font-size: 0.94rem;
+      font-weight: 750;
+      overflow-wrap: anywhere;
+    }
+    .template-brand-meta { color: var(--text-dim); font-size: 0.72rem; }
+    .template-brand-chevron {
+      width: 1.15rem;
+      height: 1.15rem;
+      flex: 0 0 auto;
+      color: #a5b4fc;
+      transition: transform 0.18s ease;
+    }
+    .template-brand-group[open] .template-brand-chevron { transform: rotate(180deg); }
+    .template-brand-content {
+      padding: 0 1.15rem 1.15rem;
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
     .template-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
@@ -719,6 +774,7 @@
     .template-photo {
       width: 100%;
       height: 140px;
+      aspect-ratio: 16 / 7;
       object-fit: cover;
       border-radius: 12px;
       margin-bottom: 0.9rem;
@@ -1146,6 +1202,12 @@
       .device-entity-item { padding: 0.65rem; }
       .ent-right { gap: 0.35rem; }
       .ent-right { flex-wrap: wrap; justify-content: flex-end; }
+      .template-brand-list { gap: 0.7rem; }
+      .template-brand-group { border-radius: 12px; }
+      .template-brand-summary { min-height: 46px; padding: 0.7rem 0.85rem; gap: 0.7rem; }
+      .template-brand-name { font-size: 0.88rem; }
+      .template-brand-meta { font-size: 0.68rem; }
+      .template-brand-content { padding: 0 0.85rem 0.85rem; }
       .template-grid { grid-template-columns: 1fr; gap: 0.85rem; }
       .template-card { padding: 0.9rem; border-radius: 12px; }
       .template-photo { height: 120px; }
@@ -1293,7 +1355,7 @@
         </button>
       </div>
 
-      <div class="template-grid" id="template-cards-container">
+      <div class="template-brand-list" id="template-cards-container">
         <!-- Rendered dynamically -->
       </div>
     </div>
@@ -3258,6 +3320,11 @@ entities:
     function renderTemplatesTab() {
       const container = document.getElementById('template-cards-container');
       document.getElementById('count-templates').textContent = _templates.length;
+      const openBrands = new Set(
+        [...container.querySelectorAll('.template-brand-group[open]')]
+          .map(group => group.dataset.brand)
+          .filter(Boolean),
+      );
 
       if (_templates.length === 0) {
         container.innerHTML = `
@@ -3280,7 +3347,7 @@ entities:
         );
       });
 
-      container.innerHTML = templates.map(tpl => {
+      const templateCard = (tpl) => {
         const entCount = (tpl.entities || []).length;
         const previewItems = (tpl.entities || []).slice(0, 5).map(e => `
           <div class="preview-pill">
@@ -3298,7 +3365,7 @@ entities:
         return `
           <div class="template-card">
             <div>
-              ${tpl.image ? (tpl.info_url ? `<a href="${tpl.info_url}" target="_blank" rel="noopener noreferrer" title="Open device information"><img class="template-photo" src="${tpl.image}" alt="${tpl.name || tpl.id}"></a>` : `<img class="template-photo" src="${tpl.image}" alt="${tpl.name || tpl.id}">`) : ''}
+              ${tpl.image ? (tpl.info_url ? `<a href="${tpl.info_url}" target="_blank" rel="noopener noreferrer" title="Open device information"><img class="template-photo" src="${tpl.image}" alt="${tpl.name || tpl.id}" width="640" height="280" loading="lazy" decoding="async"></a>` : `<img class="template-photo" src="${tpl.image}" alt="${tpl.name || tpl.id}" width="640" height="280" loading="lazy" decoding="async">`) : ''}
               <div class="template-header">
                 <div class="template-title">
                   <h3>${tpl.name || tpl.id}</h3>
@@ -3334,6 +3401,41 @@ entities:
               ${isSavedInHa ? `<button class="btn btn-danger btn-sm" onclick="confirmDeleteTemplate('${tpl.filename}')" title="Delete the saved YAML file">🗑 Delete</button>` : ''}
             </div>
           </div>
+        `;
+      };
+
+      const brands = new Map();
+      templates.forEach((tpl) => {
+        const brand = String(tpl.manufacturer || 'Other').trim() || 'Other';
+        if (!brands.has(brand)) brands.set(brand, []);
+        brands.get(brand).push(tpl);
+      });
+
+      const orderedBrands = [...brands.entries()].sort(([leftBrand, leftTemplates], [rightBrand, rightTemplates]) => {
+        const leftSaved = leftTemplates.some(tpl => tpl.source === 'user') ? 0 : 1;
+        const rightSaved = rightTemplates.some(tpl => tpl.source === 'user') ? 0 : 1;
+        if (leftSaved !== rightSaved) return leftSaved - rightSaved;
+        return leftBrand.localeCompare(rightBrand, undefined, { sensitivity: 'base' });
+      });
+
+      container.innerHTML = orderedBrands.map(([brand, brandTemplates]) => {
+        const savedCount = brandTemplates.filter(tpl => tpl.source === 'user').length;
+        const countText = `${brandTemplates.length} template${brandTemplates.length === 1 ? '' : 's'}${savedCount ? ` · ${savedCount} saved in HA` : ''}`;
+        const isOpen = openBrands.has(brand) ? ' open' : '';
+        const safeBrand = escapeHtml(brand);
+        return `
+          <details class="template-brand-group" data-brand="${safeBrand}"${isOpen}>
+            <summary class="template-brand-summary" aria-label="Show ${safeBrand} templates">
+              <span class="template-brand-summary-copy">
+                <span class="template-brand-name">${safeBrand}</span>
+                <span class="template-brand-meta">${countText}</span>
+              </span>
+              <svg class="template-brand-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4"/></svg>
+            </summary>
+            <div class="template-brand-content">
+              <div class="template-grid">${brandTemplates.map(templateCard).join('')}</div>
+            </div>
+          </details>
         `;
       }).join('');
     }

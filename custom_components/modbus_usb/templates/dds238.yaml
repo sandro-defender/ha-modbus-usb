@@ -3,6 +3,7 @@ name: Hiking DDS238 Energy Meter
 manufacturer: Hiking
 model: DDS238-2 ZN/S
 default_slave_id: 1
+image: "/modbus_usb_panel/images/hiking-dds238.jpg"
 description: Single phase DIN rail smart electricity meter with RS485 Modbus RTU
 # Safe identification checks: holding-register voltage and frequency in normal ranges.
 fingerprint:

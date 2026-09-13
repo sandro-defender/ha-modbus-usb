@@ -8,6 +8,7 @@
 # This untested template intentionally does not use Command 2 / M0 shorted.
 
 id: eletechsup-23IOC24_NPN
+image: "/modbus_usb_panel/images/eletechsup-23ioc24.jpg"
 name: eletechsup 23IOC24_NPN I/O Board
 manufacturer: eletechsup
 model: 23IOC24_NPN

@@ -3,6 +3,7 @@ name: Generic Modbus Controller / Meter
 manufacturer: Generic
 model: Modbus RTU Device
 default_slave_id: 1
+image: "/modbus_usb_panel/images/generic-modbus-meter.svg"
 description: Template for generic Modbus RTU sensor and setpoint controllers
 entities:
   - name: Measured Value 1

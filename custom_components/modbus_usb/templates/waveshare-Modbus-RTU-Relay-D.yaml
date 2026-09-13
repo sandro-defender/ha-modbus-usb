@@ -7,6 +7,7 @@ name: Waveshare Modbus RTU Relay (D)
 manufacturer: Waveshare
 model: Modbus RTU Relay (D)
 default_slave_id: 1
+image: "/modbus_usb_panel/images/waveshare-relay-d.jpg"
 tested: false
 source_url: "https://github.com/dmatscheko/modbus_connect/blob/main/custom_components/modbus_connect/device_configs/waveshare-modbus-rtu-relay-d.yaml"
 description: >

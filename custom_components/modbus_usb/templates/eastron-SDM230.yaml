@@ -7,6 +7,7 @@ name: Eastron SDM230 Energy Meter
 manufacturer: Eastron
 model: SDM230
 default_slave_id: 1
+image: "/modbus_usb_panel/images/eastron-sdm120.jpg"
 tested: false
 source_url: "https://github.com/dmatscheko/modbus_connect/blob/main/custom_components/modbus_connect/device_configs/eastron-sdm230.yaml"
 description: >

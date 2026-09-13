@@ -8,6 +8,7 @@
 id: eastron-SDM630
 name: Eastron SDM630 Energy Meter
 manufacturer: Eastron
+image: "/modbus_usb_panel/images/eastron-sdm630.jpg"
 model: SDM630
 default_slave_id: 1
 tested: false

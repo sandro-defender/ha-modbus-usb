@@ -8,6 +8,7 @@ name: eletechsup N4ROD08 Relay Board
 manufacturer: eletechsup
 model: N4ROD08
 default_slave_id: 1
+image: "/modbus_usb_panel/images/eletechsup-23ioc24.jpg"
 tested: false
 source_url: "https://github.com/r-renato/drp-modbus-boards"
 description: >

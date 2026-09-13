@@ -9,7 +9,7 @@
 #
 # Source: Eletechsup R4D6F20 Command 1 manual (see the matching .md file).
 
-image: "/modbus_usb_panel/images/eletechsup-23ioc24.jpg"
+image: "/modbus_usb_panel/images/eletechsup R4D6F20 Multifunction Relay Board.webp"
 
 id: eletechsup-R4D6F20
 name: eletechsup R4D6F20 Multifunction Relay Board

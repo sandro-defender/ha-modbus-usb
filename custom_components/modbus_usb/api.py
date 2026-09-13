@@ -27,6 +27,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
+    BAUDRATE_OPTIONS,
     CONF_ADDRESS,
     CONF_ADDRESSES,
     CONF_BAUDRATE,
@@ -76,6 +77,8 @@ from .coordinator import is_r413e16_switch_config
 _LOGGER = logging.getLogger(__name__)
 
 _GITHUB_REPOSITORY = "sandro-defender/ha-modbus-usb"
+_R4D6F20_BAUD_CODES = {1200: 0, 2400: 1, 4800: 2, 9600: 3, 19200: 4, 38400: 5, 57600: 6, 115200: 7}
+_R4D6F20_PARITY_CODES = {"N": 0, "O": 1, "E": 2}
 
 
 def _local_version() -> str:
@@ -646,6 +649,17 @@ def _get_r413e16_device(entry, device_id: str) -> dict[str, Any]:
     return device
 
 
+def _get_r4d6f20_device(entry, device_id: str) -> dict[str, Any]:
+    """Return an R4D6F20 device or reject a board-specific operation."""
+    device = next((item for item in entry.options.get(CONF_DEVICES, []) if item.get("id") == device_id), None)
+    if device is None:
+        raise ValueError("Configured device was not found")
+    controls = device.get(CONF_DEVICE_CONTROLS, {})
+    if controls.get("protocol") != "eletechsup_r4d6f20" and "r4d6f20" not in str(device.get(CONF_MODEL, "")).lower():
+        raise ValueError("These controls are available only for an eletechsup R4D6F20 device")
+    return device
+
+
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/r413e16_command",
     vol.Required("entry_id"): cv.string,
@@ -821,6 +835,70 @@ async def ws_r413e16_command(
     except Exception as err:  # noqa: BLE001
         _LOGGER.warning("R413E16 command failed: %s", err)
         connection.send_error(msg["id"], "r413e16_command_failed", str(err))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "modbus_usb/r4d6f20_command",
+    vol.Required("entry_id"): cv.string,
+    vol.Required("device_id"): cv.string,
+    vol.Required("command"): vol.In(["all_on", "all_off", "read_slave_id", "configure_serial", "channel_action", "factory_reset"]),
+    vol.Optional("baudrate"): vol.In(BAUDRATE_OPTIONS),
+    vol.Optional("parity"): vol.In(["N", "O", "E"]),
+    vol.Optional("channel"): vol.All(vol.Coerce(int), vol.Range(min=0, max=19)),
+    vol.Optional("action"): vol.In(["toggle", "interlock", "momentary", "delay"]),
+    vol.Optional("delay_seconds"): vol.All(vol.Coerce(int), vol.Range(min=0, max=255)),
+})
+@websocket_api.async_response
+async def ws_r4d6f20_command(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+    """Run documented R4D6F20 Command 1 board controls."""
+    try:
+        entry = _get_entry(hass, msg["entry_id"])
+        device = _get_r4d6f20_device(entry, msg["device_id"])
+        coordinator = hass.data[DOMAIN][entry.entry_id]
+        slave = int(device.get(CONF_SLAVE_ID, entry.data.get(CONF_SLAVE_ID, 1)))
+        command = msg["command"]
+        if command in ("all_on", "all_off"):
+            await hass.async_add_executor_job(coordinator.write_register, 0, 0x0700 if command == "all_on" else 0x0800, slave)
+            await coordinator.async_request_refresh()
+            connection.send_result(msg["id"], {"success": True, "command": command})
+            return
+        if command == "read_slave_id":
+            value = await hass.async_add_executor_job(coordinator.read_register_raw, 0x00FD, "holding", "uint16", slave)
+            connection.send_result(msg["id"], {"success": True, "slave_id": value})
+            return
+        if command == "channel_action":
+            channel, action = msg.get("channel"), msg.get("action")
+            if channel is None or action is None:
+                raise ValueError("Choose a relay channel and action")
+            value = {"toggle": 0x0300, "interlock": 0x0400, "momentary": 0x0500}.get(action)
+            if action == "delay":
+                if msg.get("delay_seconds") is None:
+                    raise ValueError("Enter a delay from 0 to 255 seconds")
+                value = 0x0600 + msg["delay_seconds"]
+            await hass.async_add_executor_job(coordinator.write_register, channel, value, slave)
+            await coordinator.async_request_refresh()
+            connection.send_result(msg["id"], {"success": True, "command": command})
+            return
+        if command == "factory_reset":
+            await hass.async_add_executor_job(coordinator.write_register, 0x00FB, 0, slave)
+            hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_BAUDRATE: 9600, CONF_PARITY: "N"})
+            connection.send_result(msg["id"], {"success": True, "reload_required": True})
+            return
+        baudrate, parity = msg.get("baudrate"), msg.get("parity")
+        if baudrate is None and parity is None:
+            raise ValueError("Choose a baud rate, parity setting, or both")
+        if baudrate is not None:
+            await hass.async_add_executor_job(coordinator.write_register, 0x00FE, _R4D6F20_BAUD_CODES[baudrate], slave)
+        if parity is not None:
+            await hass.async_add_executor_job(coordinator.write_register, 0x00FF, _R4D6F20_PARITY_CODES[parity], slave)
+        data = dict(entry.data)
+        if baudrate is not None: data[CONF_BAUDRATE] = baudrate
+        if parity is not None: data[CONF_PARITY] = parity
+        hass.config_entries.async_update_entry(entry, data=data)
+        connection.send_result(msg["id"], {"success": True, "reload_required": True})
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("R4D6F20 command failed: %s", err)
+        connection.send_error(msg["id"], "r4d6f20_command_failed", str(err))
 
 
 @websocket_api.websocket_command({
@@ -1534,6 +1612,7 @@ async def async_register_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_install_update)
     websocket_api.async_register_command(hass, ws_restart_home_assistant)
     websocket_api.async_register_command(hass, ws_r413e16_command)
+    websocket_api.async_register_command(hass, ws_r4d6f20_command)
     websocket_api.async_register_command(hass, ws_test_device_entities)
     websocket_api.async_register_command(hass, ws_clear_diagnostic_log)
     websocket_api.async_register_command(hass, ws_scan_bus)

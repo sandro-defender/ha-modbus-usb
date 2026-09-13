@@ -28,15 +28,13 @@ replacement for the full manufacturer manual.
 | Current input | 160 / `0x00A0` | raw value × 0.01 mA |
 | Voltage input | 161 / `0x00A1` | raw value × 0.01 V |
 
-The template deliberately contains only normal Home Assistant entities. It
-does not add board-setup or all-channel controls, because the integration UI
-currently exposes those device-specific commands only for the separately tested
-R413E16 protocol.
+The integration control menu exposes the documented commands below. The board
+is still untested with this integration, so use the menu only with a safe test
+load and confirm the selected device before applying a board-wide command.
 
 ## Useful documented board commands
 
-These commands are available in the manufacturer document, but are not exposed
-by this initial untested template:
+These commands are available from **R4D6F20 controls** in the device card:
 
 | Purpose | Holding register | Value |
 | --- | ---: | ---: |

@@ -17,6 +17,7 @@ manufacturer: eletechsup
 model: R4D6F20
 tested: false
 default_slave_id: 1
+default_baudrate: 9600
 info_url: "https://eletechsup.com/products/r4d6f20-smart-20-channel-rs485-relay-board-with-plc-io-module-modbus-for-multifunction-control"
 description: >
   Unverified template for Eletechsup's 20-relay R4D6F20 PLC I/O board. It uses
@@ -25,6 +26,25 @@ description: >
   reads, two PNP digital inputs, one 4–20 mA input, and one 0–10 V input.
   Default serial setup is 9600 baud, 8N1. Verify it on a non-critical load
   before relying on the configuration.
+device_controls:
+  protocol: eletechsup_r4d6f20
+  channel_actions:
+    toggle: 768
+    interlock: 1024
+    momentary: 1280
+    delay_base: 1536
+  baud_rate:
+    address: 254
+    values: {1200: 0, 2400: 1, 4800: 2, 9600: 3, 19200: 4, 38400: 5, 57600: 6, 115200: 7}
+  parity:
+    address: 255
+    values: {"N": 0, "O": 1, "E": 2}
+  slave_id:
+    address: 253
+    read_only: true
+  factory_reset:
+    address: 251
+    value: 0
 entities:
   - name: CH-01
     entity_type: switch

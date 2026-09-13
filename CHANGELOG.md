@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.1.72
+
+### Eletechsup R4D6F20 board controls
+
+- Added a control menu for the R4D6F20 template: all-relay on/off, board-ID
+  readback, baud-rate and parity settings, per-channel actions, and factory reset.
+- Updated the bundled R4D6F20 protocol reference so its documented controls
+  match the template and device card.
+- All-relay commands, configuration changes, and reset require confirmation to
+  help prevent accidental changes to a connected board.
+- The R4D6F20 remains marked as untested. Its available documentation does not
+  conclusively document a software slave-ID write, so this release safely reads
+  the ID rather than offering an unsupported write.
+
 ## 2.1.71
 
 ### Reliable device toggles

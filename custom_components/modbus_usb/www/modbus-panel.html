@@ -2993,6 +2993,7 @@ entities:
         const slaveId = dev.slave_id != null ? dev.slave_id : (entry.hub?.slave_id || 1);
         const isEnabled = dev.enabled !== false;
         const isR413e16 = dev.device_controls?.protocol === 'eletechsup_r413e16' || String(dev.model || '').toLowerCase().includes('r413e16');
+        const isR4d6f20 = dev.device_controls?.protocol === 'eletechsup_r4d6f20' || String(dev.model || '').toLowerCase().includes('r4d6f20');
         const legacyAllChannelsSwitch = devEntities.find(e => e.entity_type === 'switch' && e.address === 0 && e.on_value === 1792 && e.off_value === 2048);
         const health = (entry.diagnostics?.devices || []).find(item => item.device_id === dev.id);
         const healthBadge = !isEnabled
@@ -3115,6 +3116,7 @@ entities:
                 ${isR413e16 ? `<button class="btn btn-secondary btn-sm" onclick="openR413e16Documentation()" title="Open verified R413E16 wiring and command reference">Documentation</button>` : ''}
                 ${isR413e16 ? `<button class="btn btn-secondary btn-sm" id="r413e16-read-${dev.id}" onclick="readR413e16States('${dev.id}')" title="Read every reported R413E16 channel state now">Read channel states</button>` : ''}
                 ${isR413e16 ? `<button class="btn btn-secondary btn-sm" onclick="openR413e16Controls('${dev.id}')" title="Control all channels or change this R413E16 board's communication settings">R413E16 controls</button>` : ''}
+                ${isR4d6f20 ? `<button class="btn btn-secondary btn-sm" ${isEnabled ? '' : 'disabled'} onclick="openR4d6f20Controls('${dev.id}')" title="Open documented R4D6F20 relay and board controls">R4D6F20 controls</button>` : ''}
                 <button class="btn btn-ghost btn-sm" id="device-enabled-${dev.id}" aria-pressed="${isEnabled}" onclick="toggleDeviceEnabled('${dev.id}', ${isEnabled ? 'false' : 'true'})" title="${isEnabled ? 'Stop polling and make this device unavailable' : 'Resume polling and restore this device'}">
                   ${isEnabled ? 'Disable device' : 'Enable device'}
                 </button>
@@ -3132,6 +3134,7 @@ entities:
             </div>
             ${isEnabled ? '' : '<div class="device-disabled-notice">Disabled: its entities are unavailable in Home Assistant and no RS-485 requests are sent for this device.</div>'}
             ${isR413e16 ? `<div class="device-command-panel"><p>Board communication settings: baud rate and slave ID.</p><button class="btn btn-secondary btn-sm" onclick="openR413e16Controls('${dev.id}')">Open R413E16 settings</button></div>` : ''}
+            ${isR4d6f20 ? `<div class="device-command-panel"><p>All relays, per-channel actions, board ID, serial settings, and reset.</p><button class="btn btn-secondary btn-sm" ${isEnabled ? '' : 'disabled'} onclick="openR4d6f20Controls('${dev.id}')">Open R4D6F20 controls</button></div>` : ''}
             ${_r413e16StateReports[dev.id] ? renderR413e16StateReport(_r413e16StateReports[dev.id]) : ''}
             ${_deviceTestReports[dev.id] ? renderDeviceTestReport(_deviceTestReports[dev.id]) : ''}
           </div>
@@ -4016,6 +4019,45 @@ entities:
     function useTemplateToCreateDevice(filename) {
       openAddDeviceModal('template');
       populateTemplateSelectInAddDevice(filename);
+    }
+
+    async function openR4d6f20Controls(deviceId) {
+      const entry = getCurrentEntry();
+      const dev = (entry?.devices || []).find(item => item.id === deviceId);
+      if (!entry || !dev) return;
+      const choice = prompt('R4D6F20 controls:\n1 = Turn all relays ON\n2 = Turn all relays OFF\n3 = Read board ID\n4 = Change baud/parity\n5 = Channel action\n6 = Factory reset');
+      if (!choice) return;
+      const base = { entry_id: entry.entry_id, device_id: deviceId };
+      try {
+        if (choice === '1' || choice === '2') {
+          const command = choice === '1' ? 'all_on' : 'all_off';
+          if (!confirm(`Confirm: ${command === 'all_on' ? 'turn all 20 relays ON' : 'turn all 20 relays OFF'}?`)) return;
+          await apiCall('r4d6f20_command', { ...base, command });
+          toast('R4D6F20 command sent', 'ok');
+        } else if (choice === '3') {
+          const result = await apiCall('r4d6f20_command', { ...base, command: 'read_slave_id' });
+          toast(`R4D6F20 board ID: ${result.slave_id}`, 'ok');
+        } else if (choice === '4') {
+          const baudrate = parseInt(prompt('Baud rate (1200–115200):', entry.hub?.baudrate || 9600), 10);
+          const parity = (prompt('Parity: N (none), E (even), or O (odd):', entry.hub?.parity || 'N') || '').toUpperCase();
+          if (!Number.isFinite(baudrate) || !['N','E','O'].includes(parity) || !confirm(`Change board and hub to ${baudrate} baud, ${parity} parity? Power-cycle the board after saving.`)) return;
+          await apiCall('r4d6f20_command', { ...base, command: 'configure_serial', baudrate, parity });
+          toast('Serial settings saved; power-cycle board to apply.', 'ok');
+        } else if (choice === '5') {
+          const channel = parseInt(prompt('Relay channel 1–20:'), 10) - 1;
+          const action = (prompt('Action: toggle, interlock, momentary, delay:', 'toggle') || '').toLowerCase();
+          const delay_seconds = action === 'delay' ? parseInt(prompt('Delay seconds 0–255:', '1'), 10) : undefined;
+          if (!Number.isInteger(channel) || channel < 0 || channel > 19 || !['toggle','interlock','momentary','delay'].includes(action) || (action === 'delay' && (!Number.isInteger(delay_seconds) || delay_seconds < 0 || delay_seconds > 255))) { toast('Invalid channel or action', 'err'); return; }
+          if (!confirm(`Run ${action} on relay ${channel + 1}?`)) return;
+          await apiCall('r4d6f20_command', { ...base, command: 'channel_action', channel, action, ...(action === 'delay' ? { delay_seconds } : {}) });
+          toast(`Relay ${channel + 1}: ${action} sent`, 'ok');
+        } else if (choice === '6') {
+          if (!confirm('Factory-reset this board? Use only with the intended board selected.')) return;
+          await apiCall('r4d6f20_command', { ...base, command: 'factory_reset' });
+          toast('Reset sent; power-cycle board then use 9600 8N1.', 'ok');
+        } else { toast('Choose a number from 1 to 6', 'err'); return; }
+        await refreshData();
+      } catch (err) { toast('R4D6F20 command failed: ' + err.message, 'err'); }
     }
 
     async function toggleDeviceEnabled(deviceId, enabled) {

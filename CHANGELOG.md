@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.1.74
+
+### Unified board diagnostics and tools
+
+- Combined the visible unknown-board discovery workflow into one safe probe and
+  signal watcher, while keeping the RS-485 activity log as the single source
+  of request and error history.
+- Added a board-tools launcher that uses saved template controls for R413E16
+  and R4D6F20 boards, and routes boards without a command template to the
+  documented custom-command form.
+- Replaced the R4D6F20 prompt sequence with an accessible control dialog for
+  board-ID readback, relay actions, baud rate, parity, and factory reset.
+- Added an explicit confirmation before a custom Modbus write is sent.
+
 ## 2.1.73
 
 ### Serial connection stability

@@ -1503,7 +1503,7 @@
         <div class="card-header">
           <div>
             <div class="card-title">🔬 Live Modbus Read / Write</div>
-            <div class="card-subtitle">Send direct RTU requests over the USB adapter</div>
+            <div class="card-subtitle">Read a register or send one documented custom command when no board template is available</div>
           </div>
         </div>
 
@@ -1546,7 +1546,7 @@
             <input class="form-input mono" type="number" id="diag-write-value" value="1" />
           </div>
           <div class="diag-action-button">
-            <button class="btn btn-secondary" id="btn-diag-write" onclick="doLiveWrite()">✎ Write Value</button>
+            <button class="btn btn-secondary" id="btn-diag-write" onclick="doLiveWrite()">✎ Send custom command</button>
           </div>
         </div>
 
@@ -1579,6 +1579,30 @@
           </table>
         </div>
       </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">🛠 Board tools</div>
+            <div class="card-subtitle">Use commands supplied by the device template. For an untemplated board, use the documented custom command fields above.</div>
+          </div>
+          <span class="badge badge-amber">Writes can change hardware</span>
+        </div>
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label" for="board-tools-device">Configured board</label>
+            <select class="form-select" id="board-tools-device" onchange="describeBoardTools()"></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Available controls</label>
+            <div id="board-tools-description" class="form-hint" style="margin-top:0.65rem;">Select a board to load its template controls.</div>
+          </div>
+        </div>
+        <div class="flex gap-1" style="flex-wrap:wrap;">
+          <button class="btn btn-primary" onclick="openSelectedBoardTools()">Open board tools</button>
+          <button class="btn btn-secondary" onclick="useSelectedBoardForCustomCommand()">Use in custom command</button>
+        </div>
+      </div>
       <section class="diagnostic-workspace" aria-labelledby="advanced-debug-title">
         <div class="diagnostic-workspace-heading">
           <div>
@@ -1587,7 +1611,7 @@
           </div>
           <span class="badge badge-green">Safe reads first</span>
         </div>
-      <div class="card">
+      <div class="card" hidden>
         <div class="card-header">
           <div>
             <div class="card-title">Automatic safe discovery</div>
@@ -1607,7 +1631,7 @@
       <div class="card">
         <div class="card-header">
           <div>
-            <div class="card-title">Board Debug Lab</div>
+            <div class="card-title">Safe board discovery</div>
             <div class="card-subtitle">Read-only discovery for an unknown Modbus RTU board</div>
           </div>
           <span class="badge badge-amber">Read-only probe</span>
@@ -1873,6 +1897,43 @@
       </div>
       <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('modal-r413e16-controls')">Cancel</button><button class="btn btn-primary" id="r413e16-save" onclick="saveR413e16Settings()">Save board settings</button></div>
       <div class="modal-footer" style="justify-content:space-between; border-top:1px solid rgba(239,68,68,0.24);"><span class="form-hint" style="margin:0;">Reset restores the board’s default connection settings.</span><button class="btn btn-danger" id="r413e16-reset" onclick="resetR413e16Board()">Restore factory settings</button></div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="modal-r4d6f20-controls">
+    <div class="modal-box modal-lg">
+      <div class="modal-header">
+        <div class="modal-title">R4D6F20 board tools</div>
+        <button class="modal-close" aria-label="Close R4D6F20 controls" onclick="closeModal('modal-r4d6f20-controls')">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="r4d6f20-device-id" />
+        <p class="form-hint" style="margin:0 0 1rem; line-height:1.5;">Commands come from the saved R4D6F20 template. This board reads its slave ID and uses DIP switches to set it; the template does not expose an unsafe slave-ID write.</p>
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label" for="r4d6f20-baud">Board baud rate</label>
+            <select class="form-select" id="r4d6f20-baud"><option>1200</option><option>2400</option><option>4800</option><option selected>9600</option><option>19200</option><option>38400</option><option>57600</option><option>115200</option></select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="r4d6f20-parity">Parity</label>
+            <select class="form-select" id="r4d6f20-parity"><option value="N">None (N)</option><option value="E">Even (E)</option><option value="O">Odd (O)</option></select>
+          </div>
+        </div>
+        <div class="form-hint" style="color:#fbbf24; line-height:1.5;">Baud and parity take effect after a board power cycle. Save only when this is the intended board.</div>
+        <div class="flex gap-1 mt-2" style="flex-wrap:wrap;">
+          <button class="btn btn-primary" onclick="saveR4d6f20Serial()">Save serial settings</button>
+          <button class="btn btn-secondary" onclick="runR4d6f20Command('read_slave_id')">Read board ID</button>
+          <button class="btn btn-secondary" onclick="runR4d6f20Command('all_on')">All relays ON</button>
+          <button class="btn btn-secondary" onclick="runR4d6f20Command('all_off')">All relays OFF</button>
+        </div>
+        <div class="form-grid-2 mt-2">
+          <div class="form-group"><label class="form-label" for="r4d6f20-channel">Relay channel</label><input class="form-input mono" id="r4d6f20-channel" type="number" min="1" max="20" value="1" /></div>
+          <div class="form-group"><label class="form-label" for="r4d6f20-action">Action</label><select class="form-select" id="r4d6f20-action"><option value="toggle">Toggle</option><option value="interlock">Interlock</option><option value="momentary">Momentary</option><option value="delay">Timed action</option></select></div>
+        </div>
+        <div class="form-group"><label class="form-label" for="r4d6f20-delay">Timed action seconds</label><input class="form-input mono" id="r4d6f20-delay" type="number" min="0" max="255" value="1" /><div class="form-hint">Used only for a timed action (0–255 seconds).</div></div>
+        <div class="flex gap-1"><button class="btn btn-secondary" onclick="runR4d6f20ChannelAction()">Run relay action</button><button class="btn btn-danger" onclick="runR4d6f20Command('factory_reset')">Restore factory settings</button></div>
+        <div id="r4d6f20-result" class="text-sm mt-1" aria-live="polite"></div>
+      </div>
     </div>
   </div>
 
@@ -3668,9 +3729,65 @@ entities:
       return Number.isNaN(date.getTime()) ? timestamp : date.toLocaleTimeString();
     }
 
+    function renderBoardTools() {
+      const select = document.getElementById('board-tools-device');
+      const entry = getCurrentEntry();
+      if (!select || !entry) return;
+      const selected = select.value;
+      select.innerHTML = `<option value="">Select a configured board…</option>${(entry.devices || []).map(device =>
+        `<option value="${escapeHtml(device.id)}">${escapeHtml(device.name || device.model || 'Modbus board')} · slave ${escapeHtml(device.slave_id ?? entry.hub?.slave_id ?? 1)}</option>`
+      ).join('')}`;
+      if ([...select.options].some(option => option.value === selected)) select.value = selected;
+      describeBoardTools();
+    }
+
+    function getBoardToolsDevice() {
+      const entry = getCurrentEntry();
+      const id = document.getElementById('board-tools-device')?.value;
+      return [entry, (entry?.devices || []).find(device => device.id === id)];
+    }
+
+    function describeBoardTools() {
+      const [, device] = getBoardToolsDevice();
+      const description = document.getElementById('board-tools-description');
+      if (!description) return;
+      if (!device) {
+        description.textContent = 'Select a board to load its saved template controls.';
+        return;
+      }
+      const controls = device.device_controls || {};
+      const protocol = controls.protocol;
+      if (protocol === 'eletechsup_r413e16') {
+        description.textContent = 'Template controls: baud rate, slave ID, factory reset, all-channel operations, and per-channel actions.';
+      } else if (protocol === 'eletechsup_r4d6f20') {
+        description.textContent = 'Template controls: relay actions, board ID readback, baud rate, parity, and factory reset.';
+      } else {
+        description.textContent = 'No command template is saved for this board. Use the documented custom command fields above; every write requires confirmation.';
+      }
+    }
+
+    function useSelectedBoardForCustomCommand() {
+      const [entry, device] = getBoardToolsDevice();
+      if (!entry || !device) { toast('Select a board first', 'err'); return; }
+      const slave = device.slave_id ?? entry.hub?.slave_id ?? 1;
+      document.getElementById('diag-slave').value = slave;
+      document.getElementById('debug-slave').value = slave;
+      toast(`Custom command target set to ${device.name || device.model || 'board'} (slave ${slave})`, 'ok');
+    }
+
+    function openSelectedBoardTools() {
+      const [, device] = getBoardToolsDevice();
+      if (!device) { toast('Select a board first', 'err'); return; }
+      const protocol = device.device_controls?.protocol;
+      if (protocol === 'eletechsup_r413e16') return openR413e16Controls(device.id);
+      if (protocol === 'eletechsup_r4d6f20') return openR4d6f20Controls(device.id);
+      useSelectedBoardForCustomCommand();
+    }
+
     function renderDiagnosticsTab() {
       const entry = getCurrentEntry();
       const diag = entry?.diagnostics || {};
+      renderBoardTools();
       renderScanProgress(diag.scan || {});
       const health = diag.health || {};
       const connected = Boolean(diag.connected);
@@ -4025,39 +4142,56 @@ entities:
       const entry = getCurrentEntry();
       const dev = (entry?.devices || []).find(item => item.id === deviceId);
       if (!entry || !dev) return;
-      const choice = prompt('R4D6F20 controls:\n1 = Turn all relays ON\n2 = Turn all relays OFF\n3 = Read board ID\n4 = Change baud/parity\n5 = Channel action\n6 = Factory reset');
-      if (!choice) return;
-      const base = { entry_id: entry.entry_id, device_id: deviceId };
+      document.getElementById('r4d6f20-device-id').value = deviceId;
+      document.getElementById('r4d6f20-baud').value = String(entry.hub?.baudrate || 9600);
+      document.getElementById('r4d6f20-parity').value = entry.hub?.parity || 'N';
+      document.getElementById('r4d6f20-result').textContent = `Target: ${dev.name || dev.model || 'R4D6F20'} · slave ${dev.slave_id ?? entry.hub?.slave_id ?? 1}`;
+      openModal('modal-r4d6f20-controls');
+    }
+
+    async function runR4d6f20Command(command) {
+      const entry = getCurrentEntry();
+      const deviceId = document.getElementById('r4d6f20-device-id').value;
+      const result = document.getElementById('r4d6f20-result');
+      if (!entry || !deviceId) return;
+      const destructive = ['all_on', 'all_off', 'factory_reset'].includes(command);
+      const label = command.replaceAll('_', ' ');
+      if (destructive && !confirm(`Confirm ${label} for the selected R4D6F20 board?`)) return;
+      result.textContent = `Sending ${label}…`;
       try {
-        if (choice === '1' || choice === '2') {
-          const command = choice === '1' ? 'all_on' : 'all_off';
-          if (!confirm(`Confirm: ${command === 'all_on' ? 'turn all 20 relays ON' : 'turn all 20 relays OFF'}?`)) return;
-          await apiCall('r4d6f20_command', { ...base, command });
-          toast('R4D6F20 command sent', 'ok');
-        } else if (choice === '3') {
-          const result = await apiCall('r4d6f20_command', { ...base, command: 'read_slave_id' });
-          toast(`R4D6F20 board ID: ${result.slave_id}`, 'ok');
-        } else if (choice === '4') {
-          const baudrate = parseInt(prompt('Baud rate (1200–115200):', entry.hub?.baudrate || 9600), 10);
-          const parity = (prompt('Parity: N (none), E (even), or O (odd):', entry.hub?.parity || 'N') || '').toUpperCase();
-          if (!Number.isFinite(baudrate) || !['N','E','O'].includes(parity) || !confirm(`Change board and hub to ${baudrate} baud, ${parity} parity? Power-cycle the board after saving.`)) return;
-          await apiCall('r4d6f20_command', { ...base, command: 'configure_serial', baudrate, parity });
-          toast('Serial settings saved; power-cycle board to apply.', 'ok');
-        } else if (choice === '5') {
-          const channel = parseInt(prompt('Relay channel 1–20:'), 10) - 1;
-          const action = (prompt('Action: toggle, interlock, momentary, delay:', 'toggle') || '').toLowerCase();
-          const delay_seconds = action === 'delay' ? parseInt(prompt('Delay seconds 0–255:', '1'), 10) : undefined;
-          if (!Number.isInteger(channel) || channel < 0 || channel > 19 || !['toggle','interlock','momentary','delay'].includes(action) || (action === 'delay' && (!Number.isInteger(delay_seconds) || delay_seconds < 0 || delay_seconds > 255))) { toast('Invalid channel or action', 'err'); return; }
-          if (!confirm(`Run ${action} on relay ${channel + 1}?`)) return;
-          await apiCall('r4d6f20_command', { ...base, command: 'channel_action', channel, action, ...(action === 'delay' ? { delay_seconds } : {}) });
-          toast(`Relay ${channel + 1}: ${action} sent`, 'ok');
-        } else if (choice === '6') {
-          if (!confirm('Factory-reset this board? Use only with the intended board selected.')) return;
-          await apiCall('r4d6f20_command', { ...base, command: 'factory_reset' });
-          toast('Reset sent; power-cycle board then use 9600 8N1.', 'ok');
-        } else { toast('Choose a number from 1 to 6', 'err'); return; }
+        const response = await apiCall('r4d6f20_command', { entry_id: entry.entry_id, device_id: deviceId, command });
+        result.textContent = command === 'read_slave_id' ? `Board reported slave ID ${response.slave_id}.` : `${label} accepted.`;
+        toast('R4D6F20 command sent', 'ok');
         await refreshData();
-      } catch (err) { toast('R4D6F20 command failed: ' + err.message, 'err'); }
+      } catch (err) { result.textContent = `Command failed: ${err.message}`; toast('R4D6F20 command failed: ' + err.message, 'err'); }
+    }
+
+    async function saveR4d6f20Serial() {
+      const entry = getCurrentEntry();
+      const deviceId = document.getElementById('r4d6f20-device-id').value;
+      const baudrate = parseInt(document.getElementById('r4d6f20-baud').value, 10);
+      const parity = document.getElementById('r4d6f20-parity').value;
+      if (!entry || !deviceId || !Number.isFinite(baudrate) || !confirm(`Change the selected board and hub to ${baudrate} baud, ${parity} parity? Power-cycle the board after saving.`)) return;
+      try {
+        await apiCall('r4d6f20_command', { entry_id: entry.entry_id, device_id: deviceId, command: 'configure_serial', baudrate, parity });
+        document.getElementById('r4d6f20-result').textContent = 'Serial settings saved. Power-cycle the board to apply them.';
+        toast('Serial settings saved', 'ok');
+        await refreshData();
+      } catch (err) { document.getElementById('r4d6f20-result').textContent = `Serial settings failed: ${err.message}`; }
+    }
+
+    async function runR4d6f20ChannelAction() {
+      const entry = getCurrentEntry();
+      const deviceId = document.getElementById('r4d6f20-device-id').value;
+      const channel = parseInt(document.getElementById('r4d6f20-channel').value, 10) - 1;
+      const action = document.getElementById('r4d6f20-action').value;
+      const delaySeconds = parseInt(document.getElementById('r4d6f20-delay').value, 10);
+      if (!entry || !deviceId || channel < 0 || channel > 19 || (action === 'delay' && (!Number.isInteger(delaySeconds) || delaySeconds < 0 || delaySeconds > 255)) || !confirm(`Run ${action} on relay ${channel + 1}?`)) return;
+      try {
+        await apiCall('r4d6f20_command', { entry_id: entry.entry_id, device_id: deviceId, command: 'channel_action', channel, action, ...(action === 'delay' ? { delay_seconds: delaySeconds } : {}) });
+        document.getElementById('r4d6f20-result').textContent = `Relay ${channel + 1}: ${action} accepted.`;
+        await refreshData();
+      } catch (err) { document.getElementById('r4d6f20-result').textContent = `Relay command failed: ${err.message}`; }
     }
 
     async function toggleDeviceEnabled(deviceId, enabled) {
@@ -4712,6 +4846,7 @@ entities:
         resBox.textContent = '❌ Enter a valid slave ID, address, and write value.';
         return;
       }
+      if (!window.confirm(`Send documented custom command to slave ${slave}: ${regtype} address ${address}, value ${value}? This can change board settings or connected equipment.`)) return;
       resBox.style.color = '#93c5fd';
       resBox.textContent = `Writing ${value} to ${regtype} ${address} (slave ${slave})…`;
       if (!_isLiveHA) {

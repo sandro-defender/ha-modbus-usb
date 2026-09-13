@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.82
+
+### R4D6F20 testing status
+
+- Marked the Eletechsup R4D6F20 template as **Testing** based on current
+  integration work. It remains subject to hardware verification.
+
 ## 2.1.81
 
 ### Template-driven M0 settings

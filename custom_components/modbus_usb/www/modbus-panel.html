@@ -3460,9 +3460,11 @@ entities:
 
         const extraCount = entCount > 5 ? `<div style="text-align:center; font-size:0.68rem; color:var(--text-dim); padding-top:2px;">+ ${entCount - 5} more entities</div>` : '';
         const isSavedInHa = tpl.source === 'user';
-        const validationBadge = tpl.tested
-          ? '<span class="badge badge-green" title="Confirmed working with this integration">✓ Tested & confirmed</span>'
-          : '<span class="badge badge-amber" title="Not yet confirmed with this integration">○ Not yet tested</span>';
+        const validationBadge = tpl.status === 'testing'
+          ? '<span class="badge badge-amber" title="Currently being tested with this integration">◌ Testing</span>'
+          : tpl.tested
+            ? '<span class="badge badge-green" title="Confirmed working with this integration">✓ Tested & confirmed</span>'
+            : '<span class="badge badge-amber" title="Not yet confirmed with this integration">○ Not yet tested</span>';
 
         return `
           <div class="template-card">

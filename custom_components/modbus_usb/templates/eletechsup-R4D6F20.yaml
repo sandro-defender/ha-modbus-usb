@@ -17,6 +17,7 @@ name: eletechsup R4D6F20 Multifunction Relay Board
 manufacturer: eletechsup
 model: R4D6F20
 tested: false
+status: testing
 default_slave_id: 1
 default_baudrate: 9600
 m0_short: false  # Command 1 template requires M0 open.

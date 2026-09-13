@@ -58,6 +58,7 @@ def _parse_template_file(
             "manufacturer": data.get("manufacturer", "Generic"),
             "model": data.get("model", "Modbus Device"),
             "tested": bool(data.get("tested", False)),
+            "status": data.get("status", "tested" if data.get("tested", False) else "untested"),
             "default_slave_id": int(data.get("default_slave_id", 1)),
             "m0_short": bool(data.get("m0_short", False)),
             "description": data.get("description", ""),

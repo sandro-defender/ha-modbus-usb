@@ -635,10 +635,8 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             if not is_r4d6f20 or not members:
                 continue
             if device.get(CONF_M0_SHORT, False):
-                for item in members:
-                    data[item["id"]] = None
-                    handled.add(item["id"])
-                _LOGGER.warning("R4D6F20 %s is configured with M0 shorted; Command 1 template polling is suspended", device.get(CONF_NAME, device_id))
+                data.update(self._read_r4d6f20_command2_blocks(members, int(device.get(CONF_SLAVE_ID, self.slave_id))))
+                handled.update(item["id"] for item in members)
                 continue
             data.update(self._read_r4d6f20_blocks(members, int(device.get(CONF_SLAVE_ID, self.slave_id))))
             handled.update(item["id"] for item in members if item[CONF_ADDRESS] in set(range(20)) | {128, 129, 160, 161})
@@ -687,6 +685,41 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 for item in members:
                     data[item["id"]] = None
                 self._record_transaction("read_holding", slave=slave, address=start, count=count, error=err, duration_ms=(datetime.now() - started).total_seconds() * 1000)
+        return data
+
+    def _read_r4d6f20_command2_blocks(self, entities: list[dict], slave: int) -> dict[str, Any]:
+        """Read documented R4D6F20 Command 2 ranges in three RTU requests."""
+        data: dict[str, Any] = {}
+        ranges = (
+            (REGISTER_TYPE_COIL, "read_coils", 0, 20),
+            (REGISTER_TYPE_DISCRETE, "read_discrete_inputs", 0, 2),
+            (REGISTER_TYPE_INPUT, "read_input_registers", 0, 2),
+        )
+        for register_type, method, start, count in ranges:
+            members = [
+                item for item in entities
+                if item.get(CONF_REGISTER_TYPE) == register_type
+                and start <= int(item.get(CONF_ADDRESS, -1)) < start + count
+            ]
+            if not members:
+                continue
+            started = datetime.now()
+            try:
+                with self._serial_lock:
+                    self._ensure_connected()
+                    result = self._call_modbus(method, start, count=count, slave=slave)
+                    if result.isError():
+                        raise UpdateFailed(str(result))
+                for item in members:
+                    index = int(item[CONF_ADDRESS]) - start
+                    value = bool(result.bits[index]) if register_type in (REGISTER_TYPE_COIL, REGISTER_TYPE_DISCRETE) else result.registers[index]
+                    scale = item.get(CONF_SCALE, 1)
+                    data[item["id"]] = value if scale in (1, None) else value * scale
+                self._record_transaction(f"read_{register_type}", slave=slave, address=start, count=count, result="block", duration_ms=(datetime.now() - started).total_seconds() * 1000)
+            except Exception as err:  # noqa: BLE001
+                for item in members:
+                    data[item["id"]] = None
+                self._record_transaction(f"read_{register_type}", slave=slave, address=start, count=count, error=err, duration_ms=(datetime.now() - started).total_seconds() * 1000)
         return data
 
     def _read_one(self, ent: dict, device_slave_map: dict[str, int] | None = None) -> Any:

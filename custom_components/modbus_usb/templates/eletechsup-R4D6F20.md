@@ -10,12 +10,14 @@ replacement for the full manufacturer manual.
   one 0–10 V input.
 - Factory serial configuration: 9600 baud, 8 data bits, no parity, 1 stop bit.
 - Factory Modbus slave ID: 1. The board's DIP switches select IDs 1–63.
-- This template uses the factory-default **Command 1** map with **M0 open**:
-  function code 03 reads holding registers and function code 06 writes one
-  holding register.
-- Shorting the M0 jumper changes the board to Command 2, which uses the
-  standard coil/discrete-input function codes. Do not apply this template after
-  changing M0.
+- This combined template has two profiles selected from **R4D6F20 board
+  tools**. Set the checkbox to match the physical M0 jumper, then save the
+  mode. Saving changes the Home Assistant entity map only; it does not write to
+  the board.
+  - **Command 1 / M0 open** uses FC03 holding-register reads and FC06 writes.
+  - **Command 2 / M0 shorted** uses FC01 relay-coil reads/writes, FC02 digital
+    input reads, and FC03 holding-register reads for analog and configuration
+    values.
 
 ## Template register map
 
@@ -33,6 +35,20 @@ is still untested with this integration, so use the menu only with a safe test
 load and confirm the selected device before applying a board-wide command.
 
 ## Useful documented board commands
+
+## Command 2 register map (M0 shorted)
+
+| Function | Address range | Meaning |
+| --- | ---: | --- |
+| FC01 / FC05 / FC15 | coils 0–19 | Relay CH-01 to CH-20 state and ON/OFF control |
+| FC02 | discrete inputs 0–1 | PNP DI-01 and DI-02 state |
+| FC03 / FC04 | input registers 0–1 | Current and voltage input values |
+| FC03 / FC06 / FC16 | holding registers 128–255 | Board special functions, including serial settings and reset |
+
+The Command 2 profile reads current and voltage from input registers 0 and 1
+with the same ×0.01 scaling. It deliberately does not offer Command 1's toggle,
+interlock, momentary, or timed action registers: they are not part of Command
+2. Use the individual relay switches for Command 2 ON/OFF control.
 
 These commands are available from **R4D6F20 controls** in the device card:
 

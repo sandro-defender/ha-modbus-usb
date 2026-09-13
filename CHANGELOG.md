@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.1.79
+
+### Combined R4D6F20 M0 templates
+
+- Combined the documented R4D6F20 Command 1 (M0 open) and Command 2 (M0
+  shorted) profiles in one template.
+- The M0 checkbox now replaces the board's entity profile without writing to
+  hardware: Command 1 uses holding-register relays; Command 2 uses relay coils
+  and discrete inputs.
+- Command 2 polling reads the 20 relay coils, two inputs, and two analog
+  values in three grouped requests. Its all-relay controls use the documented
+  coil map, while Command 1-only relay actions are hidden.
+- Added R413E16 M0 wiring metadata and a board-tools checkbox: M0 open is
+  low-level TTL output and M0 connected is high-level TTL output. It does not
+  select a different Modbus protocol or send a board command.
+
 ## 2.1.78
 
 ### Faster R4D6F20 polling and M0 safety

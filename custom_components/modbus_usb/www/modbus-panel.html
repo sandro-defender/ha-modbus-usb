@@ -1880,6 +1880,7 @@
         <input type="hidden" id="r413e16-device-id" />
         <input type="hidden" id="r413e16-original-baud" />
         <input type="hidden" id="r413e16-original-slave" />
+        <input type="hidden" id="r413e16-original-m0" />
         <p class="form-hint" style="margin:0 0 1rem; font-size:0.78rem; line-height:1.5;">These settings use the confirmed Eletechsup R413E16 protocol. The all-channel control is now a normal switch in the device’s switch list.</p>
         <div class="form-grid-2">
           <div class="form-group">
@@ -1893,6 +1894,8 @@
             <div class="form-hint">This updates the device and all its configured entities.</div>
           </div>
         </div>
+        <label class="debug-ack-label"><input type="checkbox" id="r413e16-m0-short" /> M0 is connected (high-level TTL outputs)</label>
+        <div class="form-hint" style="line-height:1.5;">M0 open is the default low-level output. This hardware jumper changes output polarity only; it does not change the R413E16 Modbus protocol. Saving records the wiring state and sends no M0 command.</div>
         <div class="form-hint" style="color:#fbbf24; line-height:1.5;">A slave-ID change takes effect immediately. After a baud-rate change, power-cycle the board; the hub is saved with the new rate and reconnects after the restart.</div>
       </div>
       <div class="modal-footer"><button class="btn btn-ghost" onclick="closeModal('modal-r413e16-controls')">Cancel</button><button class="btn btn-primary" id="r413e16-save" onclick="saveR413e16Settings()">Save board settings</button></div>
@@ -1909,8 +1912,8 @@
       <div class="modal-body">
         <input type="hidden" id="r4d6f20-device-id" />
         <p class="form-hint" style="margin:0 0 1rem; line-height:1.5;">Commands come from the saved R4D6F20 template. This board reads its slave ID and uses DIP switches to set it; the template does not expose an unsafe slave-ID write.</p>
-        <label class="debug-ack-label"><input type="checkbox" id="r4d6f20-m0-short" /> M0 jumper is shorted (Command 2 mode)</label>
-        <div class="form-hint" style="color:#fbbf24; line-height:1.5;">The current template is Command 1 / M0 open. Saving M0 shorted suspends its reads and board commands so it cannot send the wrong protocol. A verified Command 2 template is required before using that mode.</div>
+        <label class="debug-ack-label"><input type="checkbox" id="r4d6f20-m0-short" onchange="updateR4d6f20ModeUi()" /> M0 jumper is shorted (Command 2 mode)</label>
+        <div class="form-hint" id="r4d6f20-mode-help" style="color:#fbbf24; line-height:1.5;">Command 1 / M0 open uses holding registers. Command 2 / M0 shorted uses relay coils and discrete inputs. Saving installs the matching combined-template profile; it does not send a command to the board.</div>
         <button class="btn btn-secondary btn-sm mt-1" onclick="saveR4d6f20Mode()">Save M0 mode</button>
         <div class="form-grid-2">
           <div class="form-group">
@@ -1929,12 +1932,12 @@
           <button class="btn btn-secondary" onclick="runR4d6f20Command('all_on')">All relays ON</button>
           <button class="btn btn-secondary" onclick="runR4d6f20Command('all_off')">All relays OFF</button>
         </div>
-        <div class="form-grid-2 mt-2">
+        <div class="form-grid-2 mt-2" id="r4d6f20-command1-actions">
           <div class="form-group"><label class="form-label" for="r4d6f20-channel">Relay channel</label><input class="form-input mono" id="r4d6f20-channel" type="number" min="1" max="20" value="1" /></div>
           <div class="form-group"><label class="form-label" for="r4d6f20-action">Action</label><select class="form-select" id="r4d6f20-action"><option value="toggle">Toggle</option><option value="interlock">Interlock</option><option value="momentary">Momentary</option><option value="delay">Timed action</option></select></div>
         </div>
-        <div class="form-group"><label class="form-label" for="r4d6f20-delay">Timed action seconds</label><input class="form-input mono" id="r4d6f20-delay" type="number" min="0" max="255" value="1" /><div class="form-hint">Used only for a timed action (0–255 seconds).</div></div>
-        <div class="flex gap-1"><button class="btn btn-secondary" onclick="runR4d6f20ChannelAction()">Run relay action</button><button class="btn btn-danger" onclick="runR4d6f20Command('factory_reset')">Restore factory settings</button></div>
+        <div class="form-group" id="r4d6f20-command1-delay"><label class="form-label" for="r4d6f20-delay">Timed action seconds</label><input class="form-input mono" id="r4d6f20-delay" type="number" min="0" max="255" value="1" /><div class="form-hint">Used only for a timed action (0–255 seconds).</div></div>
+        <div class="flex gap-1"><button class="btn btn-secondary" id="r4d6f20-run-action" onclick="runR4d6f20ChannelAction()">Run relay action</button><button class="btn btn-danger" onclick="runR4d6f20Command('factory_reset')">Restore factory settings</button></div>
         <div id="r4d6f20-result" class="text-sm mt-1" aria-live="polite"></div>
       </div>
     </div>
@@ -3271,8 +3274,10 @@ entities:
       document.getElementById('r413e16-device-id').value = deviceId;
       document.getElementById('r413e16-original-baud').value = baud;
       document.getElementById('r413e16-original-slave').value = slave;
+      document.getElementById('r413e16-original-m0').value = String(Boolean(dev.m0_short));
       document.getElementById('r413e16-baud').value = baud;
       document.getElementById('r413e16-slave').value = slave;
+      document.getElementById('r413e16-m0-short').checked = Boolean(dev.m0_short);
       openModal('modal-r413e16-controls');
     }
 
@@ -3375,15 +3380,19 @@ entities:
       const entry = getCurrentEntry(); const deviceId = document.getElementById('r413e16-device-id').value;
       const baudrate = parseInt(document.getElementById('r413e16-baud').value, 10); const slaveId = parseInt(document.getElementById('r413e16-slave').value, 10);
       const originalBaud = parseInt(document.getElementById('r413e16-original-baud').value, 10); const originalSlave = parseInt(document.getElementById('r413e16-original-slave').value, 10);
+      const m0Short = document.getElementById('r413e16-m0-short').checked; const originalM0 = document.getElementById('r413e16-original-m0').value === 'true';
+      const device = (entry?.devices || []).find(item => item.id === deviceId);
       if (!entry || !deviceId || !Number.isFinite(baudrate) || !Number.isInteger(slaveId) || slaveId < 1 || slaveId > 247) { toast('Enter a valid baud rate and slave ID (1–247)', 'err'); return; }
-      if (baudrate === originalBaud && slaveId === originalSlave) { toast('No board settings were changed', 'inf'); return; }
-      if (!confirm(`Change this R413E16 board to ${baudrate} baud and slave ID ${slaveId}?\n\nThe board changes immediately. The hub will reconnect with the new baud rate.`)) return;
+      if (baudrate === originalBaud && slaveId === originalSlave && m0Short === originalM0) { toast('No board settings were changed', 'inf'); return; }
+      if ((baudrate !== originalBaud || slaveId !== originalSlave) && !confirm(`Change this R413E16 board to ${baudrate} baud and slave ID ${slaveId}?\n\nThe board changes immediately. The hub will reconnect with the new baud rate.`)) return;
       const button = document.getElementById('r413e16-save'); button.disabled = true; button.textContent = 'Saving…';
       try {
         const payload = { entry_id: entry.entry_id, device_id: deviceId, command: 'configure' };
         if (baudrate !== originalBaud) payload.baudrate = baudrate;
         if (slaveId !== originalSlave) payload.slave_id = slaveId;
-        await apiCall('r413e16_command', payload); closeModal('modal-r413e16-controls'); toast(baudrate !== originalBaud ? 'Settings saved. Power-cycle the board to apply the new baud rate.' : 'Board slave ID saved.', 'ok'); setTimeout(refreshData, 1500);
+        if (baudrate !== originalBaud || slaveId !== originalSlave) await apiCall('r413e16_command', payload);
+        if (m0Short !== originalM0 && device) await apiCall('save_device', { entry_id: entry.entry_id, device: { ...device, m0_short: m0Short } });
+        closeModal('modal-r413e16-controls'); toast(baudrate !== originalBaud ? 'Settings saved. Power-cycle the board to apply the new baud rate.' : m0Short !== originalM0 ? 'M0 output polarity recorded. No command was sent to the board.' : 'Board slave ID saved.', 'ok'); setTimeout(refreshData, 1500);
       } catch (err) { toast('Could not save board settings: ' + err.message, 'err'); }
       finally { button.disabled = false; button.textContent = 'Save board settings'; }
     }
@@ -4202,8 +4211,19 @@ entities:
       document.getElementById('r4d6f20-baud').value = String(entry.hub?.baudrate || 9600);
       document.getElementById('r4d6f20-parity').value = entry.hub?.parity || 'N';
       document.getElementById('r4d6f20-m0-short').checked = Boolean(dev.m0_short);
+      updateR4d6f20ModeUi();
       document.getElementById('r4d6f20-result').textContent = `Target: ${dev.name || dev.model || 'R4D6F20'} · slave ${dev.slave_id ?? entry.hub?.slave_id ?? 1}`;
       openModal('modal-r4d6f20-controls');
+    }
+
+    function updateR4d6f20ModeUi() {
+      const m0Short = document.getElementById('r4d6f20-m0-short').checked;
+      const command1Actions = ['r4d6f20-command1-actions', 'r4d6f20-command1-delay'];
+      command1Actions.forEach(id => { document.getElementById(id).style.display = m0Short ? 'none' : ''; });
+      document.getElementById('r4d6f20-run-action').style.display = m0Short ? 'none' : '';
+      document.getElementById('r4d6f20-mode-help').textContent = m0Short
+        ? 'Command 2 / M0 shorted: CH-01–CH-20 become coils 0–19 and DI-01–DI-02 become discrete inputs 0–1. All-relay and serial/reset controls use the documented Command 2 map. Save to install this profile; no command is sent while saving.'
+        : 'Command 1 / M0 open: CH-01–CH-20 use holding registers 0–19, and the relay action controls below are available. Save to install this profile; no command is sent while saving.';
     }
 
     async function runR4d6f20Command(command) {
@@ -4229,10 +4249,11 @@ entities:
       const device = (entry?.devices || []).find(item => item.id === deviceId);
       const m0Short = document.getElementById('r4d6f20-m0-short').checked;
       if (!entry || !device) return;
-      if (m0Short && !confirm('Save M0 shorted mode? Command 1 reads and board commands will be suspended until you uncheck it.')) return;
+      if (m0Short && !confirm('Save M0 shorted / Command 2 mode? The integration will replace this board’s entities with the documented coil and discrete-input profile. No command will be sent to the board.')) return;
       try {
-        await apiCall('save_device', { entry_id: entry.entry_id, device: { ...device, m0_short: m0Short } });
-        document.getElementById('r4d6f20-result').textContent = m0Short ? 'M0 shorted mode saved. Command 1 polling and board commands are suspended.' : 'M0 open mode saved. Command 1 polling is enabled.';
+        await apiCall('r4d6f20_set_mode', { entry_id: entry.entry_id, device_id: deviceId, m0_short: m0Short });
+        document.getElementById('r4d6f20-result').textContent = m0Short ? 'Command 2 / M0 shorted profile installed. Relay coils and discrete inputs are now active.' : 'Command 1 / M0 open profile installed. Holding-register relay actions are now active.';
+        updateR4d6f20ModeUi();
         await refreshData();
       } catch (err) { document.getElementById('r4d6f20-result').textContent = `Could not save M0 mode: ${err.message}`; }
     }

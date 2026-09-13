@@ -659,8 +659,6 @@ def _get_r4d6f20_device(entry, device_id: str) -> dict[str, Any]:
     controls = device.get(CONF_DEVICE_CONTROLS, {})
     if controls.get("protocol") != "eletechsup_r4d6f20" and "r4d6f20" not in str(device.get(CONF_MODEL, "")).lower():
         raise ValueError("These controls are available only for an eletechsup R4D6F20 device")
-    if device.get(CONF_M0_SHORT, False):
-        raise ValueError("M0 is marked shorted. This Command 1 template is disabled until M0 is open again.")
     return device
 
 
@@ -854,7 +852,7 @@ async def ws_r413e16_command(
 })
 @websocket_api.async_response
 async def ws_r4d6f20_command(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
-    """Run documented R4D6F20 Command 1 board controls."""
+    """Run documented R4D6F20 board controls for the selected M0 mode."""
     try:
         entry = _get_entry(hass, msg["entry_id"])
         device = _get_r4d6f20_device(entry, msg["device_id"])
@@ -862,7 +860,18 @@ async def ws_r4d6f20_command(hass: HomeAssistant, connection: websocket_api.Acti
         slave = int(device.get(CONF_SLAVE_ID, entry.data.get(CONF_SLAVE_ID, 1)))
         command = msg["command"]
         if command in ("all_on", "all_off"):
-            await hass.async_add_executor_job(coordinator.write_register, 0, 0x0700 if command == "all_on" else 0x0800, slave)
+            if device.get(CONF_M0_SHORT, False):
+                # Command 2 maps relays to coils 0–19. Its manual does not
+                # define Command 1's 0x0700/0x0800 all-relay register values.
+                for channel in range(20):
+                    await hass.async_add_executor_job(
+                        coordinator.write_coil, channel, command == "all_on", slave
+                    )
+            else:
+                await hass.async_add_executor_job(
+                    coordinator.write_register, 0,
+                    0x0700 if command == "all_on" else 0x0800, slave,
+                )
             await coordinator.async_request_refresh()
             connection.send_result(msg["id"], {"success": True, "command": command})
             return
@@ -871,6 +880,11 @@ async def ws_r4d6f20_command(hass: HomeAssistant, connection: websocket_api.Acti
             connection.send_result(msg["id"], {"success": True, "slave_id": value})
             return
         if command == "channel_action":
+            if device.get(CONF_M0_SHORT, False):
+                raise ValueError(
+                    "Command 2 has individual relay coils, not Command 1 action registers. "
+                    "Use the CH switches for ON/OFF control."
+                )
             channel, action = msg.get("channel"), msg.get("action")
             if channel is None or action is None:
                 raise ValueError("Choose a relay channel and action")
@@ -903,6 +917,86 @@ async def ws_r4d6f20_command(hass: HomeAssistant, connection: websocket_api.Acti
     except Exception as err:  # noqa: BLE001
         _LOGGER.warning("R4D6F20 command failed: %s", err)
         connection.send_error(msg["id"], "r4d6f20_command_failed", str(err))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "modbus_usb/r4d6f20_set_mode",
+    vol.Required("entry_id"): cv.string,
+    vol.Required("device_id"): cv.string,
+    vol.Required("m0_short"): bool,
+})
+@websocket_api.async_response
+async def ws_r4d6f20_set_mode(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Install the R4D6F20 entity profile matching its physical M0 jumper."""
+    try:
+        entry = _get_entry(hass, msg["entry_id"])
+        device = _get_r4d6f20_device(entry, msg["device_id"])
+        mode_key = "command_2" if msg["m0_short"] else "command_1"
+        controls = device.get(CONF_DEVICE_CONTROLS, {})
+        mode = controls.get("command_modes", {}).get(mode_key, {})
+        if not mode:
+            # Existing boards can have older Command 1-only metadata. Upgrade
+            # that metadata in place while retaining their name and entities.
+            templates = await async_load_templates(hass)
+            template = next(
+                (item for item in templates
+                 if str(item.get(CONF_MODEL, "")).lower() == "r4d6f20"
+                 and item.get(CONF_DEVICE_CONTROLS, {}).get("command_modes")),
+                None,
+            )
+            if template is None:
+                raise ValueError("The combined R4D6F20 template could not be found")
+            controls = template[CONF_DEVICE_CONTROLS]
+            mode = controls["command_modes"][mode_key]
+
+        relay = mode["relay"]
+        digital_input = mode["digital_input"]
+        analog_input = mode.get("analog_input", {"register_type": "holding", "address_start": 160})
+        new_entities = []
+        for entity in entry.options.get(CONF_ENTITIES, []):
+            if entity.get(CONF_DEVICE_ID) != device["id"]:
+                new_entities.append(entity)
+                continue
+            updated = dict(entity)
+            name = str(updated.get(CONF_NAME, ""))
+            if name.startswith("CH-") and name[3:].isdigit() and 1 <= int(name[3:]) <= 20:
+                updated[CONF_REGISTER_TYPE] = relay["register_type"]
+                updated[CONF_ADDRESS] = int(relay["address_start"]) + int(name[3:]) - 1
+                if relay["register_type"] == REGISTER_TYPE_COIL:
+                    updated[CONF_DATA_TYPE] = "bool"
+                    updated.pop(CONF_ON_VALUE, None)
+                    updated.pop(CONF_OFF_VALUE, None)
+                    updated.pop(CONF_STATE_ON_VALUE, None)
+                else:
+                    updated[CONF_DATA_TYPE] = "uint16"
+                    updated[CONF_ON_VALUE] = int(relay["on_value"])
+                    updated[CONF_OFF_VALUE] = int(relay["off_value"])
+                    updated[CONF_STATE_ON_VALUE] = 1
+            elif name in ("DI-01", "DI-02"):
+                updated[CONF_REGISTER_TYPE] = digital_input["register_type"]
+                updated[CONF_ADDRESS] = int(digital_input["address_start"]) + int(name[-2:]) - 1
+                updated[CONF_DATA_TYPE] = "bool" if digital_input["register_type"] != "holding" else "uint16"
+            elif name in ("Current Input", "Voltage Input"):
+                updated[CONF_REGISTER_TYPE] = analog_input["register_type"]
+                updated[CONF_ADDRESS] = int(analog_input["address_start"]) + (0 if name == "Current Input" else 1)
+                updated[CONF_DATA_TYPE] = "uint16"
+            new_entities.append(updated)
+
+        new_options = dict(entry.options or {})
+        new_options[CONF_DEVICES] = [
+            {**item, CONF_DEVICE_CONTROLS: controls, CONF_M0_SHORT: msg["m0_short"]}
+            if item.get("id") == device["id"] else item
+            for item in entry.options.get(CONF_DEVICES, [])
+        ]
+        new_options[CONF_ENTITIES] = new_entities
+        hass.data.setdefault(DOMAIN, {}).setdefault(DATA_PRESERVE_SERIAL_RELOAD, set()).add(entry.entry_id)
+        hass.config_entries.async_update_entry(entry, options=new_options)
+        connection.send_result(msg["id"], {"success": True, "mode": mode_key})
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("R4D6F20 mode switch failed: %s", err)
+        connection.send_error(msg["id"], "r4d6f20_set_mode_failed", str(err))
 
 
 @websocket_api.websocket_command({
@@ -1682,6 +1776,7 @@ async def async_register_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_restart_home_assistant)
     websocket_api.async_register_command(hass, ws_r413e16_command)
     websocket_api.async_register_command(hass, ws_r4d6f20_command)
+    websocket_api.async_register_command(hass, ws_r4d6f20_set_mode)
     websocket_api.async_register_command(hass, ws_test_device_entities)
     websocket_api.async_register_command(hass, ws_clear_diagnostic_log)
     websocket_api.async_register_command(hass, ws_scan_bus)

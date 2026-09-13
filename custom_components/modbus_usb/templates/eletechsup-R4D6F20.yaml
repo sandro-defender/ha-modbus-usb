@@ -1,8 +1,9 @@
 # Eletechsup R4D6F20 — 20-channel RS-485 Modbus RTU relay / I/O board
 #
-# This template implements the factory-default Command 1 protocol: M0 OPEN.
-# It uses FC03 for status reads and FC06 for single-register writes. Do not use
-# the Command 2 (M0-shorted) coil map with this template.
+# This is a combined two-mode template.  M0 OPEN selects the factory-default
+# Command 1 map; M0 shorted selects the documented Command 2 coil map from the
+# same manual.  Select the physical jumper state in Board Tools so the matching
+# entity map is installed.
 #
 # Channel writes: 0x0100 (256) = OPEN / ON, 0x0200 (512) = CLOSE / OFF.
 # Channel reads: FC03 returns 1 = ON and 0 = OFF.
@@ -29,6 +30,34 @@ description: >
   before relying on the configuration.
 device_controls:
   protocol: eletechsup_r4d6f20
+  command_modes:
+    command_1:
+      m0_short: false
+      label: "Command 1 — M0 open"
+      read_functions: [3]
+      write_functions: [6, 16]
+      relay:
+        register_type: holding
+        address_start: 0
+        on_value: 256
+        off_value: 512
+      digital_input:
+        register_type: holding
+        address_start: 128
+    command_2:
+      m0_short: true
+      label: "Command 2 — M0 shorted"
+      read_functions: [1, 2, 3, 4]
+      write_functions: [5, 6, 15, 16]
+      relay:
+        register_type: coil
+        address_start: 0
+      digital_input:
+        register_type: discrete
+        address_start: 0
+      analog_input:
+        register_type: input
+        address_start: 0
   channel_actions:
     toggle: 768
     interlock: 1024

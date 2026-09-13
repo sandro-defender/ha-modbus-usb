@@ -8,7 +8,12 @@ This note documents the commands used by `eletechsup-R413E16.yaml`. It is a conc
 - RS-485 Modbus RTU and TTL serial are available. The Home Assistant template uses Modbus RTU only.
 - Default serial setup: 9600 baud, 8 data bits, no parity, 1 stop bit.
 - Default Modbus slave ID: 1. Valid configured IDs are 1–247.
-- The M0 jumper selects the physical output polarity. It is a hardware setting and cannot be changed by Modbus.
+- The M0 jumper selects physical TTL output polarity, not a second Modbus
+  command map: **M0 open = low-level output** (the default) and **M0 connected
+  = high-level output**. It is a hardware setting and cannot be changed by
+  Modbus. The board-tools checkbox records the installed state so wiring is
+  documented with the device; it does not send a command or alter the Modbus
+  registers.
 
 ## Confirmed Modbus registers
 

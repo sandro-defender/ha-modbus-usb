@@ -33,6 +33,11 @@ description: >
 # Values are decimal forms of the verified Modbus FC06 register words.
 device_controls:
   protocol: eletechsup_r413e16
+  m0_output_polarity:
+    open: low
+    shorted: high
+    # M0 changes the physical TTL output polarity only. It does not change the
+    # Modbus register map or function codes on this R413E16 control core.
   all_on:
     register_type: holding
     address: 0

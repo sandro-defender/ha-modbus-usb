@@ -1481,6 +1481,18 @@
       <div class="card">
         <div class="card-header">
           <div>
+            <div class="card-title">🔌 Serial port profile</div>
+            <div class="card-subtitle">Configured adapter details. This check lists ports only; it does not reopen or take control of the RS-485 adapter.</div>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="btn-serial-status" onclick="refreshSerialPortStatus()">↻ Refresh adapter details</button>
+        </div>
+        <div class="diag-grid" id="diag-serial-grid"></div>
+        <p class="form-hint" id="diag-serial-adapter" role="status" style="margin:0.85rem 0 0;">Loading adapter details…</p>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
             <div class="card-title">🔎 Find RS-485 Devices</div>
             <div class="card-subtitle">Probes holding register 0 across slave IDs and baud rates. Use a found target to prefill Board Tools or a documented custom command.</div>
           </div>
@@ -1489,6 +1501,11 @@
           <div class="form-group">
             <label class="form-label">Baud rates</label>
             <input class="form-input mono" id="scan-baudrates" value="9600,19200,38400" placeholder="9600,19200" />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Parity profiles</label>
+            <input class="form-input mono" id="scan-parities" value="N" placeholder="N,E,O" aria-describedby="scan-parity-help" />
+            <p class="form-hint" id="scan-parity-help">Only the listed settings are tested; start with N.</p>
           </div>
           <div class="form-group">
             <label class="form-label">Start slave ID</label>
@@ -1501,7 +1518,7 @@
         </div>
         <div class="flex items-center gap-1">
           <button class="btn btn-primary" id="btn-scan-bus" onclick="scanRs485Bus()">🔎 Scan RS-485 Bus</button>
-          <span class="text-muted text-sm">Start with IDs 1–20. A full 1–247 scan can take several minutes.</span>
+          <span class="text-muted text-sm">The integration temporarily tests only the selected profiles under its serial lock, then restores the configured connection.</span>
         </div>
         <div id="scan-result-box" style="display:none; margin-top:1rem; padding:0.85rem; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.06); font-family:var(--font-mono); font-size:0.8rem;"></div>
         <div id="scan-progress-wrap" style="display:none; margin-top:0.7rem;">
@@ -1569,6 +1586,26 @@
       <div class="card">
         <div class="card-header">
           <div>
+            <div class="card-title">✅ Template read verification</div>
+            <div class="card-subtitle">Reads configured non-switch entities for one board. Outputs are always skipped; no relay or setting is changed.</div>
+          </div>
+          <span class="badge badge-green">Read only</span>
+        </div>
+        <div class="form-grid-2">
+          <div class="form-group">
+            <label class="form-label" for="template-verify-device">Configured board</label>
+            <select class="form-select" id="template-verify-device"></select>
+          </div>
+          <div class="diag-action-button" style="align-self:end;">
+            <button class="btn btn-primary" id="btn-template-verify" onclick="verifyTemplateReads()">▶ Verify configured reads</button>
+          </div>
+        </div>
+        <div id="template-verify-result" class="debug-result" role="status" style="display:none; margin-top:0.9rem;"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div>
             <div class="card-title">📜 RS-485 Activity &amp; Error Log</div>
             <div class="card-subtitle">The newest 200 Modbus reads and writes recorded since this integration was loaded</div>
           </div>
@@ -1585,7 +1622,7 @@
         </div>
         <div class="diag-log-wrap">
           <table class="diag-log">
-            <thead><tr><th>Time</th><th>Request</th><th>Slave</th><th>Address</th><th>Value / Response</th><th>Time</th></tr></thead>
+            <thead><tr><th>Time</th><th>Operation</th><th>FC / Request frame</th><th>Slave / Address</th><th>Value / Response</th><th>Duration / Retries</th></tr></thead>
             <tbody id="diag-log-body"><tr><td colspan="6" class="text-muted" style="text-align:center; padding:1.2rem;">Waiting for RS-485 activity…</td></tr></tbody>
           </table>
         </div>
@@ -2325,6 +2362,7 @@
     let _dashboardFilter = 'all';
     const _deviceTestReports = {};
     const _r413e16StateReports = {};
+    let _serialStatusEntryId = null;
     const _expandedDeviceCards = new Set();
     try {
       JSON.parse(localStorage.getItem('modbus_usb_expanded_devices') || '[]').forEach(id => _expandedDeviceCards.add(id));
@@ -2692,6 +2730,9 @@ entities:
       if (type === 'scan_usb_ports') {
         return { ports: [{ port: '/dev/ttyUSB0', description: 'USB-RS485 Adapter', details: 'CH340 USB-Serial' }] };
       }
+      if (type === 'get_serial_status') {
+        return { serial: { port: '/dev/ttyUSB0', baudrate: 9600, bytesize: 8, parity: 'N', stopbits: 1, connection_owner: 'Home Assistant Modbus USB', operation_active: false }, adapter: { port: '/dev/ttyUSB0', description: 'USB-RS485 Adapter', details: 'CH340 USB-Serial' } };
+      }
       if (type === 'test_device_entities') {
         const device = entry.devices.find(d => d.id === payload.device_id);
         const deviceEntities = entry.entities.filter(e => e.device_id === payload.device_id);
@@ -2702,6 +2743,11 @@ entities:
           results: deviceEntities.map(e => e.entity_type === 'switch'
             ? { name: e.name, address: e.address, register_type: e.register_type, entity_type: 'switch', on: { success: true, message: 'acknowledged' }, off: { success: true, message: 'acknowledged' } }
             : { name: e.name, address: e.address, register_type: e.register_type, entity_type: e.entity_type, read: { success: true, value: 'sample value' } }) };
+      }
+      if (type === 'verify_device_reads') {
+        const deviceEntities = entry.entities.filter(e => e.device_id === payload.device_id);
+        const checked = deviceEntities.filter(e => e.entity_type !== 'switch');
+        return { device_name: entry.devices.find(d => d.id === payload.device_id)?.name || 'Device', checked: checked.length, passed: checked.length, failed: 0, skipped: deviceEntities.length - checked.length, duration_ms: checked.length * 120, results: deviceEntities.map(e => e.entity_type === 'switch' ? { name: e.name, address: e.address, register_type: e.register_type, entity_type: 'switch', status: 'skipped', reason: 'Output control is excluded from read-only verification' } : { name: e.name, address: e.address, register_type: e.register_type, entity_type: e.entity_type, status: 'pass', value: 'sample value' }) };
       }
       if (type === 'save_device') {
         const dev = { ...payload.device };
@@ -3896,6 +3942,7 @@ entities:
       const entry = getCurrentEntry();
       const diag = entry?.diagnostics || {};
       renderBoardTools();
+      renderTemplateVerifyDevices();
       renderScanProgress(diag.scan || {});
       const health = diag.health || {};
       const connected = Boolean(diag.connected);
@@ -3921,6 +3968,21 @@ entities:
         <div class="diag-metric"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value)}</div></div>
       `).join('');
 
+      const serial = diag.serial || entry?.hub || {};
+      const serialFields = [
+        ['Port', serial.port || entry?.hub?.port || '—'],
+        ['Settings', `${serial.baudrate || entry?.hub?.baudrate || '—'} baud · ${serial.bytesize || entry?.hub?.bytesize || '—'}${serial.parity || entry?.hub?.parity || '—'}${serial.stopbits || entry?.hub?.stopbits || '—'}`],
+        ['Port owner', serial.connection_owner || 'Home Assistant Modbus USB'],
+        ['Bus activity', serial.operation_active ? 'Request in progress' : 'Idle'],
+      ];
+      document.getElementById('diag-serial-grid').innerHTML = serialFields.map(([label, value]) => `
+        <div class="diag-metric"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value)}</div></div>
+      `).join('');
+      if (entry && _serialStatusEntryId !== entry.entry_id) {
+        _serialStatusEntryId = entry.entry_id;
+        setTimeout(refreshSerialPortStatus, 0);
+      }
+
       const errorBox = document.getElementById('diag-last-error');
       if (health.last_error) {
         errorBox.style.display = 'block';
@@ -3944,15 +4006,82 @@ entities:
       }
       body.innerHTML = transactions.map(item => {
         const response = getDiagnosticResponse(item);
+        const frame = item.request_hex
+          ? `${item.function_code || '—'} · ${item.request_hex}`
+          : (item.function_code || '—');
+        const retry = Number(item.retries_configured || 0);
         return `<tr class="${item.status === 'error' ? 'error' : ''}">
           <td>${escapeHtml(formatLogTime(item.timestamp))}</td>
           <td>${escapeHtml(item.operation)}</td>
-          <td>${escapeHtml(item.slave)}</td>
-          <td>${escapeHtml(item.address)}${item.count > 1 ? ` (${escapeHtml(item.count)} words)` : ''}</td>
+          <td class="mono" title="Reconstructed request. Response bytes are unavailable from the current PyModbus transport.">${escapeHtml(frame)}</td>
+          <td>slave ${escapeHtml(item.slave)} · ${escapeHtml(item.address)}${item.count > 1 ? ` (${escapeHtml(item.count)} words)` : ''}</td>
           <td>${escapeHtml(response)}</td>
-          <td>${item.duration_ms == null ? '—' : `${escapeHtml(item.duration_ms)} ms`}</td>
+          <td>${item.duration_ms == null ? '—' : `${escapeHtml(item.duration_ms)} ms`} · ${retry} ${retry === 1 ? 'retry' : 'retries'} configured</td>
         </tr>`;
       }).join('');
+    }
+
+    async function refreshSerialPortStatus() {
+      const entry = getCurrentEntry();
+      const button = document.getElementById('btn-serial-status');
+      const hint = document.getElementById('diag-serial-adapter');
+      if (!entry || !hint) return;
+      if (button) { button.disabled = true; button.textContent = 'Checking…'; }
+      hint.textContent = 'Listing adapters visible to Home Assistant without opening the configured port…';
+      try {
+        const result = await apiCall('get_serial_status', { entry_id: entry.entry_id });
+        const adapter = result.adapter;
+        const serial = result.serial || {};
+        hint.textContent = adapter
+          ? `${adapter.port} — ${adapter.description || 'Serial adapter'}${adapter.details ? ` (${adapter.details})` : ''}. ${serial.operation_active ? 'A Modbus request is currently using the integration lock.' : 'The integration lock is idle.'}`
+          : `${serial.port || 'Configured port'} is not currently listed by Home Assistant. Check USB passthrough, cable, and adapter power.`;
+      } catch (error) {
+        hint.textContent = `Could not read adapter details: ${error.message}`;
+      } finally {
+        if (button) { button.disabled = false; button.textContent = '↻ Refresh adapter details'; }
+      }
+    }
+
+    function renderTemplateVerifyDevices() {
+      const select = document.getElementById('template-verify-device');
+      const entry = getCurrentEntry();
+      if (!select || !entry) return;
+      const selected = select.value;
+      const devices = (entry.devices || []).filter(device => (entry.entities || []).some(entity => entity.device_id === device.id));
+      select.innerHTML = devices.length
+        ? devices.map(device => `<option value="${escapeHtml(device.id)}">${escapeHtml(device.name || device.model || 'Modbus board')} · slave ${escapeHtml(device.slave_id ?? entry.hub?.slave_id ?? 1)}</option>`).join('')
+        : '<option value="">No configured board with entities</option>';
+      if (devices.some(device => device.id === selected)) select.value = selected;
+      document.getElementById('btn-template-verify').disabled = !devices.length;
+    }
+
+    async function verifyTemplateReads() {
+      const entry = getCurrentEntry();
+      const deviceId = document.getElementById('template-verify-device')?.value;
+      const button = document.getElementById('btn-template-verify');
+      const output = document.getElementById('template-verify-result');
+      if (!entry || !deviceId || !output) { toast('Choose a configured board first', 'err'); return; }
+      button.disabled = true;
+      button.textContent = 'Verifying…';
+      output.style.display = 'block';
+      output.className = 'debug-result';
+      output.textContent = 'Reading configured non-switch entities through the Home Assistant serial lock…';
+      try {
+        const report = await apiCall('verify_device_reads', { entry_id: entry.entry_id, device_id: deviceId });
+        output.className = `debug-result ${report.failed ? 'error' : 'ok'}`;
+        const rows = (report.results || []).map(item => {
+          const detail = item.status === 'pass' ? `value: ${item.value}` : (item.reason || item.error || 'No result');
+          return `<li><strong>${escapeHtml(item.status.toUpperCase())}</strong> · ${escapeHtml(item.name)} · ${escapeHtml(item.register_type)} ${escapeHtml(item.address)} · ${escapeHtml(detail)}</li>`;
+        }).join('');
+        output.innerHTML = `<div class="debug-result-title"><span>${escapeHtml(report.device_name)}</span><span>${report.passed}/${report.checked} reads passed</span></div><div class="debug-result-copy">${report.failed} failed, ${report.skipped} outputs skipped · ${report.duration_ms} ms</div><ul class="debug-result-copy" style="margin:0.55rem 0 0; padding-left:1.1rem;">${rows}</ul>`;
+        await refreshData();
+      } catch (error) {
+        output.className = 'debug-result error';
+        output.textContent = `Read verification failed: ${error.message}`;
+      } finally {
+        button.disabled = false;
+        button.textContent = '▶ Verify configured reads';
+      }
     }
 
     function getDiagnosticResponse(item) {
@@ -3999,8 +4128,10 @@ entities:
         (filter === 'write' && String(item.operation || '').startsWith('write_'))
       );
       const text = rows.map(item => [item.timestamp, item.status.toUpperCase(), item.operation,
+        `fc=${item.function_code || 'n/a'}`, `request=${item.request_hex || 'not available'}`,
         `slave=${item.slave}`, `address=${item.address}`, getDiagnosticResponse(item),
-        item.duration_ms == null ? '' : `${item.duration_ms}ms`].join(' | ')).join('\n');
+        item.duration_ms == null ? '' : `${item.duration_ms}ms`,
+        `retries_configured=${item.retries_configured ?? 0}`].join(' | ')).join('\n');
       try {
         const content = text || 'No RS-485 activity recorded.';
         if (navigator.clipboard?.writeText) {
@@ -5327,23 +5458,25 @@ entities:
       const entry = getCurrentEntry();
       const baudrates = document.getElementById('scan-baudrates').value.split(',')
         .map(value => parseInt(value.trim(), 10)).filter(Number.isFinite);
+      const parities = document.getElementById('scan-parities').value.split(',')
+        .map(value => value.trim().toUpperCase()).filter(Boolean);
       const startSlave = parseInt(document.getElementById('scan-start-slave').value, 10);
       const endSlave = parseInt(document.getElementById('scan-end-slave').value, 10);
       const button = document.getElementById('btn-scan-bus');
       const box = document.getElementById('scan-result-box');
-      if (!entry || !baudrates.length || !Number.isFinite(startSlave) || !Number.isFinite(endSlave)) {
-        toast('Enter valid baud rates and slave IDs', 'err');
+      if (!entry || !baudrates.length || !parities.length || !parities.every(value => ['N', 'E', 'O'].includes(value)) || !Number.isFinite(startSlave) || !Number.isFinite(endSlave)) {
+        toast('Enter valid baud rates, parity profiles (N, E, or O), and slave IDs', 'err');
         return;
       }
       button.disabled = true;
       button.textContent = '⌛ Scanning…';
       box.style.display = 'block';
       box.style.color = '#93c5fd';
-      box.textContent = `Scanning slave IDs ${startSlave}–${endSlave} at ${baudrates.join(', ')} baud…`;
+      box.textContent = `Scanning slave IDs ${startSlave}–${endSlave} at ${baudrates.join(', ')} baud with ${parities.join(', ')} parity…`;
       const progressTimer = setInterval(refreshScanProgress, 500);
       try {
         const result = await apiCall('scan_bus', {
-          entry_id: entry.entry_id, baudrates,
+          entry_id: entry.entry_id, baudrates, parities,
           start_slave: startSlave, end_slave: endSlave,
         });
         box.style.color = result.found?.length ? '#34d399' : '#fcd34d';
@@ -5352,7 +5485,7 @@ entities:
               const suggestion = item.suggestions?.length
                 ? ` — suggested template: ${escapeHtml(item.suggestions.join(', '))}`
                 : '';
-              return `<div style="margin-bottom:0.55rem;">slave ${escapeHtml(item.slave_id)} at ${escapeHtml(item.baudrate)} baud (${escapeHtml(item.response)})${suggestion} <button class="btn btn-secondary btn-sm" onclick="useDiscoveredTarget(${Number(item.slave_id)}, ${Number(item.baudrate)})">Use this target</button></div>`;
+              return `<div style="margin-bottom:0.55rem;">slave ${escapeHtml(item.slave_id)} at ${escapeHtml(item.baudrate)} baud, ${escapeHtml(item.parity || 'N')} parity (${escapeHtml(item.response)})${suggestion} <button class="btn btn-secondary btn-sm" onclick="useDiscoveredTarget(${Number(item.slave_id)}, ${Number(item.baudrate)})">Use this target</button></div>`;
             }).join('')}`
           : `No responding devices found after ${result.probed || 0} probes. Check A/B wires, power, baud rate, and slave ID.`;
         await refreshData();

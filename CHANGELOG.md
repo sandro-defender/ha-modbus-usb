@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.1.85
+
+### MCP-informed Diagnostics improvements
+
+- Added a non-invasive serial-port profile card with configured COM/TTY
+  settings, Home Assistant ownership, lock activity, and detected USB-adapter
+  details.
+- Extended Find RS-485 Devices to scan only the selected baud and parity
+  profiles under the existing serial lock, then restore the configured client.
+- Improved the in-memory activity log with function codes, reconstructed Modbus
+  RTU request frames, configured retry information, clearer errors, and richer
+  copy output. Response bytes remain explicitly unavailable when PyModbus does
+  not expose them.
+- Added read-only configured-device verification: non-switch entities are read
+  and reported individually, while all outputs are skipped.
+
 ## 2.1.84
 
 ### RS-485 MCP integration plan

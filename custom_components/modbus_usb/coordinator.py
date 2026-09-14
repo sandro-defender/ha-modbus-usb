@@ -398,7 +398,8 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         )
 
     def scan_bus(
-        self, baudrates: list[int], start_slave: int = 1, end_slave: int = 20,
+        self, baudrates: list[int], parities: list[str] | None = None,
+        start_slave: int = 1, end_slave: int = 20,
         templates: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Probe a bounded RS-485 range and report devices that answer.
@@ -414,10 +415,13 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         valid_bauds = sorted({int(rate) for rate in baudrates if int(rate) > 0})
         if not valid_bauds:
             raise ValueError("Select at least one baud rate to scan")
+        valid_parities = sorted({str(parity).upper() for parity in (parities or [self.serial_config[CONF_PARITY]])})
+        if not set(valid_parities).issubset({"N", "E", "O"}):
+            raise ValueError("Parity must be N (none), E (even), or O (odd)")
 
         found: list[dict[str, Any]] = []
         probed = 0
-        total = len(valid_bauds) * (end_slave - start_slave + 1)
+        total = len(valid_bauds) * len(valid_parities) * (end_slave - start_slave + 1)
         self.scan_progress = {
             "active": True,
             "completed": 0,
@@ -428,48 +432,50 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             self.client.close()
             try:
                 for baudrate in valid_bauds:
-                    probe = ModbusSerialClient(
-                        port=self.serial_config[CONF_PORT],
-                        baudrate=baudrate,
-                        bytesize=self.serial_config[CONF_BYTESIZE],
-                        parity=self.serial_config[CONF_PARITY],
-                        stopbits=self.serial_config[CONF_STOPBITS],
-                        timeout=0.2,
-                        retries=0,
-                    )
-                    try:
-                        if not probe.connect():
-                            continue
-                        for slave in range(start_slave, end_slave + 1):
-                            probed += 1
-                            self.scan_progress["completed"] = probed
-                            try:
-                                result = self._call_modbus_on_client(
-                                    probe, "read_holding_registers", 0,
-                                    count=1, slave=slave,
-                                )
-                                message = str(result)
-                                no_response = "no response received" in message.lower()
-                                if not no_response:
-                                    response_kind = "register response" if not result.isError() else "exception response"
-                                    suggestions = self._match_templates(
-                                        probe, slave, templates or []
-                                    )
-                                    found.append({
-                                        "slave_id": slave,
-                                        "baudrate": baudrate,
-                                        "response": response_kind,
-                                        "suggestions": suggestions,
-                                    })
-                                    self.scan_progress["found"] = len(found)
-                                    self._record_transaction(
-                                        "scan_found", slave=slave, address=0,
-                                        result=f"{baudrate} baud — {response_kind}",
-                                    )
-                            except Exception:  # A timeout is expected for unused IDs.
+                    for parity in valid_parities:
+                        probe = ModbusSerialClient(
+                            port=self.serial_config[CONF_PORT],
+                            baudrate=baudrate,
+                            bytesize=self.serial_config[CONF_BYTESIZE],
+                            parity=parity,
+                            stopbits=self.serial_config[CONF_STOPBITS],
+                            timeout=0.2,
+                            retries=0,
+                        )
+                        try:
+                            if not probe.connect():
                                 continue
-                    finally:
-                        probe.close()
+                            for slave in range(start_slave, end_slave + 1):
+                                probed += 1
+                                self.scan_progress["completed"] = probed
+                                try:
+                                    result = self._call_modbus_on_client(
+                                        probe, "read_holding_registers", 0,
+                                        count=1, slave=slave,
+                                    )
+                                    message = str(result)
+                                    no_response = "no response received" in message.lower()
+                                    if not no_response:
+                                        response_kind = "register response" if not result.isError() else "exception response"
+                                        suggestions = self._match_templates(
+                                            probe, slave, templates or []
+                                        )
+                                        found.append({
+                                            "slave_id": slave,
+                                            "baudrate": baudrate,
+                                            "parity": parity,
+                                            "response": response_kind,
+                                            "suggestions": suggestions,
+                                        })
+                                        self.scan_progress["found"] = len(found)
+                                        self._record_transaction(
+                                            "scan_found", slave=slave, address=0,
+                                            result=f"{baudrate} baud, {parity} parity — {response_kind}",
+                                        )
+                                except Exception:  # A timeout is expected for unused IDs.
+                                    continue
+                        finally:
+                            probe.close()
             finally:
                 self.client.connect()
                 self.scan_progress["active"] = False
@@ -525,6 +531,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
     ) -> None:
         """Keep a rolling, UI-safe record of every RS-485 operation and health."""
         timestamp = datetime.now().astimezone().isoformat()
+        function_code, request_hex = self._diagnostic_request_frame(
+            operation, slave, address, count, value
+        )
         item: dict[str, Any] = {
             "timestamp": timestamp,
             "operation": operation,
@@ -534,6 +543,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             "value": value,
             "result": result,
             "status": "error" if error else "ok",
+            "function_code": function_code,
+            "request_hex": request_hex,
+            "retries_configured": int(getattr(self.client, "retries", 0) or 0),
         }
         if duration_ms is not None:
             item["duration_ms"] = round(duration_ms, 1)
@@ -562,6 +574,46 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 operation, slave, address, value, result, duration_ms or 0,
             )
 
+    @staticmethod
+    def _diagnostic_request_frame(
+        operation: str, slave: int, address: int, count: int, value: Any
+    ) -> tuple[str | None, str | None]:
+        """Return a reconstructed request frame for the Diagnostics display.
+
+        Pymodbus does not make raw RTU request/response buffers portable across
+        its transports.  These bytes are therefore clearly labelled as a
+        reconstructed request; response bytes are never invented.
+        """
+        operations = {
+            "read_coil": 0x01,
+            "read_discrete": 0x02,
+            "read_holding": 0x03,
+            "read_input": 0x04,
+            "write_coil": 0x05,
+            "write_holding": 0x06,
+        }
+        function_code = operations.get(operation)
+        if function_code is None:
+            return None, None
+        if function_code in {0x01, 0x02, 0x03, 0x04}:
+            payload = bytes((slave, function_code, address >> 8, address & 0xFF, count >> 8, count & 0xFF))
+        elif function_code == 0x05:
+            coil_value = 0xFF00 if bool(value) else 0x0000
+            payload = bytes((slave, function_code, address >> 8, address & 0xFF, coil_value >> 8, coil_value & 0xFF))
+        else:
+            try:
+                register_value = int(value) & 0xFFFF
+            except (TypeError, ValueError):
+                return f"0x{function_code:02X}", None
+            payload = bytes((slave, function_code, address >> 8, address & 0xFF, register_value >> 8, register_value & 0xFF))
+        crc = 0xFFFF
+        for byte in payload:
+            crc ^= byte
+            for _ in range(8):
+                crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
+        frame = payload + bytes((crc & 0xFF, crc >> 8))
+        return f"0x{function_code:02X}", " ".join(f"{byte:02X}" for byte in frame)
+
     def get_diagnostics(self) -> dict[str, Any]:
         """Return a serial-health snapshot and rolling RS-485 transaction log."""
         return {
@@ -571,6 +623,15 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             "health": dict(self.diag),
             "transactions": list(self.transaction_log),
             "scan": dict(self.scan_progress),
+            "serial": {
+                "port": self.serial_config.get(CONF_PORT),
+                "baudrate": self.serial_config.get(CONF_BAUDRATE),
+                "bytesize": self.serial_config.get(CONF_BYTESIZE),
+                "parity": self.serial_config.get(CONF_PARITY),
+                "stopbits": self.serial_config.get(CONF_STOPBITS),
+                "connection_owner": "Home Assistant Modbus USB",
+                "operation_active": self._serial_lock.locked(),
+            },
         }
 
     def clear_transaction_log(self) -> None:

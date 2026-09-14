@@ -1096,6 +1096,77 @@ async def ws_test_device_entities(
 
 
 @websocket_api.websocket_command({
+    vol.Required("type"): "modbus_usb/verify_device_reads",
+    vol.Required("entry_id"): cv.string,
+    vol.Required("device_id"): cv.string,
+})
+@websocket_api.async_response
+async def ws_verify_device_reads(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Verify configured device reads without operating any outputs.
+
+    This is deliberately separate from the legacy full device test: a template
+    verification run reads every non-switch entity and reports switches as
+    skipped, so it can be used on connected equipment without cycling relays.
+    """
+    try:
+        entry = _get_entry(hass, msg["entry_id"])
+        device = next(
+            (item for item in entry.options.get(CONF_DEVICES, []) if item.get("id") == msg["device_id"]),
+            None,
+        )
+        if device is None:
+            raise ValueError("Configured device was not found")
+        entities = [
+            item for item in entry.options.get(CONF_ENTITIES, [])
+            if item.get(CONF_DEVICE_ID) == msg["device_id"]
+        ]
+        if not entities:
+            raise ValueError("This device has no configured template entities to verify")
+
+        coordinator = hass.data[DOMAIN][entry.entry_id]
+        started = time.monotonic()
+        results: list[dict[str, Any]] = []
+        for entity in entities:
+            result: dict[str, Any] = {
+                "name": entity.get(CONF_NAME, entity.get(CONF_ENTITY_ID, "Entity")),
+                "address": entity.get(CONF_ADDRESS),
+                "register_type": entity.get(CONF_REGISTER_TYPE),
+                "entity_type": entity.get(CONF_ENTITY_TYPE),
+            }
+            if entity.get(CONF_ENTITY_TYPE) == "switch":
+                result["status"] = "skipped"
+                result["reason"] = "Output control is excluded from read-only verification"
+            else:
+                try:
+                    slave_id = _entity_slave_id(entry, entity)
+                    value = await hass.async_add_executor_job(
+                        coordinator.read_entity_value, entity, slave_id
+                    )
+                    result.update({"status": "pass", "slave_id": slave_id, "value": value})
+                except Exception as err:  # noqa: BLE001
+                    result.update({"status": "fail", "error": str(err)})
+                await asyncio.sleep(0)
+            results.append(result)
+
+        checked = [item for item in results if item["status"] != "skipped"]
+        passed = sum(item["status"] == "pass" for item in checked)
+        connection.send_result(msg["id"], {
+            "device_name": device.get(CONF_NAME, msg["device_id"]),
+            "checked": len(checked),
+            "passed": passed,
+            "failed": len(checked) - passed,
+            "skipped": len(results) - len(checked),
+            "duration_ms": round((time.monotonic() - started) * 1000, 1),
+            "results": results,
+        })
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("Read-only template verification failed: %s", err)
+        connection.send_error(msg["id"], "template_verify_failed", str(err))
+
+
+@websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/clear_diagnostic_log",
     vol.Required("entry_id"): cv.string,
 })
@@ -1115,6 +1186,7 @@ async def ws_clear_diagnostic_log(
     vol.Required("type"): "modbus_usb/scan_bus",
     vol.Required("entry_id"): cv.string,
     vol.Required("baudrates"): [vol.All(vol.Coerce(int), vol.Range(min=1200, max=115200))],
+    vol.Optional("parities", default=["N"]): [vol.In(["N", "E", "O"])],
     vol.Optional("start_slave", default=1): vol.All(vol.Coerce(int), vol.Range(min=1, max=247)),
     vol.Optional("end_slave", default=20): vol.All(vol.Coerce(int), vol.Range(min=1, max=247)),
 })
@@ -1128,7 +1200,7 @@ async def ws_scan_bus(
         templates = await async_load_templates(hass)
         result = await hass.async_add_executor_job(
             coordinator.scan_bus,
-            msg["baudrates"], msg["start_slave"], msg["end_slave"], templates,
+            msg["baudrates"], msg["parities"], msg["start_slave"], msg["end_slave"], templates,
         )
         connection.send_result(msg["id"], result)
     except Exception as err:  # noqa: BLE001
@@ -1150,6 +1222,31 @@ async def ws_scan_usb_ports(
     except Exception as err:  # noqa: BLE001
         _LOGGER.warning("Serial-port scan failed: %s", err)
         connection.send_error(msg["id"], "port_scan_failed", str(err))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "modbus_usb/get_serial_status",
+    vol.Required("entry_id"): cv.string,
+})
+@websocket_api.async_response
+async def ws_get_serial_status(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Return the configured port profile and matching USB-adapter metadata.
+
+    Listing ports is non-invasive: it never opens the configured adapter, so
+    this can safely run while the integration owns an active RS-485 bus.
+    """
+    try:
+        coordinator = hass.data[DOMAIN][msg["entry_id"]]
+        serial = coordinator.get_diagnostics().get("serial", {})
+        configured_port = str(serial.get("port") or "")
+        ports = await hass.async_add_executor_job(_list_serial_ports)
+        adapter = next((item for item in ports if item.get("port") == configured_port), None)
+        connection.send_result(msg["id"], {"serial": serial, "adapter": adapter})
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("Serial status lookup failed: %s", err)
+        connection.send_error(msg["id"], "serial_status_failed", str(err))
 
 
 @websocket_api.websocket_command({
@@ -1779,6 +1876,7 @@ async def async_register_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_r4d6f20_command)
     websocket_api.async_register_command(hass, ws_r4d6f20_set_mode)
     websocket_api.async_register_command(hass, ws_test_device_entities)
+    websocket_api.async_register_command(hass, ws_verify_device_reads)
     websocket_api.async_register_command(hass, ws_clear_diagnostic_log)
     websocket_api.async_register_command(hass, ws_scan_bus)
     websocket_api.async_register_command(hass, ws_scan_usb_ports)

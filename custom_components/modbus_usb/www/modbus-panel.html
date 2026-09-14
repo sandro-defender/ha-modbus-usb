@@ -336,7 +336,7 @@
     .btn-danger:hover { background: rgba(239,68,68,0.25); }
     .btn-sm { padding: 0.3rem 0.65rem; font-size: 0.72rem; }
     #btn-refresh { min-width:92px; }
-    #btn-refresh .refresh-icon { width:16px; height:16px; stroke:currentColor; stroke-width:2; fill:none; stroke-linecap:round; }
+    #btn-refresh .refresh-icon { width:18px; height:18px; display:block; }
     #btn-refresh.is-loading .refresh-icon { animation:refreshSpin 0.8s linear infinite; }
     @keyframes refreshSpin { to { transform:rotate(360deg); } }
     .channel-picker { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:0.45rem; margin-top:0.45rem; }
@@ -1347,7 +1347,7 @@
           </button>
 
           <button class="btn btn-ghost" id="btn-refresh" onclick="refreshData()" aria-label="Refresh controller data" title="Refresh controller data">
-            <svg class="refresh-icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0 2 5.5M20 4v7h-7" /></svg><span class="refresh-label">Refresh</span>
+            <img class="refresh-icon" src="/modbus_usb_panel/images/reload-button.svg?v=2.1.90" alt="" aria-hidden="true"><span class="refresh-label">Refresh</span>
           </button>
         </div>
       </div>

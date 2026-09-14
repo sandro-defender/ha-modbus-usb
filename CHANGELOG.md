@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.90
+
+### Local reload-button artwork
+
+- Added a static, locally served reload-button SVG derived from the supplied artwork's black, pink, and white treatment.
+- Replaced the top Refresh glyph with the local asset; it makes no external request and keeps the existing loading spin feedback.
+
 ## 2.1.89
 
 ### Rich collapsed Diagnostics summaries

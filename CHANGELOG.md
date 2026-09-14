@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.89
+
+### Rich collapsed Diagnostics summaries
+
+- Let the live summary use all remaining space in a collapsed row, preserving a readable truncated title when necessary.
+- Add compact multi-value summaries for health, serial profile, scans, last Modbus activity, verification, logs, and safe discovery tools.
+
 ## 2.1.88
 
 ### Compact Diagnostics summaries

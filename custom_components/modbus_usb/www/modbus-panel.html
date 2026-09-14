@@ -522,6 +522,7 @@
       cursor: pointer;
     }
     .diagnostic-card-toggle .card-title, .diagnostic-card-toggle .card-subtitle { display: block; }
+    .diagnostic-card-summary { display: none; }
     .diagnostic-card-toggle:focus-visible { outline: 2px solid #818cf8; outline-offset: 4px; border-radius: 6px; }
     .diagnostic-card.is-collapsed > :not(.card-header) { display: none !important; }
     .diagnostic-card.is-collapsed {
@@ -529,6 +530,31 @@
     }
     .diagnostic-card.is-collapsed .card-header {
       margin-bottom: 0;
+    }
+    .diagnostic-card.is-collapsed .diagnostic-card-toggle {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+    .diagnostic-card.is-collapsed .diagnostic-card-toggle .card-title {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .diagnostic-card.is-collapsed .diagnostic-card-summary {
+      display: block;
+      min-width: 0;
+      max-width: 48%;
+      overflow: hidden;
+      color: var(--text-dim);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      text-align: right;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .diagnostic-card.is-collapsed .diagnostic-card-toggle .card-subtitle,
     .diagnostic-card.is-collapsed .card-header > :not(.diagnostic-card-toggle) {
@@ -2710,6 +2736,10 @@ entities:
           while (child.firstChild) text.appendChild(child.firstChild);
           toggle.appendChild(text);
         }
+        const summary = document.createElement('span');
+        summary.className = 'diagnostic-card-summary';
+        summary.textContent = 'Ready';
+        toggle.appendChild(summary);
         header.replaceChild(toggle, titleWrap);
         card.classList.add('diagnostic-card');
         card.dataset.diagnosticCollapsible = key;
@@ -2722,6 +2752,31 @@ entities:
           try { localStorage.setItem('modbus_usb_expanded_diagnostics', JSON.stringify([..._expandedDiagnosticCards])); } catch (_) { /* Session state still works. */ }
         });
       });
+    }
+
+    function updateDiagnosticCardSummaries({ connected, serial, latestTransaction, diag, entry, transactions }) {
+      const scan = diag.scan || {};
+      const scanTotal = Number(scan.total || 0);
+      const scanDone = Number(scan.completed || 0);
+      const scanPercent = scanTotal ? Math.min(100, Math.round(scanDone / scanTotal * 100)) : 0;
+      const selectedBoard = document.getElementById('board-tools-device')?.selectedOptions?.[0]?.textContent?.trim();
+      const summaries = {
+        'diagnostic-0': connected ? 'Connected' : 'Offline',
+        'diagnostic-1': `${serial.port || entry?.hub?.port || 'No port'} · ${serial.baudrate || entry?.hub?.baudrate || '—'} baud`,
+        'diagnostic-2': scan.active ? `${scanPercent}% scanning` : (scanTotal ? `${scan.found || 0} found` : 'Ready to scan'),
+        'diagnostic-3': latestTransaction ? `Slave ${latestTransaction.slave}` : 'Ready',
+        'diagnostic-4': 'Read only',
+        'diagnostic-5': transactions.length ? `${transactions.length} records` : 'No activity',
+        'diagnostic-6': selectedBoard || 'Select a board',
+        'diagnostic-8': 'Read only',
+        'diagnostic-9': 'Read only',
+      };
+      for (const [key, value] of Object.entries(summaries)) {
+        const summary = document.querySelector(`[data-diagnostic-collapsible="${key}"] .diagnostic-card-summary`);
+        if (!summary) continue;
+        summary.textContent = value;
+        summary.title = value;
+      }
     }
 
     function isConfiguredHaEntity(entityId) {
@@ -4097,6 +4152,7 @@ entities:
         (filter === 'read' && String(item.operation || '').startsWith('read_')) ||
         (filter === 'write' && String(item.operation || '').startsWith('write_'))
       );
+      updateDiagnosticCardSummaries({ connected, serial, latestTransaction, diag, entry, transactions: allTransactions });
       const body = document.getElementById('diag-log-body');
       if (!transactions.length) {
         body.innerHTML = '<tr><td colspan="6" class="text-muted" style="text-align:center; padding:1.2rem;">No RS-485 requests have been recorded yet.</td></tr>';

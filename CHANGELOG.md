@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.88
+
+### Compact Diagnostics summaries
+
+- Show a concise, live one-line summary beside each collapsed Diagnostics title, including connection, port, scan, activity, and selected-board details when available.
+- Keep both the title and summary single-line with graceful truncation on narrow screens.
+
 ## 2.1.87
 
 ### Compact collapsed Diagnostics

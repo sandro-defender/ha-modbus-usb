@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.1.84
+
+### RS-485 MCP integration plan
+
+- Added a staged, safety-first plan for Modbus, raw RS-485, and serial MCP
+  tools: a dedicated test adapter first, then a future Home Assistant API-based
+  companion that preserves the integration's single-owner serial lock.
+- Documented confirmation, audit, fixture, and CI requirements before exposing
+  any MCP write operation to a live board.
+
 ## 2.1.83
 
 ### Collapsible device cards

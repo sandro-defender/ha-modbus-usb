@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.1.86
+
+### Guarded hexadecimal writes and collapsible Diagnostics
+
+- Added a dedicated **Dangerous manual RTU hex write** window with clipboard
+  paste, a required hardware-risk acknowledgement, a second confirmation, and
+  automatic CRC generation for a pasted request without CRC bytes.
+- The backend validates every complete RTU frame and routes only FC05, FC06,
+  FC0F, and FC10 through the integration's existing serial lock. Invalid CRCs,
+  broadcast writes, malformed requests, and unsupported functions are rejected.
+- Made Diagnostics cards collapsible. They start collapsed and persist the
+  user's expanded sections in browser storage, like device cards.
+
 ## 2.1.85
 
 ### MCP-informed Diagnostics improvements

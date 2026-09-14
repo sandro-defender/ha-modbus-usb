@@ -528,10 +528,12 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         result: Any = None,
         error: Exception | str | None = None,
         duration_ms: float | None = None,
+        function_code: str | None = None,
+        request_hex: str | None = None,
     ) -> None:
         """Keep a rolling, UI-safe record of every RS-485 operation and health."""
         timestamp = datetime.now().astimezone().isoformat()
-        function_code, request_hex = self._diagnostic_request_frame(
+        detected_function, detected_request = self._diagnostic_request_frame(
             operation, slave, address, count, value
         )
         item: dict[str, Any] = {
@@ -543,8 +545,8 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             "value": value,
             "result": result,
             "status": "error" if error else "ok",
-            "function_code": function_code,
-            "request_hex": request_hex,
+            "function_code": function_code or detected_function,
+            "request_hex": request_hex or detected_request,
             "retries_configured": int(getattr(self.client, "retries", 0) or 0),
         }
         if duration_ms is not None:
@@ -573,6 +575,101 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 "RS-485 %s: slave=%s address=%s value=%s result=%s duration=%.1fms",
                 operation, slave, address, value, result, duration_ms or 0,
             )
+
+    def execute_manual_hex_write(self, frame_hex: str, generate_crc: bool = False) -> dict[str, Any]:
+        """Execute one CRC-checked standard Modbus RTU write via the owned client.
+
+        The Diagnostics page accepts complete RTU frames for documented writes,
+        but deliberately does not expose a raw serial bypass.  Decoding the PDU
+        here preserves the integration's lock, reconnection behavior, error
+        handling, and transaction audit trail.
+        """
+        compact = "".join(frame_hex.replace("0x", "").replace("0X", "").split())
+        if not compact or len(compact) % 2 or any(char not in "0123456789abcdefABCDEF" for char in compact):
+            raise ValueError("Paste hexadecimal bytes only, for example: 01 06 00 80 00 01 49 E0")
+        frame = bytes.fromhex(compact)
+        if generate_crc:
+            if len(frame) >= 4 and self._modbus_crc16(frame[:-2]) == (frame[-2] | (frame[-1] << 8)):
+                # A valid CRC is already present; keep the exact documented frame.
+                pass
+            else:
+                crc = self._modbus_crc16(frame)
+                frame += bytes((crc & 0xFF, crc >> 8))
+        if len(frame) < 8:
+            raise ValueError("A complete Modbus RTU write frame must include slave, function, data, and two CRC bytes")
+        crc_expected = frame[-2] | (frame[-1] << 8)
+        crc_actual = self._modbus_crc16(frame[:-2])
+        if crc_actual != crc_expected:
+            raise ValueError(f"CRC mismatch: frame has {crc_expected:04X}, expected {crc_actual:04X}")
+
+        slave, function_code = frame[0], frame[1]
+        if not 1 <= slave <= 247:
+            raise ValueError("Broadcast or invalid slave IDs are not allowed for dangerous manual writes")
+        payload = frame[:-2]
+        address = (frame[2] << 8) | frame[3]
+        count = 1
+        value: Any = None
+        started = datetime.now()
+        try:
+            with self._serial_lock:
+                self._ensure_connected()
+                if function_code == 0x05:
+                    if len(payload) != 6 or payload[4:] not in (b"\x00\x00", b"\xFF\x00"):
+                        raise ValueError("FC05 must contain exactly one coil value: FF00 (on) or 0000 (off)")
+                    value = payload[4:] == b"\xFF\x00"
+                    result = self._call_modbus("write_coil", address, value, slave=slave)
+                elif function_code == 0x06:
+                    if len(payload) != 6:
+                        raise ValueError("FC06 must contain exactly one 16-bit holding-register value")
+                    value = (payload[4] << 8) | payload[5]
+                    result = self._call_modbus("write_register", address, value, slave=slave)
+                elif function_code == 0x0F:
+                    if len(payload) < 8:
+                        raise ValueError("FC0F frame is incomplete")
+                    count = (payload[4] << 8) | payload[5]
+                    byte_count = payload[6]
+                    if not 1 <= count <= 1968 or byte_count != (count + 7) // 8 or len(payload) != 7 + byte_count:
+                        raise ValueError("FC0F count or byte count does not match the supplied coil data")
+                    value = [bool(payload[7 + index // 8] & (1 << (index % 8))) for index in range(count)]
+                    result = self._call_modbus("write_coils", address, value, slave=slave)
+                elif function_code == 0x10:
+                    if len(payload) < 9:
+                        raise ValueError("FC10 frame is incomplete")
+                    count = (payload[4] << 8) | payload[5]
+                    byte_count = payload[6]
+                    if not 1 <= count <= 123 or byte_count != count * 2 or len(payload) != 7 + byte_count:
+                        raise ValueError("FC10 register count or byte count does not match the supplied data")
+                    value = [(payload[index] << 8) | payload[index + 1] for index in range(7, 7 + byte_count, 2)]
+                    result = self._call_modbus("write_registers", address, value, slave=slave)
+                else:
+                    raise ValueError("Only documented write functions FC05, FC06, FC0F, and FC10 are accepted")
+                if result.isError():
+                    raise UpdateFailed(str(result))
+            self._record_transaction(
+                "manual_hex_write", slave=slave, address=address, count=count,
+                value=value, result="accepted", duration_ms=(datetime.now() - started).total_seconds() * 1000,
+                function_code=f"0x{function_code:02X}",
+                request_hex=" ".join(f"{byte:02X}" for byte in frame),
+            )
+            return {"slave_id": slave, "function_code": f"0x{function_code:02X}", "address": address, "count": count}
+        except Exception as err:
+            self._record_transaction(
+                "manual_hex_write", slave=slave, address=address, count=count,
+                value=value, error=err, duration_ms=(datetime.now() - started).total_seconds() * 1000,
+                function_code=f"0x{function_code:02X}",
+                request_hex=" ".join(f"{byte:02X}" for byte in frame),
+            )
+            raise
+
+    @staticmethod
+    def _modbus_crc16(payload: bytes) -> int:
+        """Return the standard Modbus RTU CRC16 for a request payload."""
+        crc = 0xFFFF
+        for byte in payload:
+            crc ^= byte
+            for _ in range(8):
+                crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
+        return crc
 
     @staticmethod
     def _diagnostic_request_frame(
@@ -606,11 +703,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             except (TypeError, ValueError):
                 return f"0x{function_code:02X}", None
             payload = bytes((slave, function_code, address >> 8, address & 0xFF, register_value >> 8, register_value & 0xFF))
-        crc = 0xFFFF
-        for byte in payload:
-            crc ^= byte
-            for _ in range(8):
-                crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
+        crc = ModbusUsbCoordinator._modbus_crc16(payload)
         frame = payload + bytes((crc & 0xFF, crc >> 8))
         return f"0x{function_code:02X}", " ".join(f"{byte:02X}" for byte in frame)
 

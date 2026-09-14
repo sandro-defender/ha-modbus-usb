@@ -509,6 +509,22 @@
       flex-wrap: wrap;
       gap: 0.75rem;
     }
+    .diagnostic-card-toggle {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      padding: 0;
+      text-align: left;
+      min-width: 0;
+      cursor: pointer;
+    }
+    .diagnostic-card-toggle .card-title, .diagnostic-card-toggle .card-subtitle { display: block; }
+    .diagnostic-card-toggle::before { content: '›'; display: inline-block; color: var(--text-dim); margin-right: 0.55rem; transition: transform 0.18s ease; }
+    .diagnostic-card-toggle:focus-visible { outline: 2px solid #818cf8; outline-offset: 4px; border-radius: 6px; }
+    .diagnostic-card.is-collapsed > :not(.card-header) { display: none !important; }
+    .diagnostic-card:not(.is-collapsed) .diagnostic-card-toggle::before { transform: rotate(90deg); }
     .device-header-left {
       display: flex;
       align-items: center;
@@ -1777,13 +1793,47 @@
             </div>
           </div>
           <label class="debug-ack-label"><input type="checkbox" id="debug-one-board-check" /> I confirm exactly one powered board is connected, and I have checked this command in that board's documentation.</label>
-          <button class="btn btn-danger" id="btn-debug-write" onclick="sendGuardedDebugWrite()">Send one manual write</button>
+          <div class="flex gap-1" style="flex-wrap:wrap;">
+            <button class="btn btn-danger" id="btn-debug-write" onclick="sendGuardedDebugWrite()">Send one manual write</button>
+            <button class="btn btn-secondary" onclick="openManualHexWrite()">Paste direct RTU hex…</button>
+          </div>
           <div id="debug-write-result" class="text-sm mt-1" aria-live="polite"></div>
         </div>
       </details>
       </section>
     </div>
     </main>
+  </div>
+
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <!-- MODAL: DANGEROUS MANUAL HEX WRITE                            -->
+  <!-- ═════════════════════════════════════════════════════════════ -->
+  <div class="modal-backdrop" id="modal-manual-hex-write">
+    <div class="modal-box modal-lg" role="dialog" aria-modal="true" aria-labelledby="manual-hex-write-title">
+      <div class="modal-header">
+        <div class="modal-title" id="manual-hex-write-title">Dangerous manual RTU hex write</div>
+        <button class="modal-close" onclick="closeModal('modal-manual-hex-write')" aria-label="Close dangerous manual hex write">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="debug-danger" role="alert">This sends one documented Modbus write through the Home Assistant serial lock. It can change relay state, serial settings, or factory configuration. It accepts only FC05, FC06, FC0F, or FC10 and rejects bad CRCs or broadcast frames.</div>
+        <div class="form-group mt-2">
+          <label class="form-label" for="manual-hex-frame">Complete Modbus RTU request frame</label>
+          <textarea class="form-textarea mono" id="manual-hex-frame" rows="4" placeholder="01 06 00 80 00 01 49 E0" oninput="previewManualHexCrc()" aria-describedby="manual-hex-help manual-hex-preview"></textarea>
+          <p class="form-hint" id="manual-hex-help">Paste hex bytes with spaces optional. Include slave, function, address, data, and CRC—or enable CRC generation below.</p>
+          <div class="flex gap-1 mt-1" style="flex-wrap:wrap;">
+            <button class="btn btn-secondary btn-sm" type="button" onclick="pasteManualHex()">Paste from clipboard</button>
+            <label class="debug-ack-label" style="margin:0;"><input type="checkbox" id="manual-hex-generate-crc" onchange="previewManualHexCrc()" /> Generate CRC automatically</label>
+          </div>
+          <p class="form-hint mono" id="manual-hex-preview" role="status" aria-live="polite">Paste a frame to validate it.</p>
+        </div>
+        <label class="debug-ack-label"><input type="checkbox" id="manual-hex-confirm" /> I confirm this is a documented command for this exact board, and I accept the hardware risk.</label>
+        <div id="manual-hex-result" class="text-sm mt-1" role="status" aria-live="polite"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('modal-manual-hex-write')">Cancel</button>
+        <button class="btn btn-danger" id="btn-manual-hex-send" onclick="sendManualHexWrite()">Send one dangerous hex write</button>
+      </div>
+    </div>
   </div>
 
   <!-- ═════════════════════════════════════════════════════════════ -->
@@ -2363,6 +2413,10 @@
     const _deviceTestReports = {};
     const _r413e16StateReports = {};
     let _serialStatusEntryId = null;
+    const _expandedDiagnosticCards = new Set();
+    try {
+      JSON.parse(localStorage.getItem('modbus_usb_expanded_diagnostics') || '[]').forEach(key => _expandedDiagnosticCards.add(key));
+    } catch (_) { /* A missing or malformed preference must not block Diagnostics. */ }
     const _expandedDeviceCards = new Set();
     try {
       JSON.parse(localStorage.getItem('modbus_usb_expanded_devices') || '[]').forEach(id => _expandedDeviceCards.add(id));
@@ -2606,6 +2660,7 @@ entities:
     }
 
     async function init() {
+      initializeDiagnosticCollapsibles();
       _hass = getHass();
       if (_hass) {
         _isLiveHA = true;
@@ -2625,6 +2680,39 @@ entities:
       setInterval(() => {
         if (document.getElementById('pane-diag')?.classList.contains('active')) refreshData();
       }, 5000);
+    }
+
+    function initializeDiagnosticCollapsibles() {
+      const cards = [...document.querySelectorAll('#pane-diag > .card, #pane-diag .diagnostic-workspace > .card')]
+        .filter(card => card.tagName !== 'DETAILS');
+      cards.forEach((card, index) => {
+        if (card.dataset.diagnosticCollapsible) return;
+        const header = card.querySelector(':scope > .card-header');
+        const titleWrap = header?.firstElementChild;
+        if (!header || !titleWrap) return;
+        const key = `diagnostic-${index}`;
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'diagnostic-card-toggle';
+        toggle.setAttribute('aria-expanded', String(_expandedDiagnosticCards.has(key)));
+        for (const child of [...titleWrap.children]) {
+          const text = document.createElement('span');
+          text.className = child.className;
+          while (child.firstChild) text.appendChild(child.firstChild);
+          toggle.appendChild(text);
+        }
+        header.replaceChild(toggle, titleWrap);
+        card.classList.add('diagnostic-card');
+        card.dataset.diagnosticCollapsible = key;
+        card.classList.toggle('is-collapsed', !_expandedDiagnosticCards.has(key));
+        toggle.addEventListener('click', () => {
+          const isExpanded = card.classList.toggle('is-collapsed') === false;
+          toggle.setAttribute('aria-expanded', String(isExpanded));
+          if (isExpanded) _expandedDiagnosticCards.add(key);
+          else _expandedDiagnosticCards.delete(key);
+          try { localStorage.setItem('modbus_usb_expanded_diagnostics', JSON.stringify([..._expandedDiagnosticCards])); } catch (_) { /* Session state still works. */ }
+        });
+      });
     }
 
     function isConfiguredHaEntity(entityId) {
@@ -2730,6 +2818,7 @@ entities:
       if (type === 'scan_usb_ports') {
         return { ports: [{ port: '/dev/ttyUSB0', description: 'USB-RS485 Adapter', details: 'CH340 USB-Serial' }] };
       }
+      if (type === 'manual_hex_write') return { slave_id: 1, function_code: '0x06', address: 128, count: 1 };
       if (type === 'get_serial_status') {
         return { serial: { port: '/dev/ttyUSB0', baudrate: 9600, bytesize: 8, parity: 'N', stopbits: 1, connection_owner: 'Home Assistant Modbus USB', operation_active: false }, adapter: { port: '/dev/ttyUSB0', description: 'USB-RS485 Adapter', details: 'CH340 USB-Serial' } };
       }
@@ -4409,6 +4498,90 @@ entities:
       updateR4d6f20ModeUi();
       document.getElementById('r4d6f20-result').textContent = `Target: ${dev.name || dev.model || 'R4D6F20'} · slave ${dev.slave_id ?? entry.hub?.slave_id ?? 1}`;
       openModal('modal-r4d6f20-controls');
+    }
+
+    function normalizeManualHex(value) {
+      return String(value || '').replace(/0x/gi, '').replace(/\s+/g, '');
+    }
+
+    function crc16Modbus(bytes) {
+      let crc = 0xFFFF;
+      for (const byte of bytes) {
+        crc ^= byte;
+        for (let bit = 0; bit < 8; bit += 1) crc = (crc & 1) ? ((crc >>> 1) ^ 0xA001) : (crc >>> 1);
+      }
+      return crc;
+    }
+
+    function previewManualHexCrc() {
+      const input = document.getElementById('manual-hex-frame');
+      const auto = document.getElementById('manual-hex-generate-crc')?.checked;
+      const preview = document.getElementById('manual-hex-preview');
+      if (!input || !preview) return;
+      const compact = normalizeManualHex(input.value);
+      if (!compact) { preview.textContent = 'Paste a frame to validate it.'; return; }
+      if (compact.length % 2 || /[^0-9a-f]/i.test(compact)) { preview.textContent = 'Use complete hexadecimal byte pairs only.'; return; }
+      const bytes = Uint8Array.from(compact.match(/../g).map(pair => parseInt(pair, 16)));
+      if (auto) {
+        const existingCrc = bytes.length >= 4 ? (bytes[bytes.length - 2] | (bytes[bytes.length - 1] << 8)) : -1;
+        const expectedExistingCrc = bytes.length >= 4 ? crc16Modbus(bytes.slice(0, -2)) : -2;
+        if (existingCrc === expectedExistingCrc) {
+          preview.textContent = 'CRC is already valid; the pasted frame will be kept unchanged.';
+        } else {
+          const crc = crc16Modbus(bytes);
+          preview.textContent = `CRC preview: ${[...bytes, crc & 0xFF, crc >>> 8].map(byte => byte.toString(16).padStart(2, '0').toUpperCase()).join(' ')}`;
+        }
+      } else if (bytes.length >= 4) {
+        const expected = crc16Modbus(bytes.slice(0, -2));
+        const received = bytes[bytes.length - 2] | (bytes[bytes.length - 1] << 8);
+        preview.textContent = expected === received ? 'CRC is valid.' : `CRC mismatch: frame has ${received.toString(16).padStart(4, '0').toUpperCase()}, expected ${expected.toString(16).padStart(4, '0').toUpperCase()}.`;
+      } else {
+        preview.textContent = 'A complete RTU frame needs at least four bytes plus CRC.';
+      }
+    }
+
+    function openManualHexWrite() {
+      document.getElementById('manual-hex-confirm').checked = false;
+      document.getElementById('manual-hex-result').textContent = '';
+      previewManualHexCrc();
+      openModal('modal-manual-hex-write');
+      setTimeout(() => document.getElementById('manual-hex-frame').focus(), 0);
+    }
+
+    async function pasteManualHex() {
+      const input = document.getElementById('manual-hex-frame');
+      try {
+        input.value = await navigator.clipboard.readText();
+        previewManualHexCrc();
+      } catch (_) {
+        toast('Clipboard access was denied. Paste with Ctrl+V instead.', 'err');
+      }
+    }
+
+    async function sendManualHexWrite() {
+      const entry = getCurrentEntry();
+      const frame = document.getElementById('manual-hex-frame').value;
+      const generateCrc = document.getElementById('manual-hex-generate-crc').checked;
+      const confirmed = document.getElementById('manual-hex-confirm').checked;
+      const button = document.getElementById('btn-manual-hex-send');
+      const result = document.getElementById('manual-hex-result');
+      if (!entry || !normalizeManualHex(frame)) { result.textContent = 'Paste a documented RTU write frame first.'; return; }
+      if (!confirmed) { result.textContent = 'Confirm the hardware-risk checkbox before sending.'; return; }
+      if (!window.confirm('Send exactly one dangerous documented Modbus RTU write? This can change equipment or serial settings.')) return;
+      button.disabled = true;
+      button.textContent = 'Sending…';
+      result.textContent = 'Validating CRC and sending through the Home Assistant serial lock…';
+      try {
+        const response = await apiCall('manual_hex_write', { entry_id: entry.entry_id, frame_hex: frame, generate_crc: generateCrc, confirmed: true });
+        result.textContent = `Accepted: slave ${response.slave_id}, ${response.function_code}, address ${response.address}, ${response.count} item${response.count === 1 ? '' : 's'}.`;
+        toast('Dangerous hex write accepted; verify the physical result.', 'ok');
+        await refreshData();
+      } catch (error) {
+        result.textContent = `Hex write rejected or failed: ${error.message}`;
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Send one dangerous hex write';
+      }
     }
 
     function updateR4d6f20ModeUi() {

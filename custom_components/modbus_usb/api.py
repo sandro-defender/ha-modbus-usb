@@ -355,6 +355,29 @@ async def ws_diagnostic_write(
         connection.send_error(msg["id"], "write_failed", str(err))
 
 
+@websocket_api.websocket_command({
+    vol.Required("type"): "modbus_usb/manual_hex_write",
+    vol.Required("entry_id"): cv.string,
+    vol.Required("frame_hex"): cv.string,
+    vol.Optional("generate_crc", default=False): bool,
+    vol.Required("confirmed"): True,
+})
+@websocket_api.async_response
+async def ws_manual_hex_write(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Send one explicitly confirmed, CRC-checked standard Modbus write frame."""
+    try:
+        coordinator = hass.data[DOMAIN][msg["entry_id"]]
+        result = await hass.async_add_executor_job(
+            coordinator.execute_manual_hex_write, msg["frame_hex"], msg.get("generate_crc", False)
+        )
+        connection.send_result(msg["id"], result)
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("Manual hexadecimal Modbus write failed: %s", err)
+        connection.send_error(msg["id"], "manual_hex_write_failed", str(err))
+
+
 _PROBE_FUNCTIONS = {
     "coil": (0x01, "Read Coils"),
     "discrete": (0x02, "Read Discrete Inputs"),
@@ -1866,6 +1889,7 @@ async def async_register_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_get_data)
     websocket_api.async_register_command(hass, ws_diagnostic_read)
     websocket_api.async_register_command(hass, ws_diagnostic_write)
+    websocket_api.async_register_command(hass, ws_manual_hex_write)
     websocket_api.async_register_command(hass, ws_probe_registers)
     websocket_api.async_register_command(hass, ws_stop_probe_registers)
     websocket_api.async_register_command(hass, ws_write_entity)

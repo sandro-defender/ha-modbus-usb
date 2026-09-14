@@ -518,13 +518,22 @@
       padding: 0;
       text-align: left;
       min-width: 0;
+      flex: 1;
       cursor: pointer;
     }
     .diagnostic-card-toggle .card-title, .diagnostic-card-toggle .card-subtitle { display: block; }
-    .diagnostic-card-toggle::before { content: '›'; display: inline-block; color: var(--text-dim); margin-right: 0.55rem; transition: transform 0.18s ease; }
     .diagnostic-card-toggle:focus-visible { outline: 2px solid #818cf8; outline-offset: 4px; border-radius: 6px; }
     .diagnostic-card.is-collapsed > :not(.card-header) { display: none !important; }
-    .diagnostic-card:not(.is-collapsed) .diagnostic-card-toggle::before { transform: rotate(90deg); }
+    .diagnostic-card.is-collapsed {
+      padding: 0.625rem 0.875rem;
+    }
+    .diagnostic-card.is-collapsed .card-header {
+      margin-bottom: 0;
+    }
+    .diagnostic-card.is-collapsed .diagnostic-card-toggle .card-subtitle,
+    .diagnostic-card.is-collapsed .card-header > :not(.diagnostic-card-toggle) {
+      display: none;
+    }
     .device-header-left {
       display: flex;
       align-items: center;

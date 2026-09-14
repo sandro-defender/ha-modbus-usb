@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.87
+
+### Compact collapsed Diagnostics
+
+- Removed the collapse chevron and reduced collapsed Diagnostics cards to a compact title-only row.
+- Keep subtitles and header actions hidden until a card is expanded, while preserving the saved expanded state.
+
 ## 2.1.86
 
 ### Guarded hexadecimal writes and collapsible Diagnostics

@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from .const import DATA_TYPES, DATA_TYPE_WORD_COUNT
+from .const import DATA_TYPE_WORD_COUNT, DATA_TYPES
 
 _REGISTER_TYPES = {
     "sensor": {"holding", "input"},

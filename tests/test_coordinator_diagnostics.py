@@ -471,6 +471,7 @@ def test_runtime_type_error_never_retries_a_write():
 def test_installed_pymodbus_request_encoding(method, args, kwargs, payload):
     """Use real client methods/codecs, intercepting execution before serial I/O."""
     from unittest.mock import Mock
+
     from pymodbus.client import ModbusSerialClient
 
     client = ModbusSerialClient(port="/dev/null")

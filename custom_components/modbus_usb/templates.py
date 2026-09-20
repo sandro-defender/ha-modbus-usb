@@ -57,7 +57,6 @@ def _parse_template_file(
             "id": template_id,
             "filename": filename,
             "source": source,
-            "source": source,
             "name": data.get("name", template_id),
             "manufacturer": data.get("manufacturer", "Generic"),
             "model": data.get("model", "Modbus Device"),

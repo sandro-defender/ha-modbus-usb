@@ -296,12 +296,14 @@ class _Entry:
 
 def _hass(entry: _Entry, coordinator=None):
     updates: list[dict] = []
+
+    def get_entry(entry_id):
+        return entry if entry_id == entry.entry_id else None
+
     hass = SimpleNamespace(
         data={DOMAIN: {entry.entry_id: coordinator} if coordinator else {}},
         config_entries=SimpleNamespace(
-            async_get_entry=lambda entry_id: entry
-            if entry_id == entry.entry_id
-            else None,
+            async_get_entry=get_entry,
             async_update_entry=lambda e, **kw: updates.append(kw),
         ),
         async_add_executor_job=AsyncMock(side_effect=lambda func, *args: func(*args)),

@@ -10,7 +10,6 @@ from typing import Any
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -36,7 +35,12 @@ from .const import (
     DOMAIN,
     REGISTER_TYPE_HOLDING,
 )
-from .coordinator import ModbusUsbCoordinator, get_device_info, get_entity_picture
+from .coordinator import (
+    ModbusUsbCoordinator,
+    as_float,
+    get_device_info,
+    get_entity_picture,
+)
 
 
 async def async_setup_entry(
@@ -65,12 +69,21 @@ class ModbusUsbNumber(CoordinatorEntity[ModbusUsbCoordinator], NumberEntity):
         self._attr_unique_id = f"{entry.entry_id}_{ent[CONF_ENTITY_ID]}"
         self._attr_name = ent[CONF_NAME]
         self._attr_native_unit_of_measurement = ent.get(CONF_UNIT_OF_MEASUREMENT) or None
-        self._attr_native_min_value = float(ent.get(CONF_MIN_VALUE, 0))
-        self._attr_native_max_value = float(ent.get(CONF_MAX_VALUE, 65535))
-        self._attr_native_step = float(ent.get(CONF_STEP, 1))
+        # Sidebar edits can persist null for optional numeric settings; a
+        # plain float() of None removed the whole number platform on setup.
+        min_value = as_float(ent.get(CONF_MIN_VALUE), 0)
+        max_value = as_float(ent.get(CONF_MAX_VALUE), 65535)
+        if max_value < min_value:
+            min_value, max_value = max_value, min_value
+        step = as_float(ent.get(CONF_STEP), 1)
+        self._attr_native_min_value = min_value
+        self._attr_native_max_value = max_value
+        # Home Assistant requires a positive step; a 0/negative saved step
+        # made the slider unusable.
+        self._attr_native_step = step if step > 0 else 1
         mode_str = ent.get(CONF_MODE, "slider")
         self._attr_mode = NumberMode.SLIDER if mode_str == "slider" else NumberMode.BOX
-        self._scale: float = float(ent.get(CONF_SCALE, 1))
+        self._scale: float = as_float(ent.get(CONF_SCALE), 1) or 1
         self._attr_device_info = get_device_info(entry, ent)
         picture = get_entity_picture(entry, ent)
         if picture:

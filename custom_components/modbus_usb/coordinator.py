@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import struct
 from collections import deque
+from enum import Enum
 from datetime import datetime, timedelta
 from threading import Lock
 from time import sleep
@@ -23,8 +24,10 @@ from .const import (
     CONF_BYTESIZE,
     CONF_DATA_TYPE,
     CONF_DEVICES,
+    CONF_DEVICE_CONTROLS,
     CONF_DEVICE_ID,
     CONF_ENTITIES,
+    CONF_ENTITY_ID,
     CONF_ENTITY_TYPE,
     CONF_ENABLED,
     CONF_IMAGE,
@@ -57,6 +60,39 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def normalize_enum(value: Any, enum_cls: type[Enum], entity_name: str) -> Any:
+    """Return a valid enum member, treating "none"/empty/invalid values as None.
+
+    The sidebar and options flows store the literal string ``"none"`` for
+    "no class selected". Home Assistant rejects unknown device/state class
+    strings while adding the entity, which previously removed the whole
+    platform from setup, so unsupported values fall back to None with a
+    warning instead of breaking every entity of that platform.
+    """
+    if value in (None, "", "none"):
+        return None
+    try:
+        return enum_cls(value)
+    except ValueError:
+        _LOGGER.warning(
+            "Unsupported %s value %r for entity %s; using no class instead",
+            enum_cls.__name__, value, entity_name,
+        )
+        return None
+
+
+def as_float(value: Any, default: float) -> float:
+    """Return ``value`` as float, falling back to ``default`` for None/"" /garbage.
+
+    Sidebar edits can persist explicit ``null`` values for optional numeric
+    settings; ``float(None)`` raised TypeError and removed the platform.
+    """
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
 
 
 def _decode_words(words: list[int], data_type: str) -> float | int:
@@ -415,7 +451,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         valid_bauds = sorted({int(rate) for rate in baudrates if int(rate) > 0})
         if not valid_bauds:
             raise ValueError("Select at least one baud rate to scan")
-        valid_parities = sorted({str(parity).upper() for parity in (parities or [self.serial_config[CONF_PARITY]])})
+        valid_parities = sorted(
+            {str(parity).upper() for parity in (parities or [self.serial_config.get(CONF_PARITY, "N")])}
+        )
         if not set(valid_parities).issubset({"N", "E", "O"}):
             raise ValueError("Parity must be N (none), E (even), or O (odd)")
 
@@ -783,22 +821,38 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         devices = {str(item.get("id")): item for item in (entry.options.get(CONF_DEVICES, []) if entry else [])}
         handled: set[str] = set()
         for device_id, device in devices.items():
-            controls = device.get("device_controls", {})
+            controls = device.get(CONF_DEVICE_CONTROLS, {})
             is_r4d6f20 = controls.get("protocol") == "eletechsup_r4d6f20" or "r4d6f20" in str(device.get(CONF_MODEL, "")).lower()
             members = [item for item in entities if str(item.get(CONF_DEVICE_ID)) == device_id]
             if not is_r4d6f20 or not members:
                 continue
             if device.get(CONF_M0_SHORT, False):
-                data.update(self._read_r4d6f20_command2_blocks(members, int(device.get(CONF_SLAVE_ID, self.slave_id))))
-                handled.update(item["id"] for item in members)
+                block_data, block_handled = self._read_r4d6f20_command2_blocks(
+                    members, int(device.get(CONF_SLAVE_ID, self.slave_id))
+                )
+                data.update(block_data)
+                handled.update(block_handled)
                 continue
-            data.update(self._read_r4d6f20_blocks(members, int(device.get(CONF_SLAVE_ID, self.slave_id))))
-            handled.update(item["id"] for item in members if item[CONF_ADDRESS] in set(range(20)) | {128, 129, 160, 161})
+            block_data, block_handled = self._read_r4d6f20_blocks(
+                members, int(device.get(CONF_SLAVE_ID, self.slave_id))
+            )
+            data.update(block_data)
+            # Only entities actually covered by a block read may skip the
+            # per-entity poll; anything else (other data types or ranges)
+            # still needs its own request.
+            handled.update(block_handled)
         for ent in entities:
-            ent_id = ent["id"]
-            if ent_id in handled:
+            ent_id = ent.get(CONF_ENTITY_ID)
+            if not ent_id or ent_id in handled:
                 continue
             if ent.get(CONF_ASSUMED_STATE):
+                continue
+            if CONF_REGISTER_TYPE not in ent or CONF_ADDRESS not in ent:
+                # A malformed entity must not take down the whole poll cycle.
+                _LOGGER.warning(
+                    "Skipping entity %s: missing register type or address",
+                    ent.get(CONF_NAME, ent_id),
+                )
                 continue
             try:
                 value = self._read_one(ent, device_slave_map)
@@ -816,13 +870,21 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 data[ent_id] = None
         return data
 
-    def _read_r4d6f20_blocks(self, entities: list[dict], slave: int) -> dict[str, Any]:
-        """Read the standard R4D6F20 Command 1 ranges in three RTU requests."""
+    def _read_r4d6f20_blocks(
+        self, entities: list[dict], slave: int
+    ) -> tuple[dict[str, Any], set[str]]:
+        """Read the standard R4D6F20 Command 1 ranges in three RTU requests.
+
+        Returns the decoded values plus the entity IDs covered by a block, so
+        the caller only skips per-entity polling for entities that were read.
+        """
         data: dict[str, Any] = {}
+        handled: set[str] = set()
         for start, count in ((0, 20), (128, 2), (160, 2)):
             members = [item for item in entities if item.get(CONF_REGISTER_TYPE) == REGISTER_TYPE_HOLDING and item.get(CONF_DATA_TYPE, DATA_TYPE_UINT16) == DATA_TYPE_UINT16 and start <= int(item.get(CONF_ADDRESS, -1)) < start + count]
             if not members:
                 continue
+            handled.update(item["id"] for item in members)
             started = datetime.now()
             try:
                 with self._serial_lock:
@@ -832,18 +894,25 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                         raise UpdateFailed(str(result))
                 for item in members:
                     value = result.registers[int(item[CONF_ADDRESS]) - start]
-                    scale = item.get(CONF_SCALE, 1)
-                    data[item["id"]] = value if scale in (1, None) else value * scale
+                    scale = as_float(item.get(CONF_SCALE), 1)
+                    data[item["id"]] = value if scale == 1 else value * scale
                 self._record_transaction("read_holding", slave=slave, address=start, count=count, result="block", duration_ms=(datetime.now() - started).total_seconds() * 1000)
             except Exception as err:  # noqa: BLE001
                 for item in members:
                     data[item["id"]] = None
                 self._record_transaction("read_holding", slave=slave, address=start, count=count, error=err, duration_ms=(datetime.now() - started).total_seconds() * 1000)
-        return data
+        return data, handled
 
-    def _read_r4d6f20_command2_blocks(self, entities: list[dict], slave: int) -> dict[str, Any]:
-        """Read documented R4D6F20 Command 2 ranges in three RTU requests."""
+    def _read_r4d6f20_command2_blocks(
+        self, entities: list[dict], slave: int
+    ) -> tuple[dict[str, Any], set[str]]:
+        """Read documented R4D6F20 Command 2 ranges in three RTU requests.
+
+        Returns the decoded values plus the entity IDs covered by a block so
+        entities outside the Command 2 maps keep their individual polling.
+        """
         data: dict[str, Any] = {}
+        handled: set[str] = set()
         ranges = (
             (REGISTER_TYPE_COIL, "read_coils", 0, 20),
             (REGISTER_TYPE_DISCRETE, "read_discrete_inputs", 0, 2),
@@ -857,6 +926,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             ]
             if not members:
                 continue
+            handled.update(item["id"] for item in members)
             started = datetime.now()
             try:
                 with self._serial_lock:
@@ -867,14 +937,14 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 for item in members:
                     index = int(item[CONF_ADDRESS]) - start
                     value = bool(result.bits[index]) if register_type in (REGISTER_TYPE_COIL, REGISTER_TYPE_DISCRETE) else result.registers[index]
-                    scale = item.get(CONF_SCALE, 1)
-                    data[item["id"]] = value if scale in (1, None) else value * scale
+                    scale = as_float(item.get(CONF_SCALE), 1)
+                    data[item["id"]] = value if scale == 1 else value * scale
                 self._record_transaction(f"read_{register_type}", slave=slave, address=start, count=count, result="block", duration_ms=(datetime.now() - started).total_seconds() * 1000)
             except Exception as err:  # noqa: BLE001
                 for item in members:
                     data[item["id"]] = None
                 self._record_transaction(f"read_{register_type}", slave=slave, address=start, count=count, error=err, duration_ms=(datetime.now() - started).total_seconds() * 1000)
-        return data
+        return data, handled
 
     def _read_one(self, ent: dict, device_slave_map: dict[str, int] | None = None) -> Any:
         register_type = ent[CONF_REGISTER_TYPE]
@@ -924,8 +994,8 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                     if result.isError():
                         raise UpdateFailed(str(result))
                     value = _decode_words(result.registers, data_type)
-                    scale = ent.get(CONF_SCALE, 1)
-                    if scale not in (1, None):
+                    scale = as_float(ent.get(CONF_SCALE), 1)
+                    if scale != 1:
                         value = value * scale
             self._record_transaction(
                 operation, slave=target_slave, address=address, count=count, result=value,

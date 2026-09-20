@@ -43,6 +43,14 @@ read_register:
             - uint32
             - int32
             - float32
+    slave_id:
+      name: Slave ID
+      description: "Modbus slave ID to query. Defaults to the hub's configured slave ID."
+      selector:
+        number:
+          min: 1
+          max: 247
+          mode: box
 
 write_register:
   name: Write Modbus Register
@@ -82,4 +90,12 @@ write_register:
         number:
           min: -32768
           max: 65535
+          mode: box
+    slave_id:
+      name: Slave ID
+      description: "Modbus slave ID to write. Defaults to the hub's configured slave ID."
+      selector:
+        number:
+          min: 1
+          max: 247
           mode: box

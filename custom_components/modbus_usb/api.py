@@ -67,7 +67,11 @@ from .const import (
     CONF_STOPBITS,
     CONF_UNIT_OF_MEASUREMENT,
     DOMAIN,
+    ENTITY_TYPES,
     REGISTER_TYPE_COIL,
+    REGISTER_TYPE_DISCRETE,
+    REGISTER_TYPE_HOLDING,
+    REGISTER_TYPE_INPUT,
 )
 from .templates import (
     async_delete_template,
@@ -326,6 +330,7 @@ async def ws_diagnostic_read(
         connection.send_error(msg["id"], "read_failed", str(err))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/diagnostic_write",
     vol.Required("entry_id"): cv.string,
@@ -355,6 +360,7 @@ async def ws_diagnostic_write(
         connection.send_error(msg["id"], "write_failed", str(err))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/manual_hex_write",
     vol.Required("entry_id"): cv.string,
@@ -533,10 +539,16 @@ async def _async_write_configured_switch(
                 coordinator.write_coil, int(address), state, slave_id
             )
     else:
-        value = entity.get(CONF_ON_VALUE, 1) if state else entity.get(CONF_OFF_VALUE, 0)
+        try:
+            value = int(
+                entity.get(CONF_ON_VALUE, 1) if state
+                else entity.get(CONF_OFF_VALUE, 0)
+            )
+        except (TypeError, ValueError):
+            value = 1 if state else 0
         for address in addresses:
             await hass.async_add_executor_job(
-                coordinator.write_register, int(address), int(value), slave_id
+                coordinator.write_register, int(address), value, slave_id
             )
     if (
         is_r413e16_switch_config(entity)
@@ -685,6 +697,7 @@ def _get_r4d6f20_device(entry, device_id: str) -> dict[str, Any]:
     return device
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/r413e16_command",
     vol.Required("entry_id"): cv.string,
@@ -862,6 +875,7 @@ async def ws_r413e16_command(
         connection.send_error(msg["id"], "r413e16_command_failed", str(err))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/r4d6f20_command",
     vol.Required("entry_id"): cv.string,
@@ -942,6 +956,7 @@ async def ws_r4d6f20_command(hass: HomeAssistant, connection: websocket_api.Acti
         connection.send_error(msg["id"], "r4d6f20_command_failed", str(err))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/r4d6f20_set_mode",
     vol.Required("entry_id"): cv.string,
@@ -1022,6 +1037,7 @@ async def ws_r4d6f20_set_mode(
         connection.send_error(msg["id"], "r4d6f20_set_mode_failed", str(err))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/test_device_entities",
     vol.Required("entry_id"): cv.string,
@@ -1189,6 +1205,7 @@ async def ws_verify_device_reads(
         connection.send_error(msg["id"], "template_verify_failed", str(err))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/clear_diagnostic_log",
     vol.Required("entry_id"): cv.string,
@@ -1205,6 +1222,7 @@ async def ws_clear_diagnostic_log(
         connection.send_error(msg["id"], "not_found", str(err))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/scan_bus",
     vol.Required("entry_id"): cv.string,
@@ -1231,6 +1249,7 @@ async def ws_scan_bus(
         connection.send_error(msg["id"], "scan_failed", str(err))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/scan_usb_ports",
 })
@@ -1272,6 +1291,7 @@ async def ws_get_serial_status(
         connection.send_error(msg["id"], "serial_status_failed", str(err))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/restore_device_template_controls",
     vol.Required("entry_id"): cv.string,
@@ -1324,6 +1344,7 @@ async def ws_restore_device_template_controls(
         connection.send_error(msg["id"], "restore_template_controls_failed", str(err))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/save_device",
     vol.Required("entry_id"): cv.string,
@@ -1388,6 +1409,7 @@ async def ws_save_device(
         connection.send_error(msg["id"], "error", str(err))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/set_device_enabled",
     vol.Required("entry_id"): cv.string,
@@ -1420,6 +1442,7 @@ async def ws_set_device_enabled(
         connection.send_error(msg["id"], "set_device_enabled_failed", str(err))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/delete_device",
     vol.Required("entry_id"): cv.string,
@@ -1474,6 +1497,7 @@ async def ws_delete_device(
         connection.send_error(msg["id"], "error", str(err))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/save_entity",
     vol.Required("entry_id"): cv.string,
@@ -1493,9 +1517,26 @@ async def ws_save_entity(
             ent_id = uuid.uuid4().hex[:8]
             entity[CONF_ENTITY_ID] = ent_id
 
+        entity_type = entity.get(CONF_ENTITY_TYPE)
+        if entity_type not in ENTITY_TYPES:
+            raise ValueError(f"Unsupported entity type: {entity_type!r}")
+
         # Coerce numeric fields
         if CONF_ADDRESS in entity:
             entity[CONF_ADDRESS] = int(entity[CONF_ADDRESS])
+            if not 0 <= entity[CONF_ADDRESS] <= 65535:
+                raise ValueError("Register addresses must be between 0 and 65535")
+        register_type = entity.get(CONF_REGISTER_TYPE)
+        allowed_registers = {
+            "sensor": [REGISTER_TYPE_HOLDING, REGISTER_TYPE_INPUT],
+            "switch": [REGISTER_TYPE_COIL, REGISTER_TYPE_HOLDING],
+            "binary_sensor": [REGISTER_TYPE_COIL, REGISTER_TYPE_DISCRETE],
+            "number": [REGISTER_TYPE_HOLDING],
+        }[entity_type]
+        if register_type not in allowed_registers:
+            raise ValueError(
+                f"A {entity_type} cannot use register type {register_type!r}"
+            )
         if CONF_ADDRESSES in entity and entity[CONF_ADDRESSES] not in (None, ""):
             if not isinstance(entity[CONF_ADDRESSES], list):
                 raise ValueError("Group switch addresses must be a list")
@@ -1542,6 +1583,7 @@ async def ws_save_entity(
         connection.send_error(msg["id"], "error", str(err))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/delete_entity",
     vol.Required("entry_id"): cv.string,
@@ -1590,6 +1632,7 @@ async def ws_delete_entity(
         connection.send_error(msg["id"], "error", str(err))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/save_hub",
     vol.Required("entry_id"): cv.string,
@@ -1645,6 +1688,7 @@ async def ws_get_templates(
         connection.send_error(msg["id"], "error", str(err))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/save_template",
     vol.Required("filename"): cv.string,
@@ -1663,6 +1707,7 @@ async def ws_save_template(
         connection.send_error(msg["id"], "error", str(err))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/delete_template",
     vol.Required("filename"): cv.string,
@@ -1680,6 +1725,7 @@ async def ws_delete_template(
         connection.send_error(msg["id"], "error", str(err))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/apply_template",
     vol.Required("entry_id"): cv.string,

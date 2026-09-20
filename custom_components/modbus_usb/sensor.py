@@ -1,10 +1,13 @@
 """Sensor platform for Modbus USB Controller."""
 from __future__ import annotations
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -20,7 +23,12 @@ from .const import (
     CONF_UNIT_OF_MEASUREMENT,
     DOMAIN,
 )
-from .coordinator import ModbusUsbCoordinator, get_device_info, get_entity_picture
+from .coordinator import (
+    ModbusUsbCoordinator,
+    get_device_info,
+    get_entity_picture,
+    normalize_enum,
+)
 
 
 async def async_setup_entry(
@@ -46,8 +54,12 @@ class ModbusUsbSensor(CoordinatorEntity[ModbusUsbCoordinator], SensorEntity):
         self._attr_unique_id = f"{entry.entry_id}_{ent[CONF_ENTITY_ID]}"
         self._attr_name = ent[CONF_NAME]
         self._attr_native_unit_of_measurement = ent.get(CONF_UNIT_OF_MEASUREMENT) or None
-        self._attr_device_class = ent.get(CONF_DEVICE_CLASS)
-        self._attr_state_class = ent.get(CONF_STATE_CLASS)
+        self._attr_device_class = normalize_enum(
+            ent.get(CONF_DEVICE_CLASS), SensorDeviceClass, ent.get(CONF_NAME, "")
+        )
+        self._attr_state_class = normalize_enum(
+            ent.get(CONF_STATE_CLASS), SensorStateClass, ent.get(CONF_NAME, "")
+        )
         self._attr_device_info = get_device_info(entry, ent)
         picture = get_entity_picture(entry, ent)
         if picture:

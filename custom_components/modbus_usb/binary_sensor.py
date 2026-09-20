@@ -4,10 +4,12 @@ Supports read-only coil and discrete-input registers as binary sensors.
 """
 from __future__ import annotations
 
-from homeassistant.components.binary_sensor import BinarySensorEntity
+from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
+    BinarySensorEntity,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -21,7 +23,12 @@ from .const import (
     CONF_NAME,
     DOMAIN,
 )
-from .coordinator import ModbusUsbCoordinator, get_device_info, get_entity_picture
+from .coordinator import (
+    ModbusUsbCoordinator,
+    get_device_info,
+    get_entity_picture,
+    normalize_enum,
+)
 
 
 async def async_setup_entry(
@@ -49,8 +56,9 @@ class ModbusUsbBinarySensor(CoordinatorEntity[ModbusUsbCoordinator], BinarySenso
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{ent[CONF_ENTITY_ID]}"
         self._attr_name = ent[CONF_NAME]
-        device_class = ent.get(CONF_DEVICE_CLASS)
-        self._attr_device_class = None if device_class == "none" else device_class
+        self._attr_device_class = normalize_enum(
+            ent.get(CONF_DEVICE_CLASS), BinarySensorDeviceClass, ent.get(CONF_NAME, "")
+        )
         self._attr_device_info = get_device_info(entry, ent)
         picture = get_entity_picture(entry, ent)
         if picture:

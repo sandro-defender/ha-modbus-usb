@@ -1,0 +1,10 @@
+# Python / test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local test virtualenv
+.venv-test/
+venv/

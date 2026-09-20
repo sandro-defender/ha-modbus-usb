@@ -467,6 +467,153 @@ async def ws_verify_device_reads(
         connection.send_error(msg["id"], "template_verify_failed", str(err))
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "modbus_usb/export_activity_log",
+        vol.Required("entry_id"): cv.string,
+        vol.Optional("format", default="json"): vol.In(["json", "csv", "text"]),
+        vol.Optional("redact", default=False): cv.boolean,
+        vol.Optional("filter", default="all"): vol.In(
+            ["all", "read", "write", "error"]
+        ),
+        vol.Optional("slave_id"): vol.Any(None, vol.Coerce(int)),
+        vol.Optional("function_code"): vol.Any(None, cv.string),
+    }
+)
+@websocket_api.async_response
+async def ws_export_activity_log(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Export the RS-485 activity log as JSON, CSV, or Redacted text."""
+    import csv
+    import io
+    import json
+
+    try:
+        coordinator = hass.data[DOMAIN][msg["entry_id"]]
+        raw_rows = list(coordinator.transaction_log)
+        filter_mode = msg.get("filter", "all")
+        slave_filter = msg.get("slave_id")
+        fc_filter = msg.get("function_code")
+        do_redact = bool(msg.get("redact", False))
+
+        # Filter rows
+        filtered: list[dict[str, Any]] = []
+        for item in raw_rows:
+            if filter_mode == "error" and item.get("status") != "error":
+                continue
+            if filter_mode == "read" and not str(
+                item.get("operation") or ""
+            ).startswith("read_"):
+                continue
+            if filter_mode == "write" and not str(
+                item.get("operation") or ""
+            ).startswith("write_"):
+                continue
+            if slave_filter is not None and item.get("slave") != slave_filter:
+                continue
+            if (
+                fc_filter
+                and str(item.get("function_code") or "").upper()
+                != str(fc_filter).upper()
+            ):
+                continue
+            filtered.append(item)
+
+        # Redact sensitive entity names and proprietary register offsets if configured
+        processed: list[dict[str, Any]] = []
+        for item in filtered:
+            row = dict(item)
+            if do_redact:
+                row["address"] = "[REDACTED_ADDR]"
+                if "request_hex" in row and row["request_hex"]:
+                    hex_parts = str(row["request_hex"]).split()
+                    if len(hex_parts) >= 4:
+                        hex_parts[2] = "XX"
+                        hex_parts[3] = "XX"
+                        row["request_hex"] = " ".join(hex_parts)
+                op = str(row.get("operation") or "")
+                # Redact entity ID / name inside operation if any
+                for prefix in ("read_", "write_"):
+                    if op.startswith(prefix) and len(op) > len(prefix):
+                        suffix = op[len(prefix) :]
+                        if suffix not in (
+                            "holding",
+                            "input",
+                            "coil",
+                            "discrete",
+                            "holding_32bit",
+                        ):
+                            row["operation"] = f"{prefix}[REDACTED]"
+            processed.append(row)
+
+        export_format = msg.get("format", "json")
+        if export_format == "json":
+            output = json.dumps(processed, indent=2)
+            content_type = "application/json"
+            filename = f"modbus_activity_log_{msg['entry_id']}.json"
+        elif export_format == "csv":
+            buf = io.StringIO()
+            fieldnames = [
+                "timestamp",
+                "status",
+                "operation",
+                "function_code",
+                "request_hex",
+                "slave",
+                "address",
+                "count",
+                "value",
+                "result",
+                "duration_ms",
+                "retries_configured",
+                "error",
+            ]
+            writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            for r in processed:
+                writer.writerow(r)
+            output = buf.getvalue()
+            content_type = "text/csv"
+            filename = f"modbus_activity_log_{msg['entry_id']}.csv"
+        else:
+            # Text / Redacted text export
+            lines = []
+            for r in processed:
+                line = " | ".join(
+                    [
+                        str(r.get("timestamp") or ""),
+                        str(r.get("status") or "").upper(),
+                        str(r.get("operation") or ""),
+                        f"fc={r.get('function_code') or 'n/a'}",
+                        f"request={r.get('request_hex') or 'n/a'}",
+                        f"slave={r.get('slave')}",
+                        f"address={r.get('address')}",
+                        f"result={r.get('result') if r.get('result') is not None else r.get('error') or 'ok'}",
+                        f"{r.get('duration_ms')}ms"
+                        if r.get("duration_ms") is not None
+                        else "",
+                    ]
+                )
+                lines.append(line)
+            output = "\n".join(lines) if lines else "No RS-485 activity recorded."
+            content_type = "text/plain"
+            filename = f"modbus_activity_log_{msg['entry_id']}.txt"
+
+        connection.send_result(
+            msg["id"],
+            {
+                "format": export_format,
+                "content_type": content_type,
+                "filename": filename,
+                "data": output,
+                "count": len(processed),
+            },
+        )
+    except Exception as err:
+        connection.send_error(msg["id"], "export_failed", str(err))
+
+
 @websocket_api.require_admin
 @websocket_api.websocket_command(
     {

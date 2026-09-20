@@ -66,11 +66,14 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     if not hass.data.get(static_key):
         if hasattr(hass.http, "async_register_static_paths"):
             from homeassistant.components.http import StaticPathConfig
+
             await hass.http.async_register_static_paths(
                 [StaticPathConfig("/modbus_usb_panel", www_path, cache_headers=False)]
             )
         else:
-            hass.http.register_static_path("/modbus_usb_panel", www_path, cache_headers=False)
+            hass.http.register_static_path(
+                "/modbus_usb_panel", www_path, cache_headers=False
+            )
         hass.data[static_key] = True
 
     # Register the sidebar panel

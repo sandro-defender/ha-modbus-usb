@@ -302,7 +302,7 @@ collapsed with a one-line live summary; expand any card for details.
 | **🔎 Find RS-485 Devices** | Scans slave IDs × baud/parity under the serial lock, then restores your client. **Use this target** prefills Board Tools. |
 | **🔬 Live Modbus Read / Write** | One-shot reads/writes for testing, without creating entities. |
 | **✅ Template read verification** | Read-only check of every non-switch entity (outputs are never toggled). |
-| **📜 RS-485 Activity & Error Log** | The single history of requests, replies, timing, and errors, with copy/clear. |
+| **📜 RS-485 Activity & Error Log** | History of requests, replies, timing, and errors, with one-click JSON/CSV/Text export, sensitive data redaction, and multi-field filtering (slave ID, function code, errors). |
 | **🛠 Board tools** | Launcher for template-aware hardware actions (chapter 8). |
 | **Automatic safe discovery** | Checks the four standard read functions at address 0, then expands only functions that answer. Read-only, with a Stop button. |
 | **Safe board discovery** | Read-only unknown-board probe across functions/addresses, with plain-language interpretation of each reply. |

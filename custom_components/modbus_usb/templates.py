@@ -138,8 +138,12 @@ async def async_load_templates(hass: HomeAssistant) -> list[dict[str, Any]]:
 
 def _template_filename(filename: str, *, add_extension: bool = False) -> str:
     """Accept a plain YAML filename, never a path or another file type."""
-    if (not isinstance(filename, str) or not filename.strip() or filename.startswith(".")
-            or any(char in filename for char in ("/", "\\", "\0"))):
+    if (
+        not isinstance(filename, str)
+        or not filename.strip()
+        or filename.startswith(".")
+        or any(char in filename for char in ("/", "\\", "\0"))
+    ):
         raise ValueError("Invalid template filename")
     if add_extension and not filename.endswith((".yaml", ".yml")):
         filename = f"{filename}.yaml"
@@ -148,7 +152,9 @@ def _template_filename(filename: str, *, add_extension: bool = False) -> str:
     return filename
 
 
-def save_template_sync(hass: HomeAssistant, filename: str, content: str) -> dict[str, Any]:
+def save_template_sync(
+    hass: HomeAssistant, filename: str, content: str
+) -> dict[str, Any]:
     """Validate first, then atomically replace a user template on disk."""
     filename = _template_filename(filename, add_extension=True)
     if not isinstance(content, str):
@@ -160,7 +166,9 @@ def save_template_sync(hass: HomeAssistant, filename: str, content: str) -> dict
 
     temporary_path = None
     try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=user_dir, suffix=".tmp", delete=False) as file:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=user_dir, suffix=".tmp", delete=False
+        ) as file:
             temporary_path = file.name
             file.write(content)
             file.flush()

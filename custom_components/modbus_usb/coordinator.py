@@ -265,6 +265,38 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 str(device_id),
             )
 
+    def _resolve_port_path(self, port: str) -> str:
+        """Detect when /dev/ttyUSB* dynamically switches index or has a persistent /dev/serial/by-id link."""
+        import os
+
+        if not port or not isinstance(port, str):
+            return port
+        if port.startswith("/dev/serial/by-id/") and os.path.exists(port):
+            return port
+        by_id_dir = "/dev/serial/by-id"
+        if os.path.isdir(by_id_dir):
+            if os.path.exists(port):
+                real_target = os.path.realpath(port)
+                for name in sorted(os.listdir(by_id_dir)):
+                    link_path = os.path.join(by_id_dir, name)
+                    try:
+                        if os.path.realpath(link_path) == real_target:
+                            return link_path
+                    except OSError:
+                        continue
+                return port
+            for name in sorted(os.listdir(by_id_dir)):
+                link_path = os.path.join(by_id_dir, name)
+                try:
+                    real_target = os.path.realpath(link_path)
+                    if os.path.exists(real_target) and (
+                        "ttyUSB" in real_target or "ttyACM" in real_target
+                    ):
+                        return link_path
+                except OSError:
+                    continue
+        return port
+
     def _ensure_connected(self) -> None:
         """Open the serial adapter or raise a useful error before a request."""
         if self.client.connected:
@@ -272,16 +304,34 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         if not self._connect_with_retries():
             raise UpdateFailed("Could not open the configured serial port")
 
-    def _connect_with_retries(self, attempts: int = 3) -> bool:
-        """Connect a USB serial client, allowing Windows time to release COM ports."""
+    def _connect_with_retries(
+        self, attempts: int = 3, base_delay: float = 0.25, max_delay: float = 3.0
+    ) -> bool:
+        """Connect a USB serial client with exponential backoff and jitter."""
+        import random
+
+        # Check if port needs persistent resolution or dynamically switched
+        serial_cfg = getattr(self, "serial_config", None)
+        current_port = getattr(self.client, "port", None) or (
+            serial_cfg.get(CONF_PORT) if serial_cfg else None
+        )
+        resolved = self._resolve_port_path(str(current_port or ""))
+        if resolved and resolved != getattr(self.client, "port", None):
+            self.client.port = resolved
+            if serial_cfg is not None:
+                serial_cfg[CONF_PORT] = resolved
+
         for attempt in range(attempts):
-            if self.client.connect():
-                return True
-            # pyserial can briefly retain a handle after the old Modbus client
-            # closes. Retrying here avoids a false unavailable-port result
-            # immediately after changing baud rate or parity.
+            try:
+                if self.client.connect():
+                    return True
+            except Exception:
+                pass
             if attempt < attempts - 1:
-                sleep(0.25)
+                # Exponential backoff with random jitter
+                backoff = min(max_delay, base_delay * (2**attempt))
+                jitter = random.uniform(0, 0.25 * backoff)
+                sleep(backoff + jitter)
         return False
 
     def reconfigure_serial(self, serial_config: dict[str, Any]) -> bool:

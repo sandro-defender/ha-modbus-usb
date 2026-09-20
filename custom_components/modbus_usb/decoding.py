@@ -65,14 +65,19 @@ def decode_words(words: list[int], data_type: str) -> float | int:
     if data_type == "bool":
         return words[0]
     word_counts = {
-        DATA_TYPE_UINT16: 1, DATA_TYPE_INT16: 1, DATA_TYPE_UINT32: 2,
-        DATA_TYPE_INT32: 2, DATA_TYPE_FLOAT32: 2,
+        DATA_TYPE_UINT16: 1,
+        DATA_TYPE_INT16: 1,
+        DATA_TYPE_UINT32: 2,
+        DATA_TYPE_INT32: 2,
+        DATA_TYPE_FLOAT32: 2,
     }
     count = word_counts.get(data_type)
     if count is None:
         raise ValueError(f"Unsupported data type: {data_type}")
     if len(words) < count:
-        raise ValueError(f"Incomplete Modbus response: expected {count} registers, got {len(words)}")
+        raise ValueError(
+            f"Incomplete Modbus response: expected {count} registers, got {len(words)}"
+        )
     if data_type == DATA_TYPE_UINT16:
         return words[0]
     if data_type == DATA_TYPE_INT16:

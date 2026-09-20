@@ -132,13 +132,17 @@
       }
 
       const filter = document.getElementById('diag-log-filter')?.value || 'all';
+      const slaveFilter = document.getElementById('diag-log-slave-filter')?.value?.trim();
+      const fcFilter = document.getElementById('diag-log-fc-filter')?.value?.trim()?.toUpperCase();
       const allTransactions = diag.transactions || [];
-      const transactions = allTransactions.filter(item =>
-        filter === 'all' ||
-        (filter === 'error' && item.status === 'error') ||
-        (filter === 'read' && String(item.operation || '').startsWith('read_')) ||
-        (filter === 'write' && String(item.operation || '').startsWith('write_'))
-      );
+      const transactions = allTransactions.filter(item => {
+        if (filter === 'error' && item.status !== 'error') return false;
+        if (filter === 'read' && !String(item.operation || '').startsWith('read_')) return false;
+        if (filter === 'write' && !String(item.operation || '').startsWith('write_')) return false;
+        if (slaveFilter && String(item.slave) !== slaveFilter) return false;
+        if (fcFilter && String(item.function_code || '').toUpperCase() !== fcFilter) return false;
+        return true;
+      });
       updateDiagnosticCardSummaries({ connected, serial, latestTransaction, diag, entry, transactions: allTransactions });
       const body = document.getElementById('diag-log-body');
       if (!transactions.length) {
@@ -173,9 +177,16 @@
         const result = await apiCall('get_serial_status', { entry_id: entry.entry_id });
         const adapter = result.adapter;
         const serial = result.serial || {};
-        hint.textContent = adapter
-          ? `${adapter.port} — ${adapter.description || 'Serial adapter'}${adapter.details ? ` (${adapter.details})` : ''}. ${serial.operation_active ? 'A Modbus request is currently using the integration lock.' : 'The integration lock is idle.'}`
-          : `${serial.port || 'Configured port'} is not currently listed by Home Assistant. Check USB passthrough, cable, and adapter power.`;
+        if (adapter) {
+          const meta = [];
+          if (adapter.chipset) meta.push(`Chipset: ${adapter.chipset}`);
+          if (adapter.vid && adapter.pid) meta.push(`VID/PID: ${adapter.vid}:${adapter.pid}`);
+          if (adapter.persistent_path && adapter.persistent_path !== adapter.port) meta.push(`Persistent path: ${adapter.persistent_path}`);
+          const metaStr = meta.length ? ` [${meta.join(' · ')}]` : '';
+          hint.textContent = `${adapter.port} — ${adapter.description || 'Serial adapter'}${adapter.details ? ` (${adapter.details})` : ''}${metaStr}. ${serial.operation_active ? 'A Modbus request is currently using the integration lock.' : 'The integration lock is idle.'}`;
+        } else {
+          hint.textContent = `${serial.port || 'Configured port'} is not currently listed by Home Assistant. Check USB passthrough, cable, and adapter power.`;
+        }
       } catch (error) {
         hint.textContent = `Could not read adapter details: ${error.message}`;
       } finally {
@@ -257,6 +268,41 @@
         renderDiagnosticsTab();
       } catch (e) {
         // The completed scan call will surface the error in its result box.
+      }
+    }
+
+        async function exportDiagnosticLog() {
+      const entry = getCurrentEntry();
+      if (!entry) return;
+      const format = document.getElementById('diag-log-export-format')?.value || 'json';
+      const redact = Boolean(document.getElementById('diag-log-export-redact')?.checked);
+      const filter = document.getElementById('diag-log-filter')?.value || 'all';
+      const slaveFilter = document.getElementById('diag-log-slave-filter')?.value?.trim();
+      const fcFilter = document.getElementById('diag-log-fc-filter')?.value?.trim();
+
+      const params = {
+        entry_id: entry.entry_id,
+        format,
+        redact,
+        filter,
+      };
+      if (slaveFilter) params.slave_id = parseInt(slaveFilter, 10);
+      if (fcFilter) params.function_code = fcFilter;
+
+      try {
+        const result = await apiCall('export_activity_log', params);
+        const blob = new Blob([result.data], { type: result.content_type || 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = result.filename || `modbus_log.${format}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        toast(`Exported ${result.count} records (${format.toUpperCase()})`, 'ok');
+      } catch (err) {
+        toast(`Export failed: ${err.message}`, 'err');
       }
     }
 

@@ -364,13 +364,22 @@
             <div class="card-title">📜 RS-485 Activity &amp; Error Log</div>
             <div class="card-subtitle">The newest 200 Modbus reads and writes recorded since this integration was loaded</div>
           </div>
-          <div class="flex gap-1 items-center">
-            <select class="form-select" id="diag-log-filter" onchange="renderDiagnosticsTab()" style="min-width:105px; padding:0.38rem 0.55rem;">
+          <div class="flex gap-1 items-center flex-wrap">
+            <select class="form-select" id="diag-log-filter" onchange="renderDiagnosticsTab()" style="min-width:105px; padding:0.38rem 0.55rem;" title="Filter by state/operation">
               <option value="all">All activity</option>
               <option value="read">Reads</option>
               <option value="write">Writes</option>
               <option value="error">Errors</option>
             </select>
+            <input class="form-input mono" id="diag-log-slave-filter" type="number" min="1" max="247" placeholder="Slave ID" oninput="renderDiagnosticsTab()" style="width:85px; padding:0.38rem 0.55rem;" title="Filter by slave ID" />
+            <input class="form-input mono" id="diag-log-fc-filter" type="text" placeholder="FC (e.g. 0x03)" oninput="renderDiagnosticsTab()" style="width:105px; padding:0.38rem 0.55rem;" title="Filter by function code" />
+            <select class="form-select" id="diag-log-export-format" style="width:90px; padding:0.38rem 0.55rem;" title="Export format">
+              <option value="json">JSON</option>
+              <option value="csv">CSV</option>
+              <option value="text">Text</option>
+            </select>
+            <label class="form-check" style="font-size:0.8rem; margin:0 0.2rem;" title="Redact entity names and register addresses"><input type="checkbox" id="diag-log-export-redact" /> Redact</label>
+            <button class="btn btn-secondary btn-sm" onclick="exportDiagnosticLog()">⬇ Export</button>
             <button class="btn btn-secondary btn-sm" onclick="copyDiagnosticLog()">⧉ Copy</button>
             <button class="btn btn-secondary btn-sm" onclick="clearDiagnosticLog()">⌫ Clear</button>
           </div>

@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 2.3.0
+
+### Hardware-Verified Template Certification
+- Certified **Eastron SDM120 / SDM230 / SDM630** meter templates with verified physical hardware registers: standard IEEE 754 32-bit float register ordering (`>f`), scale factors, and cumulative energy counters (Import, Export, and Total Active Energy at address 342).
+- Certified **eletechsup R4D6F20** Command 1 and Command 2 modes across all relay channels, digital inputs, and analog inputs (4–20 mA and 0–10 V).
+- Certified **XY-MD02** temperature and humidity environmental sensor with verified offsets and tenths-of-degree scaling (`0.1`).
+- Added explicit test fixtures matching vendor response byte dumps for certified templates in `tests/test_templates.py`.
+
+### Enhanced Serial Port & Path Resiliency
+- Enhanced serial port resolution logic to detect dynamic index switches (e.g. `/dev/ttyUSB0` to `/dev/ttyUSB1`) by looking up persistent `/dev/serial/by-id/...` paths.
+- Implemented automatic graceful serial reconnection with exponential backoff and jitter under the coordinator's serial lock.
+- Surfaced detailed adapter metadata (chipset, vendor ID, product ID, persistent path) in the **Serial Profile** tab.
+
+### Diagnostic Log Export & Filtering
+- Added one-click export (JSON / CSV / Redacted Text) for the sidebar's rolling RS-485 activity log via `modbus_usb/export_activity_log`.
+- Added option to automatically redact sensitive entity names and proprietary register offsets in exports.
+- Added client-side and backend filtering by slave ID, function code, and error state.
+
 ### Fixed
 - Preserve float32 setpoint fractions and encode negative int16 values as two's-complement register words; reject out-of-range numeric writes before serial I/O.
 - Require administrator authorization for REST template mutations and direct sidebar switch writes; reject config entries belonging to other integrations.

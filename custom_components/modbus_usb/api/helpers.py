@@ -36,26 +36,79 @@ from ..const import (
 _LOGGER = logging.getLogger(__name__)
 
 
-def _list_serial_ports() -> list[dict[str, str]]:
-    """Return serial ports visible to the Home Assistant host."""
+def _resolve_persistent_port_path(port: str) -> str:
+    """Detect when /dev/ttyUSB* dynamically switches index or lookup persistent by-id path."""
+    import os
+
+    if not port or not isinstance(port, str):
+        return port
+    if port.startswith("/dev/serial/by-id/") and os.path.exists(port):
+        return port
+    by_id_dir = "/dev/serial/by-id"
+    if os.path.isdir(by_id_dir):
+        if os.path.exists(port):
+            real_target = os.path.realpath(port)
+            for name in sorted(os.listdir(by_id_dir)):
+                link_path = os.path.join(by_id_dir, name)
+                try:
+                    if os.path.realpath(link_path) == real_target:
+                        return link_path
+                except OSError:
+                    continue
+            return port
+        for name in sorted(os.listdir(by_id_dir)):
+            link_path = os.path.join(by_id_dir, name)
+            try:
+                real_target = os.path.realpath(link_path)
+                if os.path.exists(real_target) and (
+                    "ttyUSB" in real_target or "ttyACM" in real_target
+                ):
+                    return link_path
+            except OSError:
+                continue
+    return port
+
+
+def _list_serial_ports() -> list[dict[str, Any]]:
+    """Return serial ports and detailed adapter metadata visible to Home Assistant."""
+
     try:
         from serial.tools import list_ports
     except ImportError:
         _LOGGER.warning("USB port scanning is unavailable because pyserial is missing")
         return []
 
-    ports: list[dict[str, str]] = []
+    ports: list[dict[str, Any]] = []
     for port in list_ports.comports():
-        details = " · ".join(
+        details_parts = [
             value
             for value in (port.manufacturer, port.product, port.hwid)
             if value and value != "n/a"
-        )
+        ]
+        persistent_path = _resolve_persistent_port_path(port.device)
+        vid_hex = f"0x{port.vid:04X}" if port.vid is not None else None
+        pid_hex = f"0x{port.pid:04X}" if port.pid is not None else None
+        chipset = port.product or port.description or "Standard Serial Adapter"
+        if port.manufacturer and port.manufacturer != "n/a":
+            chipset = f"{port.manufacturer} ({chipset})"
+
         ports.append(
             {
                 "port": port.device,
+                "persistent_path": persistent_path,
                 "description": port.description or "Serial device",
-                "details": details,
+                "details": " · ".join(details_parts),
+                "manufacturer": port.manufacturer
+                if port.manufacturer != "n/a"
+                else None,
+                "product": port.product if port.product != "n/a" else None,
+                "vid": vid_hex,
+                "pid": pid_hex,
+                "hwid": port.hwid if port.hwid != "n/a" else None,
+                "serial_number": port.serial_number
+                if port.serial_number != "n/a"
+                else None,
+                "chipset": chipset,
             }
         )
     return sorted(ports, key=lambda item: item["port"])

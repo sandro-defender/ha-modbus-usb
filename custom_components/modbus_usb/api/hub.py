@@ -93,8 +93,20 @@ async def ws_get_serial_status(
         serial = coordinator.get_diagnostics().get("serial", {})
         configured_port = str(serial.get("port") or "")
         ports = await hass.async_add_executor_job(_list_serial_ports)
+        # Match either exact port or persistent symlink path
         adapter = next(
-            (item for item in ports if item.get("port") == configured_port), None
+            (
+                item
+                for item in ports
+                if item.get("port") == configured_port
+                or item.get("persistent_path") == configured_port
+                or (
+                    configured_port
+                    and item.get("persistent_path")
+                    and configured_port in str(item.get("persistent_path"))
+                )
+            ),
+            None,
         )
         connection.send_result(msg["id"], {"serial": serial, "adapter": adapter})
     except Exception as err:

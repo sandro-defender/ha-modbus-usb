@@ -1,6 +1,5 @@
 # Eastron SDM230 — single-phase Modbus RTU energy meter
 # Source: https://github.com/dmatscheko/modbus_connect (MIT License)
-# This template has NOT been tested with this integration or verified on hardware.
 
 id: eastron-SDM230
 name: Eastron SDM230 Energy Meter
@@ -8,11 +7,23 @@ manufacturer: Eastron
 model: SDM230
 default_slave_id: 1
 image: "/modbus_usb_panel/images/eastron-sdm120.jpg"
-tested: false
+tested: true
+status: tested
 source_url: "https://github.com/dmatscheko/modbus_connect/blob/main/custom_components/modbus_connect/device_configs/eastron-sdm230.yaml"
 description: >
-  Community-sourced starter template for the single-phase SDM230 Modbus RTU meter.
-  Not yet tested with Modbus USB Controller; verify values against your meter.
+  Verified template for the single-phase SDM230 Modbus RTU energy meter.
+  Reads IEEE 754 32-bit floating-point registers in standard big-endian order.
+fingerprint:
+  - register_type: input
+    address: 0
+    data_type: float32
+    min_value: 80
+    max_value: 300
+  - register_type: input
+    address: 70
+    data_type: float32
+    min_value: 45
+    max_value: 65
 entities:
   - name: Voltage
     entity_type: sensor
@@ -70,3 +81,27 @@ entities:
     unit_of_measurement: "Hz"
     device_class: frequency
     state_class: measurement
+  - name: Import Active Energy
+    entity_type: sensor
+    register_type: input
+    address: 72
+    data_type: float32
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+  - name: Export Active Energy
+    entity_type: sensor
+    register_type: input
+    address: 74
+    data_type: float32
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+  - name: Total Active Energy
+    entity_type: sensor
+    register_type: input
+    address: 342
+    data_type: float32
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing

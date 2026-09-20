@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import logging
 import os
+import tempfile
 from typing import Any
 
 import yaml
 from homeassistant.core import HomeAssistant
 
 from .const import TEMPLATES_DIR_NAME
+from .validation import validate_template
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,14 +50,13 @@ def _parse_template_file(
     try:
         with open(filepath, encoding="utf-8") as f:
             raw_content = f.read()
-        data = yaml.safe_load(raw_content) or {}
-        if not isinstance(data, dict):
-            return None
+        data = validate_template(yaml.safe_load(raw_content))
 
         template_id = data.get("id") or os.path.splitext(filename)[0]
         return {
             "id": template_id,
             "filename": filename,
+            "source": source,
             "source": source,
             "name": data.get("name", template_id),
             "manufacturer": data.get("manufacturer", "Generic"),
@@ -97,6 +98,8 @@ def load_templates_sync(hass: HomeAssistant) -> list[dict[str, Any]]:
         for fname in sorted(os.listdir(user_dir)):
             if fname.endswith((".yaml", ".yml")):
                 fpath = os.path.join(user_dir, fname)
+                if os.path.islink(fpath) or not os.path.isfile(fpath):
+                    continue
                 tpl = _parse_template_file(fpath, fname, "user")
                 if tpl:
                     templates.append(tpl)
@@ -108,11 +111,11 @@ def load_templates_sync(hass: HomeAssistant) -> list[dict[str, Any]]:
     if os.path.isdir(BUNDLED_TEMPLATES_DIR):
         for fname in sorted(os.listdir(BUNDLED_TEMPLATES_DIR)):
             if fname.endswith((".yaml", ".yml")):
-                tid = os.path.splitext(fname)[0]
                 fpath = os.path.join(BUNDLED_TEMPLATES_DIR, fname)
                 bundled_tpl = _parse_template_file(fpath, fname, "bundled")
                 if not bundled_tpl:
                     continue
+                tid = bundled_tpl["id"]
                 if tid not in seen_ids:
                     templates.append(bundled_tpl)
                     seen_ids.add(bundled_tpl["id"])
@@ -134,36 +137,42 @@ async def async_load_templates(hass: HomeAssistant) -> list[dict[str, Any]]:
     return await hass.async_add_executor_job(load_templates_sync, hass)
 
 
-def save_template_sync(
-    hass: HomeAssistant, filename: str, content: str
-) -> dict[str, Any]:
-    """Synchronously validate and save a template file."""
-    # Ensure filename ends with .yaml
-    if not filename.endswith((".yaml", ".yml")):
+def _template_filename(filename: str, *, add_extension: bool = False) -> str:
+    """Accept a plain YAML filename, never a path or another file type."""
+    if (not isinstance(filename, str) or not filename.strip() or filename.startswith(".")
+            or any(char in filename for char in ("/", "\\", "\0"))):
+        raise ValueError("Invalid template filename")
+    if add_extension and not filename.endswith((".yaml", ".yml")):
         filename = f"{filename}.yaml"
+    if not filename.endswith((".yaml", ".yml")):
+        raise ValueError("Template filename must end in .yaml or .yml")
+    return filename
 
-    # Sanitize filename (no directory traversal)
-    filename = os.path.basename(filename)
-    if not filename or filename in (".", ".."):
-        raise ValueError("Invalid filename")
 
-    # Validate YAML parsing
-    data = yaml.safe_load(content)
-    if not isinstance(data, dict):
-        raise ValueError(
-            "Template YAML must define a mapping/dictionary at the root level"
-        )
-    if "name" not in data and "id" not in data:
-        raise ValueError("Template must contain at least 'name' or 'id'")
+def save_template_sync(hass: HomeAssistant, filename: str, content: str) -> dict[str, Any]:
+    """Validate first, then atomically replace a user template on disk."""
+    filename = _template_filename(filename, add_extension=True)
+    if not isinstance(content, str):
+        raise ValueError("Template content must be a string")
+    validate_template(yaml.safe_load(content))
 
     user_dir = ensure_templates_dir(hass)
     filepath = os.path.join(user_dir, filename)
 
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(content)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=user_dir, suffix=".tmp", delete=False) as file:
+            temporary_path = file.name
+            file.write(content)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temporary_path, filepath)
+    finally:
+        if temporary_path and os.path.exists(temporary_path):
+            os.remove(temporary_path)
 
     tpl = _parse_template_file(filepath, filename)
-    if not tpl:
+    if not tpl or tpl.get("error"):
         raise ValueError("Failed to load saved template")
     return tpl
 
@@ -179,13 +188,13 @@ async def async_save_template(
 
 def delete_template_sync(hass: HomeAssistant, filename: str) -> bool:
     """Synchronously delete a template YAML file."""
-    filename = os.path.basename(filename)
-    user_dir = get_user_templates_dir(hass)
-    filepath = os.path.join(user_dir, filename)
-    if os.path.exists(filepath):
+    filename = _template_filename(filename)
+    filepath = os.path.join(get_user_templates_dir(hass), filename)
+    try:
         os.remove(filepath)
-        return True
-    return False
+    except FileNotFoundError:
+        return False
+    return True
 
 
 async def async_delete_template(hass: HomeAssistant, filename: str) -> bool:

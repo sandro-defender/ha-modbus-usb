@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 
@@ -15,9 +16,8 @@ def call_modbus_on_client(
     versions as well as current Home Assistant installations.
     """
     method = getattr(client, method_name)
-    try:
-        return method(*args, device_id=slave, **kwargs)
-    except TypeError as err:
-        if "device_id" not in str(err):
-            raise
-        return method(*args, slave=slave, **kwargs)
+    # Do not retry a write after TypeError: older clients may silently accept
+    # arbitrary keyword arguments, leaving the request addressed to slave 0.
+    parameters = inspect.signature(method).parameters
+    unit_keyword = "slave" if "slave" in parameters else "device_id"
+    return method(*args, **{unit_keyword: slave}, **kwargs)

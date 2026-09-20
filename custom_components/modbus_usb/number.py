@@ -6,9 +6,13 @@ can be read and written directly from the HA frontend.
 
 from __future__ import annotations
 
+import math
+import struct
+
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -29,6 +33,8 @@ from .const import (
     CONF_STEP,
     CONF_UNIT_OF_MEASUREMENT,
     DATA_TYPE_UINT16,
+    DATA_TYPE_FLOAT32,
+    DATA_TYPE_INT16,
     DATA_TYPE_WORD_COUNT,
     DOMAIN,
 )
@@ -132,21 +138,34 @@ class ModbusUsbNumber(CoordinatorEntity[ModbusUsbCoordinator], NumberEntity):
         scale = self._scale
         slave = self._resolve_slave_id()
 
-        # Convert display value back to raw integer
-        raw_int = (
-            int(round(value / scale)) if scale not in (1.0, 0.0) else int(round(value))
-        )
+        if not math.isfinite(value):
+            raise HomeAssistantError("Number value must be finite")
+        if not self.native_min_value <= value <= self.native_max_value:
+            raise HomeAssistantError("Number value is outside its configured range")
+        raw_value = value / scale
+        if not math.isfinite(raw_value):
+            raise HomeAssistantError("Scaled number value must be finite")
+        if data_type != DATA_TYPE_FLOAT32:
+            raw_value = round(raw_value)
+        formats = {"uint16": ">H", "int16": ">h", "uint32": ">I", "int32": ">i", "float32": ">f"}
+        try:
+            encoded = struct.pack(formats[data_type], raw_value)
+        except (KeyError, struct.error, OverflowError) as err:
+            raise HomeAssistantError(f"Value cannot be represented as {data_type}") from err
+        # Pymodbus register writes are unsigned 16-bit wire values.
+        if data_type == DATA_TYPE_INT16:
+            raw_value = struct.unpack(">H", encoded)[0]
 
         if count == 1:
             await self.hass.async_add_executor_job(
-                self.coordinator.write_register, address, raw_int, slave
+                self.coordinator.write_register, address, raw_value, slave
             )
         else:
             # 32-bit: write two registers using pymodbus write_registers
             await self.hass.async_add_executor_job(
                 self.coordinator.write_registers_32bit,
                 address,
-                raw_int,
+                raw_value,
                 data_type,
                 slave,
             )

@@ -8,6 +8,7 @@ the WebSocket API.
 from __future__ import annotations
 
 import logging
+import math
 import struct
 from enum import Enum
 from typing import Any
@@ -53,13 +54,23 @@ def as_float(value: Any, default: float) -> float:
     settings; ``float(None)`` raised TypeError and removed the platform.
     """
     try:
-        return float(value)
+        result = float(value)
+        return result if math.isfinite(result) else float(default)
     except (TypeError, ValueError):
         return float(default)
 
 
 def decode_words(words: list[int], data_type: str) -> float | int:
     """Decode a list of 16-bit register words into a number."""
+    word_counts = {
+        DATA_TYPE_UINT16: 1, DATA_TYPE_INT16: 1, DATA_TYPE_UINT32: 2,
+        DATA_TYPE_INT32: 2, DATA_TYPE_FLOAT32: 2,
+    }
+    count = word_counts.get(data_type)
+    if count is None:
+        raise ValueError(f"Unsupported data type: {data_type}")
+    if len(words) < count:
+        raise ValueError(f"Incomplete Modbus response: expected {count} registers, got {len(words)}")
     if data_type == DATA_TYPE_UINT16:
         return words[0]
     if data_type == DATA_TYPE_INT16:
@@ -72,5 +83,7 @@ def decode_words(words: list[int], data_type: str) -> float | int:
     if data_type == DATA_TYPE_INT32:
         return struct.unpack(">i", raw)[0]
     if data_type == DATA_TYPE_FLOAT32:
-        return struct.unpack(">f", raw)[0]
-    return words[0]
+        value = struct.unpack(">f", raw)[0]
+        if not math.isfinite(value):
+            raise ValueError("Modbus float response is not finite")
+        return value

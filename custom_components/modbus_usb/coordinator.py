@@ -61,10 +61,14 @@ from .device_info import (
 from .diagnostics import diagnostic_request_frame, modbus_crc16
 
 _LOGGER = logging.getLogger(__name__)
+# Compatibility alias for callers of the former coordinator-local helper.
+_decode_words = decode_words
 
 
 class ModbusUsbCoordinator(DataUpdateCoordinator):
     """Polls the USB-connected Modbus controller and shares results with entities."""
+
+    _call_modbus_on_client = staticmethod(call_modbus_on_client)
 
     def __init__(
         self,
@@ -971,7 +975,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             raise
 
     def write_registers_32bit(
-        self, address: int, value: int, data_type: str, slave: int | None = None
+        self, address: int, value: int | float, data_type: str, slave: int | None = None
     ) -> None:
         """Write two consecutive holding registers for 32-bit data types."""
         target_slave = int(slave if slave is not None else self.slave_id)
@@ -979,8 +983,10 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             raw = struct.pack(">i", value)
         elif data_type in ("float32",):
             raw = struct.pack(">f", value)
-        else:  # uint32
+        elif data_type == "uint32":
             raw = struct.pack(">I", value)
+        else:
+            raise ValueError(f"Unsupported 32-bit data type: {data_type}")
         high, low = struct.unpack(">HH", raw)
         started = datetime.now()
         try:

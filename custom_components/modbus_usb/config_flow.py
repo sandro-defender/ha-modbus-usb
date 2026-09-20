@@ -103,6 +103,9 @@ class ModbusUsbConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
+            # A serial adapter cannot safely be owned by two entries, even if
+            # they specify different default slave IDs.
+            self._async_abort_entries_match({CONF_PORT: user_input[CONF_PORT]})
             await self.async_set_unique_id(
                 f"{user_input[CONF_PORT]}_{user_input[CONF_SLAVE_ID]}"
             )

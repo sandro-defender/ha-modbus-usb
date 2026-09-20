@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Preserve float32 setpoint fractions and encode negative int16 values as two's-complement register words; reject out-of-range numeric writes before serial I/O.
+- Require administrator authorization for REST template mutations and direct sidebar switch writes; reject config entries belonging to other integrations.
+- Validate entity/template register spans, slave IDs, numeric settings, template offsets, and sidebar hub settings before saving. Keep holding-register binary inputs supported.
+- Save templates atomically, reject unsafe filenames, avoid following template symlinks, and match overrides by declared template ID.
+- Keep services and serial clients alive after failed unloads; scope panel/API registration to each Home Assistant instance and retry failed registration.
+- Prevent creating another hub for a serial port already configured, even with a different default slave ID.
+- Use monotonic transaction timing, reject incomplete/non-finite register responses, and select the Pymodbus unit-ID keyword before sending: legacy clients silently ignored `device_id`, potentially using broadcast address 0. Never retry a write on an unrelated TypeError.
+- Declare the required pyserial dependency and constrain Pymodbus to supported major version 3.
+- Correct the README license label to match the repository's MIT LICENSE.
+
+### Development
+- Add regression tests and pull-request/Dev CI across Python 3.11/3.12 and legacy/current Pymodbus.
+- Run tests and lint before publishing releases; do not publish from manually selected non-main branches.
+
 ## 2.2.0
 
 ### Brand refresh

@@ -6,6 +6,13 @@ This module hooks pymodbus transaction tracing (``trace_packet`` on modern
 releases, the ``pymodbus.logging`` frame dumps on older ones) and records the
 actual TX and RX bytes of every serial transaction.
 
+Since v2.7.0 the capture keeps the *full* raw RX stream of one coordinator
+transaction, already split into complete RTU frames: a batch write or a
+board block reader that performs several serial exchanges still produces
+one log entry, and every response frame that traveled for it (write
+echoes, the frames of a batch read, an exception plus a follow-up read)
+is captured and handed to the inspector as a list of decoded frames.
+
 The frame extraction logic is pure and Home Assistant-free so it stays
 trivially unit-testable: response length is derived from the received bytes
 themselves (exception frames, byte-count frames, and write echoes) exactly
@@ -26,6 +33,11 @@ MAX_RTU_FRAME_LENGTH = 256
 # Safety cap for the per-transaction receive buffer when frames never
 # complete (bus noise, baud mismatch); the buffer is reset at this size.
 RX_BUFFER_LIMIT = 1024
+# Safety cap for the number of complete response frames kept per coordinator
+# transaction. Batch writes of N items produce N echo frames; the cap keeps
+# the log bounded when a runaway device answers a batch with a flood of
+# frames.
+MAX_RESPONSE_FRAMES = 64
 
 _READ_FUNCTIONS = frozenset({0x01, 0x02, 0x03, 0x04})
 _ECHO_RESPONSE_FUNCTIONS = frozenset({0x05, 0x06, 0x0F, 0x10})
@@ -94,8 +106,45 @@ def extract_response_frame(rx_buffer: bytes) -> tuple[bytes | None, int]:
     return rx_buffer[:expected], expected
 
 
+def extract_response_frames(rx_buffer: bytes) -> tuple[list[bytes], int]:
+    """Split the start of a receive buffer into complete RTU response frames.
+
+    Returns ``(frames, consumed)`` where ``frames`` is the list of complete
+    frames found at the start of the buffer (in arrival order, capped at
+    ``MAX_RESPONSE_FRAMES``) and ``consumed`` is the length of the buffer
+    prefix that is accounted for — complete frames plus any desynced
+    garbage that had to be dropped. ``rx_buffer[consumed:]`` is the part
+    that is still being received and must be kept for the next chunk.
+
+    Extraction stops at the first incomplete frame, so a partial tail stays
+    in the buffer; a desync (declared byte count above the RTU maximum)
+    drops everything behind it.
+    """
+    frames: list[bytes] = []
+    offset = 0
+    while offset < len(rx_buffer) and len(frames) < MAX_RESPONSE_FRAMES:
+        frame, consumed = extract_response_frame(rx_buffer[offset:])
+        if frame is not None:
+            frames.append(frame)
+        offset += consumed
+        if frame is None:
+            # Either still incomplete (consumed == 0) or desynced garbage
+            # that was dropped (consumed > 0); both end this pass.
+            break
+    return frames, offset
+
+
 class ResponseCapture:
     """Records the raw TX/RX bytes of the most recent serial transaction.
+
+    A *window* runs from ``consume`` until the next ``consume`` and covers
+    one whole coordinator transaction — including batch operations that
+    perform several serial exchanges before a single log entry is recorded.
+    Each TX frame updates the recorded request (the last TX wins, mirroring
+    the single ``request_hex`` field of the log entry), while every
+    complete response frame received for the window is kept, so multi-frame
+    responses (batch reads, block readers, exception plus follow-up) arrive
+    at the inspector as a list instead of only the last pair.
 
     The class is thread-safe: pymodbus tracing may run on the serial
     executor thread while ``consume`` is called by the coordinator when it
@@ -106,6 +155,17 @@ class ResponseCapture:
         self._lock = threading.Lock()
         self._tx: bytes | None = None
         self._rx = b""
+        # Offset into ``_rx`` up to which bytes have already been framed
+        # (or dropped as desync). pymodbus re-passes growing buffers, so the
+        # same bytes must never be framed twice.
+        self._rx_offset = 0
+        # Set when a TX frame arrived and no RX bytes merged since; used to
+        # tell a fresh (possibly identical) response frame apart from a
+        # stale re-pass of an already fully framed buffer.
+        self._tx_pending = False
+        self._frames: list[bytes] = []
+        # Last complete frame of the window; kept for callers that only
+        # care about the most recent response (backward compatibility).
         self._response: bytes | None = None
         self._active = False
         # Name of the installed hook ("trace_packet", "client_trace_packet",
@@ -119,9 +179,11 @@ class ResponseCapture:
     def on_trace(self, sending: bool, data: bytes) -> bytes:
         """Consume one pymodbus trace call; always return ``data`` unchanged.
 
-        Sync pymodbus passes the *growing* receive buffer on every poll,
-        async pymodbus passes only the new chunk. Both shapes are normalized
-        into one per-transaction buffer before frame extraction.
+        Sync pymodbus passes the *growing* receive buffer on every poll and
+        resets it after each consumed frame; async pymodbus passes only the
+        new chunk. Both shapes are normalized into one per-transaction
+        buffer that is reframed on every chunk, so a single coordinator
+        transaction keeps its full raw RX stream.
         """
         try:
             chunk = bytes(data)
@@ -129,39 +191,80 @@ class ResponseCapture:
             return data
         with self._lock:
             if sending:
-                # A new request opens a new capture window.
+                # A new request updates the recorded TX frame. The receive
+                # window stays open until consume() so multi-frame
+                # transactions (batch writes, board block readers) keep
+                # every response frame of the whole operation — but any
+                # still-incomplete RX tail belongs to the previous request
+                # and is dropped, exactly like pymodbus's per-request
+                # receive buffer.
                 self._tx = chunk
-                self._rx = b""
-                self._response = None
+                self._tx_pending = True
                 self._active = True
+                self._rx = self._rx[: self._rx_offset]
                 return data
             if not self._active:
                 # RX observed without a TX (hook installed mid-transaction).
                 self._active = True
-            if self._response is not None:
-                # One request/response pair is already complete; ignore
-                # trailing bytes until the next TX frame.
-                return data
-            if chunk.startswith(self._rx):
-                self._rx = chunk
-            elif self._rx.startswith(chunk):
-                pass  # stale re-send of a shorter buffer prefix
-            else:
-                self._rx += chunk
-            frame, consumed = extract_response_frame(self._rx)
-            if frame is not None:
-                self._response = frame
-                self._rx = self._rx[consumed:]
-            elif consumed:
-                self._rx = self._rx[consumed:]  # unrecoverable desync; drop
-            elif len(self._rx) > RX_BUFFER_LIMIT:
-                self._rx = b""  # runaway noise guard
+            self._merge_rx(chunk)
         return data
+
+    def _merge_rx(self, chunk: bytes) -> None:
+        """Merge one RX chunk into the per-transaction buffer and reframe it."""
+        if not chunk:
+            return
+        fully_consumed = self._rx_offset == len(self._rx)
+        if fully_consumed and self._rx:
+            if chunk == self._rx and not self._tx_pending:
+                # Stale re-pass of an already fully framed buffer (some
+                # pymodbus revisions re-trace the buffer after the framer
+                # consumed it); no new bytes arrived.
+                return
+            # The previous buffer is fully framed; start fresh so a new
+            # frame — even one identical to the previous echo — is not
+            # mistaken for a re-pass of the old buffer.
+            self._rx = b""
+            self._rx_offset = 0
+        self._tx_pending = False
+        if chunk.startswith(self._rx):
+            # Sync pymodbus re-passes the growing buffer on every poll.
+            self._rx = chunk
+        elif self._rx.startswith(chunk):
+            return  # stale re-send of a shorter buffer prefix
+        elif chunk in self._rx:
+            return  # re-send of an already-buffered chunk; nothing new
+        else:
+            self._rx += chunk
+
+        frames, consumed = extract_response_frames(self._rx[self._rx_offset :])
+        for frame in frames:
+            if len(self._frames) >= MAX_RESPONSE_FRAMES:
+                break
+            self._frames.append(frame)
+            self._response = frame
+        self._rx_offset += consumed
+        if len(self._frames) >= MAX_RESPONSE_FRAMES:
+            # Frame cap reached; stop buffering the rest of this window.
+            self._rx = b""
+            self._rx_offset = 0
+        elif len(self._rx) - self._rx_offset > RX_BUFFER_LIMIT:
+            # Runaway noise in the not-yet-framed part; drop it, keep frames.
+            self._rx = self._rx[: self._rx_offset]
 
     # ── coordinator entry point ────────────────────────────────────────
 
     def consume(self) -> dict[str, Any] | None:
-        """Pop the recorded TX/RX pair for the transaction that just ended.
+        """Pop the recorded TX/RX stream for the transaction that just ended.
+
+        Returns a dictionary with:
+
+        - ``request_hex``: the last TX frame of the window (hex string) —
+          for batch operations this is the final serial request;
+        - ``response_hex``: the last complete response frame, matching the
+          pre-v2.7.0 behaviour;
+        - ``response_frames``: every complete response frame of the window
+          (list of hex strings, oldest first), or None when no frame was
+          captured.
 
         Returns None when no serial I/O was observed since the previous
         consume, so recorded bookkeeping entries never adopt stale frames.
@@ -169,14 +272,22 @@ class ResponseCapture:
         with self._lock:
             if not self._active:
                 return None
-            window = {
+            window: dict[str, Any] = {
                 "request_hex": _format_bytes(self._tx) if self._tx else None,
                 "response_hex": (
                     _format_bytes(self._response) if self._response else None
                 ),
+                "response_frames": (
+                    [_format_bytes(frame) for frame in self._frames]
+                    if self._frames
+                    else None
+                ),
             }
             self._tx = None
             self._rx = b""
+            self._rx_offset = 0
+            self._tx_pending = False
+            self._frames = []
             self._response = None
             self._active = False
             return window

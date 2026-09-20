@@ -1356,6 +1356,40 @@
   .designer-apply-row { margin-top: 0.6rem; padding-top: 0.7rem; border-top: 1px dashed var(--border-subtle); }
   .designer-fingerprint-section { margin-bottom: 1rem; padding-bottom: 0.4rem; border-bottom: 1px dashed var(--border-subtle); }
 
+/* ─── v2.7.0: inspector filters, multi-frame RX & designer editor ── */
+  .inspector-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem; margin-bottom: 0.75rem; }
+  .inspector-filter { display: flex; flex-direction: column; gap: 0.2rem; }
+  .inspector-filter-label { font-size: 0.62rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+  .inspector-filter-select { width: auto; min-width: 84px; padding: 0.3rem 0.5rem; font-size: 0.75rem; }
+  .inspector-filter-hex { flex: 1; min-width: 150px; }
+  .inspector-filter-input { padding: 0.3rem 0.5rem; font-size: 0.75rem; }
+  .inspector-filter-count { color: var(--text-dim); font-size: 0.72rem; align-self: center; white-space: nowrap; }
+
+  .inspector-frame-list { display: flex; flex-direction: column; gap: 0.75rem; }
+  .inspector-frame-item { padding: 0.6rem 0.7rem; border-radius: 10px; border: 1px solid var(--border-subtle); background: rgba(255,255,255,0.02); }
+  .inspector-frame-item-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.45rem; flex-wrap: wrap; }
+  .inspector-frame-item-index { font-size: 0.7rem; font-weight: 700; color: #a5b4fc; background: rgba(99,102,241,0.15); border-radius: 6px; padding: 0.1rem 0.45rem; }
+  .inspector-frame-item-summary { color: var(--text-dim); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+
+  .designer-import-row { margin-bottom: 0.75rem; }
+  .designer-editor { display: grid; grid-template-columns: auto 1fr; border-radius: 8px; overflow: hidden; }
+  .designer-line-numbers {
+    padding: 0.55rem 0.5rem;
+    margin: 0;
+    background: rgba(15, 23, 42, 0.95);
+    border-right: 1px solid rgba(255,255,255,0.08);
+    color: rgba(148,163,184,0.55);
+    font-size: 0.82rem;
+    line-height: 1.45;
+    white-space: pre;
+    overflow: hidden;
+    text-align: right;
+    min-width: 2.4ch;
+    user-select: none;
+  }
+  .designer-editor .designer-yaml { border-radius: 0; }
+  .designer-editor-hint { margin-top: 0.35rem; }
+
   @media (max-width: 1000px) {
     .inspector-layout, .designer-layout { grid-template-columns: 1fr; }
   }

@@ -133,9 +133,16 @@
           },
           transactions: [
             {
-              transaction: { timestamp: new Date().toISOString(), operation: 'read_input', slave: 1, address: 0, count: 2, status: 'ok', function_code: '0x04', request_hex: '01 04 00 00 00 02 71 CB', request_captured: true, response_hex: '01 04 04 43 66 66 66 A5 95', duration_ms: 25.4, latency: { lock_wait_ms: 0.3, connect_ms: 0.1, frame_delay_ms: 0, request_ms: 25 }, error: null },
+              // Batch-style transaction: the full RX stream (two frames) is
+              // carried in response_frames; response_frame/response_hex hold
+              // the last frame, exactly like the live server view.
+              transaction: { timestamp: new Date().toISOString(), operation: 'read_input', slave: 1, address: 0, count: 2, status: 'ok', function_code: '0x04', request_hex: '01 04 00 00 00 02 71 CB', request_captured: true, response_hex: '01 03 04 00 01 00 02 2A 32', response_frames: ['01 04 04 43 66 66 66 A5 95', '01 03 04 00 01 00 02 2A 32'], duration_ms: 25.4, latency: { lock_wait_ms: 0.3, connect_ms: 0.1, frame_delay_ms: 0, request_ms: 25 }, error: null },
               frame: { raw_hex: '01 04 00 00 00 02 71 CB', frame_length: 8, direction: 'request', slave_id: 1, function_code: 4, function_name: 'Read Input Registers', frame_kind: 'read_request', address: 0, count: 2, crc_present: true, crc_low: 113, crc_high: 203, crc_received: 52081, crc_expected: 52081, crc_valid: true, errors: [], valid: true, summary: 'Read Input Registers · slave 1 · addr 0000 · count 2' },
-              response_frame: { raw_hex: '01 04 04 43 66 66 66 A5 95', frame_length: 9, direction: 'response', slave_id: 1, function_code: 4, function_name: 'Read Input Registers', frame_kind: 'read_response', byte_count: 4, data_hex: '43 66 66 66', values: [17254, 26214], crc_present: true, crc_low: 165, crc_high: 149, crc_received: 38309, crc_expected: 38309, crc_valid: true, errors: [], valid: true, summary: 'Read Input Registers · slave 1 · 4 data bytes' },
+              response_frame: { raw_hex: '01 03 04 00 01 00 02 2A 32', frame_length: 9, direction: 'response', slave_id: 1, function_code: 3, function_name: 'Read Holding Registers', frame_kind: 'read_response', byte_count: 4, data_hex: '00 01 00 02', values: [1, 2], crc_present: true, crc_low: 42, crc_high: 50, crc_received: 12842, crc_expected: 12842, crc_valid: true, errors: [], valid: true, summary: 'Read Holding Registers · slave 1 · 4 data bytes' },
+              response_frames: [
+                { raw_hex: '01 04 04 43 66 66 66 A5 95', frame_length: 9, direction: 'response', slave_id: 1, function_code: 4, function_name: 'Read Input Registers', frame_kind: 'read_response', byte_count: 4, data_hex: '43 66 66 66', values: [17254, 26214], crc_present: true, crc_low: 149, crc_high: 165, crc_received: 42389, crc_expected: 42389, crc_valid: true, errors: [], valid: true, summary: 'Read Input Registers · slave 1 · 4 data bytes' },
+                { raw_hex: '01 03 04 00 01 00 02 2A 32', frame_length: 9, direction: 'response', slave_id: 1, function_code: 3, function_name: 'Read Holding Registers', frame_kind: 'read_response', byte_count: 4, data_hex: '00 01 00 02', values: [1, 2], crc_present: true, crc_low: 42, crc_high: 50, crc_received: 12842, crc_expected: 12842, crc_valid: true, errors: [], valid: true, summary: 'Read Holding Registers · slave 1 · 4 data bytes' },
+              ],
             },
             {
               transaction: { timestamp: new Date().toISOString(), operation: 'write_holding', slave: 3, address: 128, count: 1, status: 'ok', function_code: '0x06', request_hex: '03 06 00 80 00 01 48 00', request_captured: true, response_hex: '03 06 00 80 00 01 48 00', duration_ms: 65.2, latency: { lock_wait_ms: 4.8, connect_ms: 0, frame_delay_ms: 10, request_ms: 50.4 }, error: null },
@@ -329,6 +336,7 @@
         renderHubTab();
         renderDiagnosticsTab();
         renderDesignerApplyTargets();
+        renderDesignerImportOptions();
         if (document.getElementById('pane-inspector')?.classList.contains('active')) {
           // Prefer the live WebSocket stream; poll only as a fallback and
           // never while the user paused the inspector.

@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 2.7.0
+
+### Traffic Inspector: live client-side filters
+- The transaction list can now be filtered **live, in the browser**: by **slave ID** (options auto-populated from recent traffic), by **operation/status** (`ok` / `error` / `exception` — *exception* matches any transaction whose captured RX stream contains an exception response), and by **free-text hex search** across request and response frames (accepts `01 03`, `0x0103`, `83:02`, …).
+- Filters apply to every new live-stream push, coexist with the existing **⏸ Pause stream / ▶ Resume** behavior, and **persist across tab switches** (state in `state.js`, static filter controls). A `shown / total` counter and **✕ Clear** button track the active filter set; rows that only match by a hidden transaction keep their selection in the detail pane.
+
+### Traffic Inspector: full multi-frame response capture
+- `capture.py` now keeps the **full raw RX stream of one coordinator transaction**, already split into complete RTU frames: the capture window spans the whole operation (a new TX updates the recorded request and drops only the still-incomplete RX tail, like pymodbus's per-request buffer), so batch writes, board block readers, and exception-plus-follow-up exchanges keep **every** response frame instead of only the last pair.
+- New pure, unit-tested `extract_response_frames()` splits a receive buffer into complete frames (arrival order, capped at `MAX_RESPONSE_FRAMES = 64`, desync garbage dropped, partial tails kept for the next chunk); the growing-buffer (sync) and chunked (async) pymodbus shapes, stale buffer re-passes, identical echo frames across batch retries, and the runaway-noise guard are all handled.
+- Log entries gain `response_frames` (list of hex strings; `response_hex` keeps the last frame for backward compatibility); `inspector.py` decodes the stream into a `response_frames` list per transaction (synthesizing a one-item list for pre-v2.7.0 entries that carry only `response_hex`), which is included in both `modbus_usb/traffic_inspector` results and `modbus_usb/subscribe_traffic` events.
+- The detail pane renders multi-frame responses as a **list of decoded frames** (per-frame chips, CRC validation, and `EXC` badges) with an `RX ×N` row badge, instead of only the last request/response pair.
+
+### Template Designer: syntax-aware editing & template import
+- The YAML editor gained a **line-number gutter** (scroll-synced), **Tab / Shift+Tab** two-space indent/outdent (multi-line selections supported), and **Ctrl+Enter** (or Cmd+Enter) to run the live validation directly from the editor.
+- New **📥 Import into editor** control: pick any bundled or user-saved template from a dropdown and its `raw_yaml` loads into the editor (filename pre-filled, previous validation results cleared), so existing templates can be used as a starting point for a new device.
+
+### Config flow: capture availability in options
+- The options flow menu gained a read-only **Traffic capture status** step showing the active pymodbus version and hook (`trace_packet` / `logging` fallback / none), so users can see whether their pymodbus release supports raw TX/RX tracing for the Traffic Inspector.
+
+### Development
+- Comprehensive pytest coverage for every new capture parser path (multi-frame extraction, frame caps, desync handling, identical-echo and stale re-pass cases, window semantics across TX boundaries), multi-frame `analyze_transaction`/inspector view decoding, the live-stream event payload change, the new options-flow step, and all new panel wiring (filters, multi-frame rendering, designer editor UX, template import) (303 tests total).
+- `ruff check` and `ruff format` pass cleanly across the repository; `node --check` passes on every `www/panel/*.js` script.
+
 ## 2.6.0
 
 ### Traffic Inspector: real response-frame capture

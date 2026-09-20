@@ -687,7 +687,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         of reconstructed, and ``response_hex`` carries the actual response
         frame (byte-count frames, write echoes, and exception frames).
         Operations that send several frames before one record (batch writes,
-        board block readers) keep the last request/response pair.
+        board block readers) keep the last TX frame as ``request_hex`` and
+        the full raw RX stream as ``response_frames`` (one entry per
+        response frame, oldest first).
         """
         timestamp = datetime.now().astimezone().isoformat()
         detected_function, detected_request = diagnostic_request_frame(
@@ -719,6 +721,11 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 item["request_captured"] = True
             if window.get("response_hex"):
                 item["response_hex"] = window["response_hex"]
+            if window.get("response_frames"):
+                # Full raw RX stream of the transaction, already framed —
+                # multi-frame responses (batch reads, block readers) keep
+                # every frame instead of only the last one.
+                item["response_frames"] = list(window["response_frames"])
         if duration_ms is not None:
             item["duration_ms"] = round(duration_ms, 1)
         tx_stages = self._get_tx_stages()
@@ -1667,6 +1674,8 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
 
 
 # Changelog:
+# 2026-09-20 — v2.7.0: recorded transactions keep the full framed RX stream
+#              (response_frames) of multi-frame operations, not only the last pair.
 # 2026-09-20 — v2.6.0: real TX/RX response capture (capture.py) attached to every
 #              recorded transaction, plus a per-entry live traffic dispatcher signal.
 # 2026-09-08 — Support both Pymodbus device_id and legacy slave keywords.

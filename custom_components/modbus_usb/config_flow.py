@@ -165,7 +165,70 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
     ) -> ConfigFlowResult:
         return self.async_show_menu(
             step_id="init",
-            menu_options=["settings", "add_entity", "manage_entities"],
+            menu_options=[
+                "settings",
+                "capture_info",
+                "add_entity",
+                "manage_entities",
+            ],
+        )
+
+    # ---------- Read-only traffic capture status ----------
+    async def async_step_capture_info(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show whether this pymodbus release can capture raw TX/RX bytes.
+
+        The Traffic Inspector needs a pymodbus transaction tracing hook to
+        record real response frames. This read-only step tells users what
+        their installation supports without changing any configuration.
+        """
+        if user_input is not None:
+            return await self.async_step_init()
+
+        hook: str | None = None
+        try:
+            coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+            hook = getattr(coordinator, "capture_hook", None)
+        except Exception:  # pragma: no cover - defensive
+            hook = None
+
+        try:
+            import pymodbus
+
+            pymodbus_version = str(getattr(pymodbus, "__version__", "unknown"))
+        except Exception:  # pragma: no cover - pymodbus is a hard requirement
+            pymodbus_version = "unknown"
+
+        if hook in ("trace_packet", "client_trace_packet"):
+            details = (
+                f"pymodbus {pymodbus_version} · hook: {hook}\n\n"
+                "✅ Response capture is ACTIVE via transaction tracing: the "
+                "Traffic Inspector records the real TX and RX bytes of every "
+                "serial transaction, including the full multi-frame RX stream "
+                "of batch operations."
+            )
+        elif hook == "logging":
+            details = (
+                f"pymodbus {pymodbus_version} · hook: logging\n\n"
+                "⚠️ Response capture is ACTIVE via the pymodbus debug-log "
+                "fallback: real RX bytes are parsed from pymodbus's frame "
+                "dumps. This works, but depends on pymodbus log output and is "
+                "slower than native transaction tracing."
+            )
+        else:
+            details = (
+                f"pymodbus {pymodbus_version} · hook: none\n\n"
+                "❌ Response capture is UNAVAILABLE: this pymodbus release "
+                "exposes no transaction tracing hook. The Traffic Inspector "
+                "shows reconstructed request frames only — raw response bytes "
+                "cannot be captured."
+            )
+
+        return self.async_show_form(
+            step_id="capture_info",
+            data_schema=vol.Schema({}),
+            description_placeholders={"capture_details": details},
         )
 
     # ---------- Global settings (scan interval) ----------

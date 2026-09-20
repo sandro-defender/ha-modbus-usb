@@ -189,11 +189,149 @@
       button.classList.toggle('btn-secondary', !_inspectorPaused);
     }
 
-    // ─── Rendering ──────────────────────────────────────────────
+    // ─── v2.7.0: client-side filters ────────────────────────────
+    // The filters run live in the browser over the already-decoded
+    // transaction list; the WebSocket stream, pause/resume, and reload
+    // behavior are untouched — filtered rows simply hide, and new pushes
+    // respect the active filters. The filter state lives in state.js so it
+    // persists across tab switches.
+
+    function normalizeInspectorHexQuery(text) {
+      return String(text ?? '')
+        .replace(/0[xX]/g, '')
+        .replace(/[^0-9a-fA-F]/g, '')
+        .toLowerCase();
+    }
+
+    function inspectorResponseFrameList(item) {
+      if (Array.isArray(item.response_frames) && item.response_frames.length) {
+        return item.response_frames;
+      }
+      return item.response_frame ? [item.response_frame] : [];
+    }
+
+    function inspectorTransactionHasException(item) {
+      return inspectorResponseFrameList(item).some(
+        (frame) => frame && frame.frame_kind === 'exception_response'
+      );
+    }
+
+    function inspectorTransactionHexHaystack(item) {
+      const txn = item.transaction || {};
+      const parts = [];
+      if (txn.request_hex) parts.push(txn.request_hex);
+      if (txn.response_hex) parts.push(txn.response_hex);
+      if (Array.isArray(txn.response_frames)) {
+        txn.response_frames.forEach((frameHex) => { if (frameHex) parts.push(frameHex); });
+      }
+      // Parsed frames carry raw_hex too, which also covers pre-parsed views.
+      inspectorResponseFrameList(item).forEach((frame) => {
+        if (frame && frame.raw_hex) parts.push(frame.raw_hex);
+      });
+      if (item.frame && item.frame.raw_hex) parts.push(item.frame.raw_hex);
+      return normalizeInspectorHexQuery(parts.join(' '));
+    }
+
+    function transactionMatchesInspectorFilters(item) {
+      const filters = _inspectorFilters || { slave: 'all', status: 'all', hex: '' };
+      const txn = item.transaction || {};
+      if (filters.slave && filters.slave !== 'all' && String(txn.slave ?? '') !== String(filters.slave)) {
+        return false;
+      }
+      if (filters.status && filters.status !== 'all') {
+        if (filters.status === 'ok' && txn.status !== 'ok') return false;
+        if (filters.status === 'error' && txn.status !== 'error') return false;
+        if (filters.status === 'exception' && !inspectorTransactionHasException(item)) return false;
+      }
+      const needle = normalizeInspectorHexQuery(filters.hex);
+      if (needle && !inspectorTransactionHexHaystack(item).includes(needle)) {
+        return false;
+      }
+      return true;
+    }
+
+    function getFilteredTransactionIndices() {
+      const view = _inspectorView;
+      if (!view || !Array.isArray(view.transactions)) return [];
+      return view.transactions
+        .map((item, index) => (transactionMatchesInspectorFilters(item) ? index : -1))
+        .filter((index) => index !== -1);
+    }
+
+    function activeInspectorFilterCount() {
+      const filters = _inspectorFilters || { slave: 'all', status: 'all', hex: '' };
+      let count = 0;
+      if (filters.slave && filters.slave !== 'all') count += 1;
+      if (filters.status && filters.status !== 'all') count += 1;
+      if (normalizeInspectorHexQuery(filters.hex)) count += 1;
+      return count;
+    }
+
+    function inspectorSlaveOptions() {
+      const view = _inspectorView;
+      const slaves = new Set();
+      if (view) {
+        Object.keys(view.per_slave || {}).forEach((slave) => slaves.add(String(slave)));
+        (view.transactions || []).forEach((item) => {
+          const slave = (item.transaction || {}).slave;
+          if (slave != null) slaves.add(String(slave));
+        });
+      }
+      return [...slaves].sort((a, b) => Number(a) - Number(b));
+    }
+
+    function setInspectorFilter(key, value) {
+      if (!_inspectorFilters) _inspectorFilters = { slave: 'all', status: 'all', hex: '' };
+      _inspectorFilters[key] = value;
+      renderInspectorFilterBar();
+      renderInspectorTab();
+    }
+
+    function clearInspectorFilters() {
+      _inspectorFilters = { slave: 'all', status: 'all', hex: '' };
+      const slave = document.getElementById('inspector-filter-slave');
+      const status = document.getElementById('inspector-filter-status');
+      const hex = document.getElementById('inspector-filter-hex');
+      if (slave) slave.value = 'all';
+      if (status) status.value = 'all';
+      if (hex) hex.value = '';
+      renderInspectorFilterBar();
+      renderInspectorTab();
+    }
+
+    function renderInspectorFilterBar() {
+      const filters = _inspectorFilters || { slave: 'all', status: 'all', hex: '' };
+      const slave = document.getElementById('inspector-filter-slave');
+      const hex = document.getElementById('inspector-filter-hex');
+      const clear = document.getElementById('btn-inspector-clear-filters');
+      const count = document.getElementById('inspector-filter-count');
+      if (slave) {
+        const options = inspectorSlaveOptions();
+        const current = options.includes(String(filters.slave)) ? String(filters.slave) : 'all';
+        // Rebuild options without losing focus/selection on the other controls.
+        slave.innerHTML = '<option value="all">all</option>' + options.map((s) =>
+          `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+        slave.value = current;
+        if (current !== String(filters.slave)) filters.slave = current;
+      }
+      // Never clobber the hex input while the user is typing in it.
+      if (hex && document.activeElement !== hex && hex.value !== filters.hex) {
+        hex.value = filters.hex;
+      }
+      if (clear) clear.hidden = activeInspectorFilterCount() === 0;
+      if (count) {
+        const total = _inspectorView?.transactions?.length ?? 0;
+        const shown = getFilteredTransactionIndices().length;
+        count.textContent = activeInspectorFilterCount() ? `${shown} / ${total}` : '';
+      }
+    }
+
+    // ─── Rendering ───────────────────────────────────────────────
     function renderInspectorTab() {
       const statsBar = document.getElementById('inspector-stats');
       const list = document.getElementById('inspector-list');
       if (!statsBar || !list) return;
+      renderInspectorFilterBar();
       const view = _inspectorView;
       if (!view || !Array.isArray(view.transactions)) {
         statsBar.innerHTML = '';
@@ -222,17 +360,30 @@
         return;
       }
 
-      list.innerHTML = view.transactions.map((item, index) => {
+      // v2.7.0: the live list is filtered client-side; only matching
+      // transactions render, but the selection indexes the full list.
+      const indices = getFilteredTransactionIndices();
+      if (!indices.length) {
+        list.innerHTML = '<div class="empty-box"><div class="empty-icon">🔍</div><h3>No transactions match the filters</h3><p>Adjust the slave, status, or hex filter above — or clear it to see the whole stream again.</p></div>';
+        renderInspectorDetail();
+        return;
+      }
+
+      list.innerHTML = indices.map((index) => {
+        const item = view.transactions[index];
         const txn = item.transaction || {};
         const frame = item.frame || {};
         const statusBadge = txn.status === 'error'
           ? '<span class="badge badge-red">error</span>'
           : '<span class="badge badge-green">ok</span>';
         const durationBadge = `<span class="badge badge-${durationTone(txn.duration_ms)}">${formatMs(txn.duration_ms)}</span>`;
-        const responseBadge = item.response_frame
-          ? (item.response_frame.frame_kind === 'exception_response'
-            ? '<span class="badge badge-red" title="Exception response captured from the bus">RX EXC</span>'
-            : '<span class="badge badge-blue" title="Real response bytes captured from the bus">RX</span>')
+        const responseFrames = inspectorResponseFrameList(item);
+        const responseBadge = responseFrames.length
+          ? (responseFrames.length > 1
+            ? `<span class="badge badge-purple" title="${responseFrames.length} response frames captured from the bus (batch or multi-read)">RX ×${responseFrames.length}</span>`
+            : (responseFrames[0].frame_kind === 'exception_response'
+              ? '<span class="badge badge-red" title="Exception response captured from the bus">RX EXC</span>'
+              : '<span class="badge badge-blue" title="Real response bytes captured from the bus">RX</span>'))
           : '<span class="badge badge-slate" title="No raw response bytes captured">no RX</span>';
         const selected = index === _inspectorSelected ? ' selected' : '';
         return `<button class="inspector-row${selected}" onclick="selectInspectorTransaction(${index})" aria-pressed="${index === _inspectorSelected}">
@@ -333,6 +484,29 @@
       </div>`;
     }
 
+    function multiFrameResponseSection(frames) {
+      // v2.7.0: a full raw RX stream (batch reads, block readers, exception
+      // plus follow-up) renders as a list of decoded frames instead of only
+      // the last pair.
+      return `<div class="inspector-detail-section">
+        <div class="card-title" style="margin-bottom:0.5rem;">Response frames (RX) — ${frames.length} frames</div>
+        <div class="inspector-frame-list">
+          ${frames.map((frame, index) => `
+            <div class="inspector-frame-item">
+              <div class="inspector-frame-item-head">
+                <span class="inspector-frame-item-index mono">#${index + 1}</span>
+                <span class="inspector-frame-item-summary mono">${escapeHtml(frame.summary || frame.raw_hex || 'unparsed frame')}</span>
+                ${frame.frame_kind === 'exception_response' ? '<span class="badge badge-red">EXC</span>' : ''}
+              </div>
+              <div class="frame-hex mono">${escapeHtml(frame.raw_hex || 'no frame recorded')}</div>
+              <div class="frame-grid">${frameFieldChips(frame).join('')}</div>
+              <div class="frame-grid" style="margin-top:0.5rem;">${crcChips(frame)}</div>
+              ${(frame.errors || []).length ? `<div class="frame-errors">${frame.errors.map((message) => `<div>⚠️ ${escapeHtml(message)}</div>`).join('')}</div>` : ''}
+            </div>`).join('')}
+        </div>
+      </div>`;
+    }
+
     function renderInspectorDetail() {
       const detail = document.getElementById('inspector-detail');
       if (!detail) return;
@@ -341,24 +515,37 @@
         detail.innerHTML = '<div class="empty-box"><div class="empty-icon">🔍</div><h3>No transaction selected</h3><p>Pick a transaction on the left to decode its RTU frame.</p></div>';
         return;
       }
-      const { transaction, frame, response_frame: responseFrame } = view.transactions[_inspectorSelected];
+      const {
+        transaction,
+        frame,
+        response_frame: responseFrame,
+        response_frames: responseFramesRaw,
+      } = view.transactions[_inspectorSelected];
+      const responseFrames = (Array.isArray(responseFramesRaw) && responseFramesRaw.length)
+        ? responseFramesRaw
+        : (responseFrame ? [responseFrame] : []);
       const requestFallback = '<div class="text-sm" style="color:var(--text-dim);">This transaction has no request frame — the operation could not be captured or reconstructed.</div>';
       const responseFallback = `<div class="text-sm" style="color:var(--text-dim);">${transaction.status === 'error'
         ? 'No response bytes captured — the board did not answer or the reply was unreadable.'
         : (view.capture && view.capture.supported === false)
           ? 'Raw response capture is unavailable: this pymodbus release exposes no transaction tracing hook, so only the request frame is shown.'
           : 'No raw response bytes were captured for this transaction.'}</div>`;
+      const rxSummary = responseFrames.length > 1
+        ? ` · <span class="badge badge-purple">${responseFrames.length} RX frames</span>`
+        : '';
 
       detail.innerHTML = `
         <div class="card-header">
           <div>
             <div class="card-title">${escapeHtml(frame?.summary || transaction.operation || 'Transaction')}</div>
-            <div class="card-subtitle">${escapeHtml(formatLogTime(transaction.timestamp))} · ${escapeHtml(transaction.operation || '')} · slave ${escapeHtml(transaction.slave ?? '—')}${transaction.request_captured ? ' · <span class="badge badge-blue">TX captured</span>' : ''}</div>
+            <div class="card-subtitle">${escapeHtml(formatLogTime(transaction.timestamp))} · ${escapeHtml(transaction.operation || '')} · slave ${escapeHtml(transaction.slave ?? '—')}${transaction.request_captured ? ' · <span class="badge badge-blue">TX captured</span>' : ''}${rxSummary}</div>
           </div>
           <span class="badge badge-${durationTone(transaction.duration_ms)}">${formatMs(transaction.duration_ms)}</span>
         </div>
         ${frameAnalyzerSection('Request frame (TX)', frame, requestFallback)}
-        ${frameAnalyzerSection('Response frame (RX)', responseFrame, responseFallback)}
+        ${responseFrames.length > 1
+          ? multiFrameResponseSection(responseFrames)
+          : frameAnalyzerSection('Response frame (RX)', responseFrame, responseFallback)}
         <div class="inspector-detail-section">
           <div class="card-title" style="margin-bottom:0.5rem;">Latency waterfall</div>
           ${latencyWaterfall(transaction)}

@@ -363,12 +363,31 @@ def analyze_transaction(transaction: dict[str, Any]) -> dict[str, Any]:
     """Attach decoded request/response frame breakdowns to one transaction.
 
     ``request_hex`` decodes as a request frame (reconstructed or captured TX
-    bytes); ``response_hex`` — present when pymodbus transaction tracing
-    caught the real RX bytes — decodes as a response frame, so the panel can
-    show the paired request/response of one bus transaction.
+    bytes); the captured RX bytes decode as response frame(s), so the panel
+    can show the paired request/response of one bus transaction.
+
+    Since v2.7.0 a transaction may carry the *full* raw RX stream of the
+    whole coordinator operation (batch reads, board block readers, exception
+    plus follow-up): ``response_frames`` (a list of hex strings when present)
+    decodes to ``response_frames`` in the result — one breakdown per frame,
+    in arrival order. ``response_hex``/``response_frame`` keep the last
+    frame for backward compatibility; when only ``response_hex`` is present
+    (pre-v2.7.0 log entries, single-frame capture) the list holds exactly
+    that one frame.
     """
     request_hex = transaction.get("request_hex")
     response_hex = transaction.get("response_hex")
+    response_frames_hex = transaction.get("response_frames")
+    last_response_frame = _safe_parse_frame(response_hex, as_response=True)
+    if response_frames_hex:
+        response_frames = [
+            _safe_parse_frame(frame_hex, as_response=True)
+            for frame_hex in response_frames_hex
+        ]
+    elif response_hex:
+        response_frames = [last_response_frame]
+    else:
+        response_frames = None
     return {
         "transaction": {
             "timestamp": transaction.get("timestamp"),
@@ -382,11 +401,15 @@ def analyze_transaction(transaction: dict[str, Any]) -> dict[str, Any]:
             "request_hex": request_hex,
             "request_captured": bool(transaction.get("request_captured")),
             "response_hex": response_hex,
+            "response_frames": (
+                list(response_frames_hex) if response_frames_hex else None
+            ),
             "duration_ms": transaction.get("duration_ms"),
             "latency": dict(transaction.get("latency") or {}),
         },
         "frame": _safe_parse_frame(request_hex, as_response=False),
-        "response_frame": _safe_parse_frame(response_hex, as_response=True),
+        "response_frame": last_response_frame,
+        "response_frames": response_frames,
     }
 
 

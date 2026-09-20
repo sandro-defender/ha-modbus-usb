@@ -8,9 +8,11 @@ import threading
 import pytest
 
 from custom_components.modbus_usb.capture import (
+    MAX_RESPONSE_FRAMES,
     RX_BUFFER_LIMIT,
     ResponseCapture,
     extract_response_frame,
+    extract_response_frames,
     install_response_capture,
     parse_frame_log_line,
 )
@@ -98,6 +100,7 @@ def test_capture_pairs_request_and_response() -> None:
     assert window == {
         "request_hex": _hex(TX_READ),
         "response_hex": _hex(RX_READ),
+        "response_frames": [_hex(RX_READ)],
     }
     # The window is consumed exactly once.
     assert capture.consume() is None
@@ -248,6 +251,7 @@ def test_logging_fallback_captures_frames() -> None:
         assert window == {
             "request_hex": _hex(TX_READ),
             "response_hex": _hex(RX_READ),
+            "response_frames": [_hex(RX_READ)],
         }
     finally:
         capture.detach()
@@ -368,3 +372,185 @@ def test_install_on_real_pymodbus_serial_client() -> None:
             assert window["response_hex"] == _hex(RX_READ)
     finally:
         capture.detach()
+
+
+# ───────────────── v2.7.0: multi-frame RX stream capture ─────────────────
+
+
+def test_extract_frames_splits_back_to_back_responses() -> None:
+    frames, consumed = extract_response_frames(RX_READ + TX_WRITE)
+    assert frames == [RX_READ, TX_WRITE]
+    assert consumed == len(RX_READ) + len(TX_WRITE)
+
+
+def test_extract_frames_keeps_incomplete_tail() -> None:
+    buffer = RX_READ + TX_WRITE[:-1]  # second frame missing its last byte
+    frames, consumed = extract_response_frames(buffer)
+    assert frames == [RX_READ]
+    assert consumed == len(RX_READ)
+
+
+def test_extract_frames_empty_and_short_buffers() -> None:
+    assert extract_response_frames(b"") == ([], 0)
+    assert extract_response_frames(bytes.fromhex("01 03".replace(" ", ""))) == ([], 0)
+
+
+def test_extract_frames_drops_desync_after_first_frame() -> None:
+    # First frame is fine, second one declares an impossible byte count.
+    garbage = bytes.fromhex("0103FF") + bytes(20)
+    frames, consumed = extract_response_frames(RX_READ + garbage)
+    assert frames == [RX_READ]
+    assert consumed == len(RX_READ) + len(garbage)
+
+
+def test_extract_frames_unknown_function_in_stream() -> None:
+    # A CRC-scanned exotic frame followed by a standard response.
+    exotic = _frame("010700")
+    frames, consumed = extract_response_frames(exotic + RX_READ)
+    assert frames == [exotic, RX_READ]
+    assert consumed == len(exotic) + len(RX_READ)
+
+
+def test_extract_frames_caps_at_max() -> None:
+    buffer = TX_WRITE * (MAX_RESPONSE_FRAMES + 5)
+    frames, consumed = extract_response_frames(buffer)
+    assert len(frames) == MAX_RESPONSE_FRAMES
+    assert frames == [TX_WRITE] * MAX_RESPONSE_FRAMES
+    assert consumed == len(TX_WRITE) * MAX_RESPONSE_FRAMES
+
+
+# Batch-read style stream: one TX, then two complete read responses that
+# arrive as fresh (async-style) chunks straddling a frame boundary.
+RX_A = _frame("02040400 0100 02".replace(" ", ""))
+RX_B = _frame("020302 002A".replace(" ", ""))
+
+
+def test_capture_multi_frame_async_chunks() -> None:
+    capture = ResponseCapture()
+    capture.on_trace(True, TX_READ)
+    # First frame arrives in two chunks.
+    capture.on_trace(False, RX_A[:5])
+    capture.on_trace(False, RX_A[5:])
+    # Second frame arrives whole, after the first was consumed.
+    capture.on_trace(False, RX_B)
+    window = capture.consume()
+    assert window["request_hex"] == _hex(TX_READ)
+    assert window["response_hex"] == _hex(RX_B)  # last frame, as before
+    assert window["response_frames"] == [_hex(RX_A), _hex(RX_B)]
+
+
+def test_capture_multi_frame_sync_growing_buffers() -> None:
+    # pymodbus 3.x sync behaviour: the buffer grows per poll and is reset
+    # after each consumed frame, so the second frame arrives as a fresh
+    # buffer (not an extension of the first one's).
+    capture = ResponseCapture()
+    capture.on_trace(True, TX_READ)
+    capture.on_trace(False, RX_A[:4])
+    capture.on_trace(False, RX_A)  # first frame complete
+    capture.on_trace(False, RX_B[:3])
+    capture.on_trace(False, RX_B)  # second frame, fresh buffer
+    window = capture.consume()
+    assert window["response_frames"] == [_hex(RX_A), _hex(RX_B)]
+    assert window["response_hex"] == _hex(RX_B)
+
+
+def test_capture_batch_identical_echo_frames() -> None:
+    # A batch writing the same register/value produces identical echo
+    # frames; each new TX must not make the identical RX look stale.
+    capture = ResponseCapture()
+    capture.on_trace(True, TX_WRITE)
+    capture.on_trace(False, TX_WRITE)
+    capture.on_trace(True, TX_WRITE)
+    capture.on_trace(False, TX_WRITE)
+    window = capture.consume()
+    assert window["request_hex"] == _hex(TX_WRITE)
+    assert window["response_frames"] == [_hex(TX_WRITE), _hex(TX_WRITE)]
+
+
+def test_capture_stale_repass_of_consumed_buffer_is_ignored() -> None:
+    # Defensively: a re-trace of the same buffer right after the frame was
+    # consumed, with no new TX in between, adds no frame.
+    capture = ResponseCapture()
+    capture.on_trace(True, TX_READ)
+    capture.on_trace(False, RX_READ)
+    capture.on_trace(False, RX_READ)  # identical re-pass, no new TX
+    window = capture.consume()
+    assert window["response_frames"] == [_hex(RX_READ)]
+
+
+def test_capture_exception_then_followup_frame() -> None:
+    exception = _frame("028302")
+    capture = ResponseCapture()
+    capture.on_trace(True, _frame("0203000A0001"))
+    capture.on_trace(False, exception)
+    # Board retries with a second request inside the same coordinator call.
+    capture.on_trace(True, _frame("020300010001"))
+    capture.on_trace(False, _frame("020302002A"))
+    window = capture.consume()
+    assert window["response_frames"] == [
+        _hex(exception),
+        _hex(_frame("020302002A")),
+    ]
+
+
+def test_capture_drops_unframed_tail_on_new_tx() -> None:
+    capture = ResponseCapture()
+    capture.on_trace(True, TX_READ)
+    capture.on_trace(False, RX_READ[:4])  # partial, never completed
+    capture.on_trace(True, TX_WRITE)
+    capture.on_trace(False, TX_WRITE)
+    window = capture.consume()
+    # The stale partial bytes must not corrupt the second exchange.
+    assert window["request_hex"] == _hex(TX_WRITE)
+    assert window["response_frames"] == [_hex(TX_WRITE)]
+
+
+def test_capture_trailing_partial_frame_is_not_recorded() -> None:
+    capture = ResponseCapture()
+    capture.on_trace(True, TX_READ)
+    capture.on_trace(False, RX_A + RX_B[:4])
+    window = capture.consume()
+    assert window["response_frames"] == [_hex(RX_A)]
+    assert window["response_hex"] == _hex(RX_A)
+
+
+def test_capture_frame_cap_stops_recording() -> None:
+    capture = ResponseCapture()
+    for _ in range(MAX_RESPONSE_FRAMES + 10):
+        capture.on_trace(True, TX_WRITE)
+        capture.on_trace(False, TX_WRITE)
+    window = capture.consume()
+    assert len(window["response_frames"]) == MAX_RESPONSE_FRAMES
+    assert window["response_frames"] == [_hex(TX_WRITE)] * MAX_RESPONSE_FRAMES
+    # The buffer is reset at the cap, so the window stays bounded.
+    assert capture._rx == b""
+
+
+def test_capture_window_spans_batch_until_consume() -> None:
+    # One coordinator batch: two serial exchanges, one consume() — the full
+    # RX stream of the transaction is returned, not only the last pair.
+    capture = ResponseCapture()
+    capture.on_trace(True, _frame("010600010002"))
+    capture.on_trace(False, _frame("010600010002"))
+    capture.on_trace(True, _frame("010600020004"))
+    capture.on_trace(False, _frame("010600020004"))
+    window = capture.consume()
+    assert window["request_hex"] == _hex(_frame("010600020004"))
+    assert window["response_frames"] == [
+        _hex(_frame("010600010002")),
+        _hex(_frame("010600020004")),
+    ]
+    assert capture.consume() is None
+
+
+def test_capture_runaway_noise_between_frames() -> None:
+    # Noise in the not-yet-framed part resets only that part; earlier
+    # frames survive, and a real frame after the noise is still paired.
+    capture = ResponseCapture()
+    capture.on_trace(True, TX_READ)
+    capture.on_trace(False, RX_A)
+    capture.on_trace(False, bytes(RX_BUFFER_LIMIT + 50))
+    assert capture._rx == b""
+    capture.on_trace(False, RX_B)
+    window = capture.consume()
+    assert window["response_frames"] == [_hex(RX_A), _hex(RX_B)]

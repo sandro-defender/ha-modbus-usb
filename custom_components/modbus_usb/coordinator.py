@@ -1,13 +1,15 @@
 """Data update coordinator for the Modbus USB Controller integration."""
 from __future__ import annotations
 
+import inspect
 import logging
+import math
 import struct
 from collections import deque
 from enum import Enum
 from datetime import datetime, timedelta
 from threading import Lock
-from time import sleep
+from time import monotonic, sleep
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -90,13 +92,19 @@ def as_float(value: Any, default: float) -> float:
     settings; ``float(None)`` raised TypeError and removed the platform.
     """
     try:
-        return float(value)
+        result = float(value)
+        return result if math.isfinite(result) else float(default)
     except (TypeError, ValueError):
         return float(default)
 
 
 def _decode_words(words: list[int], data_type: str) -> float | int:
     """Decode a list of 16-bit register words into a number."""
+    count = DATA_TYPE_WORD_COUNT.get(data_type)
+    if count is None:
+        raise ValueError(f"Unsupported data type: {data_type}")
+    if len(words) < count:
+        raise ValueError(f"Incomplete Modbus response: expected {count} registers, got {len(words)}")
     if data_type == DATA_TYPE_UINT16:
         return words[0]
     if data_type == DATA_TYPE_INT16:
@@ -109,7 +117,10 @@ def _decode_words(words: list[int], data_type: str) -> float | int:
     if data_type == DATA_TYPE_INT32:
         return struct.unpack(">i", raw)[0]
     if data_type == DATA_TYPE_FLOAT32:
-        return struct.unpack(">f", raw)[0]
+        value = struct.unpack(">f", raw)[0]
+        if not math.isfinite(value):
+            raise ValueError("Modbus float response is not finite")
+        return value
     return words[0]
 
 
@@ -413,17 +424,17 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
     ) -> Any:
         """Call Pymodbus using its current or legacy unit-ID keyword.
 
-        Pymodbus 3.8+ renamed ``slave`` to ``device_id``.  Supporting both
+        Recent Pymodbus releases renamed ``slave`` to ``device_id``.  Supporting both
         keeps the integration working with the manifest's older supported
         versions as well as current Home Assistant installations.
         """
         method = getattr(client, method_name)
-        try:
-            return method(*args, device_id=slave, **kwargs)
-        except TypeError as err:
-            if "device_id" not in str(err):
-                raise
-            return method(*args, slave=slave, **kwargs)
+        # Legacy clients accept **kwargs and silently IGNORE device_id, leaving
+        # their default slave=0 (broadcast). Detect the explicit parameter before
+        # calling, rather than retrying on TypeError after a possible write.
+        parameters = inspect.signature(method).parameters
+        unit_keyword = "slave" if "slave" in parameters else "device_id"
+        return method(*args, **{unit_keyword: slave}, **kwargs)
 
     def _call_modbus(
         self, method_name: str, *args: Any, slave: int, **kwargs: Any
@@ -647,7 +658,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         address = (frame[2] << 8) | frame[3]
         count = 1
         value: Any = None
-        started = datetime.now()
+        started = monotonic()
         try:
             with self._serial_lock:
                 self._ensure_connected()
@@ -685,7 +696,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                     raise UpdateFailed(str(result))
             self._record_transaction(
                 "manual_hex_write", slave=slave, address=address, count=count,
-                value=value, result="accepted", duration_ms=(datetime.now() - started).total_seconds() * 1000,
+                value=value, result="accepted", duration_ms=(monotonic() - started) * 1000,
                 function_code=f"0x{function_code:02X}",
                 request_hex=" ".join(f"{byte:02X}" for byte in frame),
             )
@@ -693,7 +704,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         except Exception as err:
             self._record_transaction(
                 "manual_hex_write", slave=slave, address=address, count=count,
-                value=value, error=err, duration_ms=(datetime.now() - started).total_seconds() * 1000,
+                value=value, error=err, duration_ms=(monotonic() - started) * 1000,
                 function_code=f"0x{function_code:02X}",
                 request_hex=" ".join(f"{byte:02X}" for byte in frame),
             )
@@ -885,7 +896,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             if not members:
                 continue
             handled.update(item["id"] for item in members)
-            started = datetime.now()
+            started = monotonic()
             try:
                 with self._serial_lock:
                     self._ensure_connected()
@@ -896,11 +907,11 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                     value = result.registers[int(item[CONF_ADDRESS]) - start]
                     scale = as_float(item.get(CONF_SCALE), 1)
                     data[item["id"]] = value if scale == 1 else value * scale
-                self._record_transaction("read_holding", slave=slave, address=start, count=count, result="block", duration_ms=(datetime.now() - started).total_seconds() * 1000)
+                self._record_transaction("read_holding", slave=slave, address=start, count=count, result="block", duration_ms=(monotonic() - started) * 1000)
             except Exception as err:  # noqa: BLE001
                 for item in members:
                     data[item["id"]] = None
-                self._record_transaction("read_holding", slave=slave, address=start, count=count, error=err, duration_ms=(datetime.now() - started).total_seconds() * 1000)
+                self._record_transaction("read_holding", slave=slave, address=start, count=count, error=err, duration_ms=(monotonic() - started) * 1000)
         return data, handled
 
     def _read_r4d6f20_command2_blocks(
@@ -927,7 +938,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             if not members:
                 continue
             handled.update(item["id"] for item in members)
-            started = datetime.now()
+            started = monotonic()
             try:
                 with self._serial_lock:
                     self._ensure_connected()
@@ -939,11 +950,11 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                     value = bool(result.bits[index]) if register_type in (REGISTER_TYPE_COIL, REGISTER_TYPE_DISCRETE) else result.registers[index]
                     scale = as_float(item.get(CONF_SCALE), 1)
                     data[item["id"]] = value if scale == 1 else value * scale
-                self._record_transaction(f"read_{register_type}", slave=slave, address=start, count=count, result="block", duration_ms=(datetime.now() - started).total_seconds() * 1000)
+                self._record_transaction(f"read_{register_type}", slave=slave, address=start, count=count, result="block", duration_ms=(monotonic() - started) * 1000)
             except Exception as err:  # noqa: BLE001
                 for item in members:
                     data[item["id"]] = None
-                self._record_transaction(f"read_{register_type}", slave=slave, address=start, count=count, error=err, duration_ms=(datetime.now() - started).total_seconds() * 1000)
+                self._record_transaction(f"read_{register_type}", slave=slave, address=start, count=count, error=err, duration_ms=(monotonic() - started) * 1000)
         return data, handled
 
     def _read_one(self, ent: dict, device_slave_map: dict[str, int] | None = None) -> Any:
@@ -958,7 +969,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             slave = self.slave_id
         target_slave = int(slave)
 
-        started = datetime.now()
+        started = monotonic()
         operation = f"read_{register_type}"
         count = 1
         try:
@@ -999,13 +1010,13 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                         value = value * scale
             self._record_transaction(
                 operation, slave=target_slave, address=address, count=count, result=value,
-                duration_ms=(datetime.now() - started).total_seconds() * 1000,
+                duration_ms=(monotonic() - started) * 1000,
             )
             return value
         except Exception as err:
             self._record_transaction(
                 operation, slave=target_slave, address=address, count=count, error=err,
-                duration_ms=(datetime.now() - started).total_seconds() * 1000,
+                duration_ms=(monotonic() - started) * 1000,
             )
             raise
 
@@ -1018,7 +1029,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
     def write_coil(self, address: int, value: bool, slave: int | None = None) -> None:
         """Write a coil value (used by switches). Runs synchronously - call via executor."""
         target_slave = int(slave if slave is not None else self.slave_id)
-        started = datetime.now()
+        started = monotonic()
         try:
             with self._serial_lock:
                 self._ensure_connected()
@@ -1026,16 +1037,16 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 if result.isError():
                     raise UpdateFailed(str(result))
             self._record_transaction("write_coil", slave=target_slave, address=address, value=value,
-                                     result="accepted", duration_ms=(datetime.now() - started).total_seconds() * 1000)
+                                     result="accepted", duration_ms=(monotonic() - started) * 1000)
         except Exception as err:
             self._record_transaction("write_coil", slave=target_slave, address=address, value=value, error=err,
-                                     duration_ms=(datetime.now() - started).total_seconds() * 1000)
+                                     duration_ms=(monotonic() - started) * 1000)
             raise
 
     def write_register(self, address: int, value: int, slave: int | None = None) -> None:
         """Write a single holding register (used by switches modeled as registers)."""
         target_slave = int(slave if slave is not None else self.slave_id)
-        started = datetime.now()
+        started = monotonic()
         try:
             with self._serial_lock:
                 self._ensure_connected()
@@ -1045,14 +1056,14 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 if result.isError():
                     raise UpdateFailed(str(result))
             self._record_transaction("write_holding", slave=target_slave, address=address, value=value,
-                                     result="accepted", duration_ms=(datetime.now() - started).total_seconds() * 1000)
+                                     result="accepted", duration_ms=(monotonic() - started) * 1000)
         except Exception as err:
             self._record_transaction("write_holding", slave=target_slave, address=address, value=value, error=err,
-                                     duration_ms=(datetime.now() - started).total_seconds() * 1000)
+                                     duration_ms=(monotonic() - started) * 1000)
             raise
 
     def write_registers_32bit(
-        self, address: int, value: int, data_type: str, slave: int | None = None
+        self, address: int, value: int | float, data_type: str, slave: int | None = None
     ) -> None:
         """Write two consecutive holding registers for 32-bit data types."""
         target_slave = int(slave if slave is not None else self.slave_id)
@@ -1060,10 +1071,12 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             raw = struct.pack(">i", value)
         elif data_type in ("float32",):
             raw = struct.pack(">f", value)
-        else:  # uint32
+        elif data_type == DATA_TYPE_UINT32:
             raw = struct.pack(">I", value)
+        else:
+            raise ValueError(f"Unsupported 32-bit data type: {data_type}")
         high, low = struct.unpack(">HH", raw)
-        started = datetime.now()
+        started = monotonic()
         try:
             with self._serial_lock:
                 self._ensure_connected()
@@ -1074,11 +1087,11 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                     raise UpdateFailed(str(result))
             self._record_transaction("write_holding_32bit", slave=target_slave, address=address,
                                      count=2, value=value, result="accepted",
-                                     duration_ms=(datetime.now() - started).total_seconds() * 1000)
+                                     duration_ms=(monotonic() - started) * 1000)
         except Exception as err:
             self._record_transaction("write_holding_32bit", slave=target_slave, address=address,
                                      count=2, value=value, error=err,
-                                     duration_ms=(datetime.now() - started).total_seconds() * 1000)
+                                     duration_ms=(monotonic() - started) * 1000)
             raise
 
     def read_register_raw(

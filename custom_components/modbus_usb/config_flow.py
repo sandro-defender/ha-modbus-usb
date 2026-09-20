@@ -96,6 +96,9 @@ class ModbusUsbConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
+            # One serial adapter can have only one owner, regardless of the
+            # default slave ID. Keep existing entry unique IDs unchanged.
+            self._async_abort_entries_match({CONF_PORT: user_input[CONF_PORT]})
             await self.async_set_unique_id(f"{user_input[CONF_PORT]}_{user_input[CONF_SLAVE_ID]}")
             self._abort_if_unique_id_configured()
             return self.async_create_entry(

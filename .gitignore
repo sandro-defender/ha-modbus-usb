@@ -8,3 +8,6 @@ htmlcov/
 # Local test virtualenv
 .venv-test/
 venv/
+
+.venv/
+.ruff_cache/

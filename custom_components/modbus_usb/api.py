@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import voluptuous as vol
+import yaml
 from aiohttp import web
 from homeassistant.components import websocket_api
 from homeassistant.components.http import HomeAssistantView
@@ -34,9 +35,7 @@ from .const import (
     CONF_BYTESIZE,
     CONF_DATA_TYPE,
     CONF_DEVICE_CONTROLS,
-    CONF_DESCRIPTION,
     CONF_DEVICES,
-    CONF_DEVICE_CLASS,
     CONF_DEVICE_ID,
     CONF_ENTITIES,
     CONF_ENTITY_ID,
@@ -45,9 +44,6 @@ from .const import (
     DATA_SKIP_DEVICE_RELOAD,
     DATA_PRESERVE_SERIAL_RELOAD,
     CONF_MANUFACTURER,
-    CONF_MAX_VALUE,
-    CONF_MIN_VALUE,
-    CONF_MODE,
     CONF_MODEL,
     CONF_M0_SHORT,
     CONF_NAME,
@@ -58,20 +54,12 @@ from .const import (
     CONF_PARITY,
     CONF_PORT,
     CONF_REGISTER_TYPE,
-    CONF_SCALE,
     CONF_SCAN_INTERVAL,
     CONF_SLAVE_ID,
     CONF_STATE_ON_VALUE,
-    CONF_STATE_CLASS,
-    CONF_STEP,
     CONF_STOPBITS,
-    CONF_UNIT_OF_MEASUREMENT,
     DOMAIN,
-    ENTITY_TYPES,
     REGISTER_TYPE_COIL,
-    REGISTER_TYPE_DISCRETE,
-    REGISTER_TYPE_HOLDING,
-    REGISTER_TYPE_INPUT,
 )
 from .templates import (
     async_delete_template,
@@ -79,6 +67,8 @@ from .templates import (
     async_save_template,
 )
 from .coordinator import is_r413e16_switch_config
+from .validation import validate_entity
+from .config_flow import _hub_schema
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -129,7 +119,7 @@ def _find_hacs_update_entity(hass: HomeAssistant) -> str | None:
 
 async def _async_update_status(hass: HomeAssistant) -> dict[str, Any]:
     """Read the latest GitHub release and compare it to the installed version."""
-    current_version = _local_version()
+    current_version = await hass.async_add_executor_job(_local_version)
     session = async_get_clientsession(hass)
     release_url = f"https://github.com/{_GITHUB_REPOSITORY}/releases/latest"
     async with session.get(
@@ -181,7 +171,7 @@ def _list_serial_ports() -> list[dict[str, str]]:
 def _get_entry(hass: HomeAssistant, entry_id: str):
     """Retrieve config entry by ID or raise an error."""
     entry = hass.config_entries.async_get_entry(entry_id)
-    if entry is None:
+    if entry is None or entry.domain != DOMAIN:
         raise ValueError(f"Config entry '{entry_id}' not found")
     return entry
 
@@ -308,7 +298,7 @@ async def ws_get_data(
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/diagnostic_read",
     vol.Required("entry_id"): cv.string,
-    vol.Required("address"): vol.Coerce(int),
+    vol.Required("address"): vol.All(vol.Coerce(int), vol.Range(min=0, max=65535)),
     vol.Required("register_type"): vol.In(["holding", "input", "coil", "discrete"]),
     vol.Required("data_type"): vol.In(["uint16", "int16", "uint32", "int32", "float32"]),
     vol.Required("slave_id"): vol.All(vol.Coerce(int), vol.Range(min=1, max=247)),
@@ -334,9 +324,9 @@ async def ws_diagnostic_read(
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/diagnostic_write",
     vol.Required("entry_id"): cv.string,
-    vol.Required("address"): vol.Coerce(int),
+    vol.Required("address"): vol.All(vol.Coerce(int), vol.Range(min=0, max=65535)),
     vol.Required("register_type"): vol.In(["holding", "coil"]),
-    vol.Required("value"): vol.Coerce(int),
+    vol.Required("value"): vol.All(vol.Coerce(int), vol.Range(min=0, max=65535)),
     vol.Required("slave_id"): vol.All(vol.Coerce(int), vol.Range(min=1, max=247)),
 })
 @websocket_api.async_response
@@ -560,6 +550,7 @@ async def _async_write_configured_switch(
     return slave_id
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "modbus_usb/write_entity",
     vol.Required("entry_id"): cv.string,
@@ -947,8 +938,10 @@ async def ws_r4d6f20_command(hass: HomeAssistant, connection: websocket_api.Acti
         if parity is not None:
             await hass.async_add_executor_job(coordinator.write_register, 0x00FF, _R4D6F20_PARITY_CODES[parity], slave)
         data = dict(entry.data)
-        if baudrate is not None: data[CONF_BAUDRATE] = baudrate
-        if parity is not None: data[CONF_PARITY] = parity
+        if baudrate is not None:
+            data[CONF_BAUDRATE] = baudrate
+        if parity is not None:
+            data[CONF_PARITY] = parity
         hass.config_entries.async_update_entry(entry, data=data)
         connection.send_result(msg["id"], {"success": True, "reload_required": True})
     except Exception as err:  # noqa: BLE001
@@ -1517,50 +1510,6 @@ async def ws_save_entity(
             ent_id = uuid.uuid4().hex[:8]
             entity[CONF_ENTITY_ID] = ent_id
 
-        entity_type = entity.get(CONF_ENTITY_TYPE)
-        if entity_type not in ENTITY_TYPES:
-            raise ValueError(f"Unsupported entity type: {entity_type!r}")
-
-        # Coerce numeric fields
-        if CONF_ADDRESS in entity:
-            entity[CONF_ADDRESS] = int(entity[CONF_ADDRESS])
-            if not 0 <= entity[CONF_ADDRESS] <= 65535:
-                raise ValueError("Register addresses must be between 0 and 65535")
-        register_type = entity.get(CONF_REGISTER_TYPE)
-        allowed_registers = {
-            "sensor": [REGISTER_TYPE_HOLDING, REGISTER_TYPE_INPUT],
-            "switch": [REGISTER_TYPE_COIL, REGISTER_TYPE_HOLDING],
-            "binary_sensor": [REGISTER_TYPE_COIL, REGISTER_TYPE_DISCRETE],
-            "number": [REGISTER_TYPE_HOLDING],
-        }[entity_type]
-        if register_type not in allowed_registers:
-            raise ValueError(
-                f"A {entity_type} cannot use register type {register_type!r}"
-            )
-        if CONF_ADDRESSES in entity and entity[CONF_ADDRESSES] not in (None, ""):
-            if not isinstance(entity[CONF_ADDRESSES], list):
-                raise ValueError("Group switch addresses must be a list")
-            addresses = [int(address) for address in entity[CONF_ADDRESSES]]
-            if any(address < 0 or address > 65535 for address in addresses):
-                raise ValueError("Group switch addresses must be between 0 and 65535")
-            entity[CONF_ADDRESSES] = list(dict.fromkeys(addresses))
-        if CONF_SCALE in entity and entity[CONF_SCALE] not in (None, ""):
-            entity[CONF_SCALE] = float(entity[CONF_SCALE])
-        if CONF_SLAVE_ID in entity and entity[CONF_SLAVE_ID] not in (None, ""):
-            entity[CONF_SLAVE_ID] = int(entity[CONF_SLAVE_ID])
-        if CONF_MIN_VALUE in entity and entity[CONF_MIN_VALUE] not in (None, ""):
-            entity[CONF_MIN_VALUE] = float(entity[CONF_MIN_VALUE])
-        if CONF_MAX_VALUE in entity and entity[CONF_MAX_VALUE] not in (None, ""):
-            entity[CONF_MAX_VALUE] = float(entity[CONF_MAX_VALUE])
-        if CONF_STEP in entity and entity[CONF_STEP] not in (None, ""):
-            entity[CONF_STEP] = float(entity[CONF_STEP])
-        # JSON form values are strings.  Keep Modbus command and state values
-        # numeric so a switch edited in the sidebar retains its template
-        # behaviour (including the R413E16 verified-state mapping).
-        for value_key in (CONF_ON_VALUE, CONF_OFF_VALUE, CONF_STATE_ON_VALUE):
-            if value_key in entity and entity[value_key] not in (None, ""):
-                entity[value_key] = int(entity[value_key])
-
         new_options = dict(entry.options or {})
         entities = list(new_options.get(CONF_ENTITIES, []))
 
@@ -1569,7 +1518,10 @@ async def ws_save_entity(
             # The editor exposes only the fields it can safely change. Keep
             # template-only settings such as assumed_state and a device image
             # when an existing entity is edited from the sidebar.
-            entities[existing_idx] = {**entities[existing_idx], **entity}
+            entity = {**entities[existing_idx], **entity}
+        entity = validate_entity(entity)
+        if existing_idx is not None:
+            entities[existing_idx] = entity
         else:
             entities.append(entity)
 
@@ -1647,23 +1599,19 @@ async def ws_save_hub(
         entry = _get_entry(hass, msg["entry_id"])
         hub_data = msg["hub"]
 
-        new_data = dict(entry.data)
-        if CONF_PORT in hub_data:
-            new_data[CONF_PORT] = hub_data[CONF_PORT]
-        if CONF_BAUDRATE in hub_data:
-            new_data[CONF_BAUDRATE] = int(hub_data[CONF_BAUDRATE])
-        if CONF_BYTESIZE in hub_data:
-            new_data[CONF_BYTESIZE] = int(hub_data[CONF_BYTESIZE])
-        if CONF_PARITY in hub_data:
-            new_data[CONF_PARITY] = hub_data[CONF_PARITY]
-        if CONF_STOPBITS in hub_data:
-            new_data[CONF_STOPBITS] = int(hub_data[CONF_STOPBITS])
-        if CONF_SLAVE_ID in hub_data:
-            new_data[CONF_SLAVE_ID] = int(hub_data[CONF_SLAVE_ID])
-
-        new_options = dict(entry.options or {})
-        if CONF_SCAN_INTERVAL in hub_data:
-            new_options[CONF_SCAN_INTERVAL] = int(hub_data[CONF_SCAN_INTERVAL])
+        settings = _hub_schema()({
+            **entry.data,
+            CONF_NAME: entry.title,
+            CONF_SCAN_INTERVAL: entry.options.get(CONF_SCAN_INTERVAL, 10),
+            **hub_data,
+        })
+        if not settings[CONF_PORT].strip():
+            raise ValueError("Serial port must not be empty")
+        new_data = {key: settings[key] for key in (
+            CONF_PORT, CONF_BAUDRATE, CONF_BYTESIZE, CONF_PARITY,
+            CONF_STOPBITS, CONF_SLAVE_ID,
+        )}
+        new_options = {**entry.options, CONF_SCAN_INTERVAL: settings[CONF_SCAN_INTERVAL]}
 
         hass.config_entries.async_update_entry(entry, data=new_data, options=new_options)
         connection.send_result(msg["id"], {"success": True})
@@ -1758,6 +1706,8 @@ async def ws_apply_template(
 
         if not target_tpl:
             raise ValueError(f"Template '{tfname or tid}' not found")
+        if target_tpl.get("error"):
+            raise ValueError(f"Template is invalid: {target_tpl['error']}")
 
         new_options = dict(entry.options or {})
         devices = list(new_options.get(CONF_DEVICES, []))
@@ -1787,6 +1737,8 @@ async def ws_apply_template(
         else:
             # Look up existing device to inherit slave_id if not given
             existing_dev = next((d for d in devices if d.get("id") == device_id), None)
+            if existing_dev is None:
+                raise ValueError("Target device was not found")
             if existing_dev and "slave_id" in existing_dev:
                 slave_id = existing_dev["slave_id"]
             if existing_dev and target_tpl.get(CONF_IMAGE) and not existing_dev.get(CONF_IMAGE):
@@ -1836,6 +1788,7 @@ async def ws_apply_template(
                     int(address) + address_offset
                     for address in ent[CONF_ADDRESSES]
                 ]
+            ent = validate_entity(ent)
             entities.append(ent)
             added_entities.append(ent)
 
@@ -1895,25 +1848,34 @@ class ModbusUsbTemplatesView(HomeAssistantView):
 
     async def post(self, request: web.Request) -> web.Response:
         """POST /api/modbus_usb/templates -> save a template."""
+        if not request["hass_user"].is_admin:
+            raise web.HTTPForbidden()
         hass: HomeAssistant = request.app["hass"]
-        data = await request.json()
-        filename = data.get("filename")
-        content = data.get("content")
-        if not filename or not content:
-            return self.json({"error": "filename and content are required"}, status_code=400)
         try:
+            data = await request.json()
+            if not isinstance(data, dict):
+                raise ValueError("Request body must be an object")
+            filename = data.get("filename")
+            content = data.get("content")
+            if not isinstance(filename, str) or not isinstance(content, str) or not content:
+                raise ValueError("filename and content must be non-empty strings")
             tpl = await async_save_template(hass, filename, content)
             return self.json({"success": True, "template": tpl})
-        except Exception as err:
+        except (ValueError, yaml.YAMLError) as err:
             return self.json({"error": str(err)}, status_code=400)
 
     async def delete(self, request: web.Request) -> web.Response:
         """DELETE /api/modbus_usb/templates?filename=xxx -> delete a template."""
+        if not request["hass_user"].is_admin:
+            raise web.HTTPForbidden()
         hass: HomeAssistant = request.app["hass"]
         filename = request.query.get("filename")
         if not filename:
             return self.json({"error": "filename query parameter required"}, status_code=400)
-        deleted = await async_delete_template(hass, filename)
+        try:
+            deleted = await async_delete_template(hass, filename)
+        except ValueError as err:
+            return self.json({"error": str(err)}, status_code=400)
         return self.json({"success": deleted})
 
 
@@ -1921,15 +1883,13 @@ class ModbusUsbTemplatesView(HomeAssistantView):
 # Registration
 # ─────────────────────────────────────────────────────────────────────────────
 
-_API_REGISTERED = False
+_API_REGISTERED = f"{DOMAIN}_api_registered"
 
 
 async def async_register_api(hass: HomeAssistant) -> None:
     """Register WebSocket commands and REST views."""
-    global _API_REGISTERED  # noqa: PLW0603
-    if _API_REGISTERED:
+    if hass.data.get(_API_REGISTERED):
         return
-    _API_REGISTERED = True
 
     # Register WebSocket handlers
     websocket_api.async_register_command(hass, ws_get_data)
@@ -1963,11 +1923,9 @@ async def async_register_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_apply_template)
 
     # Register HTTP views
-    try:
-        hass.http.register_view(ModbusUsbConfigView)
-        hass.http.register_view(ModbusUsbTemplatesView)
-    except Exception as err:
-        _LOGGER.warning("Could not register HTTP views (may already be registered): %s", err)
+    hass.http.register_view(ModbusUsbConfigView)
+    hass.http.register_view(ModbusUsbTemplatesView)
+    hass.data[_API_REGISTERED] = True
 
     _LOGGER.debug("Modbus USB WebSocket & REST API registered")
 

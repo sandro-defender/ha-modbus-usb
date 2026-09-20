@@ -1,2 +1,6 @@
-# Home Assistant's custom-component test fixtures also install pytest and HA.
-pytest-homeassistant-custom-component==0.13.205
+# Python 3.11 provides an older HA compatibility check; use 3.12 for the main suite.
+pytest-homeassistant-custom-component==0.13.109; python_version < "3.12"
+pytest-homeassistant-custom-component==0.13.205; python_version >= "3.12"
+pymodbus>=3.6.0,<4.0.0
+pyserial==3.5
+ruff==0.16.8

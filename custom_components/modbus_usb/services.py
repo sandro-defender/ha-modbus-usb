@@ -7,7 +7,6 @@ Provides:
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -60,7 +59,7 @@ WRITE_REGISTER_SCHEMA = vol.Schema(
         vol.Required(CONF_REGISTER_TYPE, default=REGISTER_TYPE_HOLDING): vol.In(
             [REGISTER_TYPE_HOLDING, REGISTER_TYPE_COIL]
         ),
-        vol.Required("value"): vol.Coerce(int),
+        vol.Required("value"): vol.All(vol.Coerce(int), vol.Range(min=0, max=65535)),
         vol.Optional(CONF_SLAVE_ID): vol.All(vol.Coerce(int), vol.Range(min=1, max=247)),
     }
 )

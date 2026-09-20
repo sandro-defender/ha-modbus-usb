@@ -16,8 +16,18 @@ def call_modbus_on_client(
     versions as well as current Home Assistant installations.
     """
     method = getattr(client, method_name)
-    # Do not retry a write after TypeError: older clients may silently accept
-    # arbitrary keyword arguments, leaving the request addressed to slave 0.
+    # Prefer the keyword exposed by the client signature. Some legacy clients
+    # accept arbitrary kwargs but reject ``device_id`` only when called, so
+    # retry solely for that exact unsupported-keyword error. Other TypeErrors
+    # can originate inside a write and must never be retried.
     parameters = inspect.signature(method).parameters
     unit_keyword = "slave" if "slave" in parameters else "device_id"
-    return method(*args, **{unit_keyword: slave}, **kwargs)
+    try:
+        return method(*args, **{unit_keyword: slave}, **kwargs)
+    except TypeError as err:
+        if (
+            unit_keyword != "device_id"
+            or "unexpected keyword argument 'device_id'" not in str(err)
+        ):
+            raise
+        return method(*args, slave=slave, **kwargs)

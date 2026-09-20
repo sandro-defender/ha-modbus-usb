@@ -62,6 +62,8 @@ def as_float(value: Any, default: float) -> float:
 
 def decode_words(words: list[int], data_type: str) -> float | int:
     """Decode a list of 16-bit register words into a number."""
+    if data_type == "bool":
+        return words[0]
     word_counts = {
         DATA_TYPE_UINT16: 1, DATA_TYPE_INT16: 1, DATA_TYPE_UINT32: 2,
         DATA_TYPE_INT32: 2, DATA_TYPE_FLOAT32: 2,

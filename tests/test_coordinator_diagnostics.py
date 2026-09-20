@@ -423,21 +423,32 @@ def test_scan_bus_defaults_parity_when_serial_profile_lacks_it() -> None:
     assert coordinator.scan_progress["active"] is False
 
 
-@pytest.mark.parametrize(("words", "data_type", "expected"), [
-    ([65535], "uint16", 65535), ([65535], "int16", -1),
-    ([65535, 65535], "uint32", 4294967295), ([65535, 65535], "int32", -1),
-    ([0x414C, 0], "float32", 12.75),
-])
+@pytest.mark.parametrize(
+    ("words", "data_type", "expected"),
+    [
+        ([65535], "uint16", 65535),
+        ([65535], "int16", -1),
+        ([65535, 65535], "uint32", 4294967295),
+        ([65535, 65535], "int32", -1),
+        ([0x414C, 0], "float32", 12.75),
+    ],
+)
 def test_decode_register_types(words, data_type, expected):
     from custom_components.modbus_usb.coordinator import _decode_words
 
     assert _decode_words(words, data_type) == expected
 
 
-@pytest.mark.parametrize(("words", "data_type"), [
-    ([], "uint16"), ([0], "float32"), ([0x7FC0, 0], "float32"),
-    ([0x7F80, 0], "float32"), ([0, 0], "unknown"),
-])
+@pytest.mark.parametrize(
+    ("words", "data_type"),
+    [
+        ([], "uint16"),
+        ([0], "float32"),
+        ([0x7FC0, 0], "float32"),
+        ([0x7F80, 0], "float32"),
+        ([0, 0], "unknown"),
+    ],
+)
 def test_decode_rejects_short_nonfinite_or_unsupported_responses(words, data_type):
     from custom_components.modbus_usb.coordinator import _decode_words
 
@@ -458,16 +469,26 @@ def test_runtime_type_error_never_retries_a_write():
     client = Mock()
     client.write_register.side_effect = TypeError("invalid device_id at runtime")
     with pytest.raises(TypeError):
-        ModbusUsbCoordinator._call_modbus_on_client(client, "write_register", 1, 256, slave=1)
+        ModbusUsbCoordinator._call_modbus_on_client(
+            client, "write_register", 1, 256, slave=1
+        )
     client.write_register.assert_called_once()
 
 
-@pytest.mark.parametrize(("method", "args", "kwargs", "payload"), [
-    ("read_holding_registers", (10,), {"count": 2}, b"\x00\x0a\x00\x02"),
-    ("write_register", (10, 65535), {}, b"\x00\x0a\xff\xff"),
-    ("write_coil", (10, True), {}, b"\x00\x0a\xff\x00"),
-    ("write_registers", (10, [0x414C, 0]), {}, b"\x00\x0a\x00\x02\x04\x41\x4c\x00\x00"),
-])
+@pytest.mark.parametrize(
+    ("method", "args", "kwargs", "payload"),
+    [
+        ("read_holding_registers", (10,), {"count": 2}, b"\x00\x0a\x00\x02"),
+        ("write_register", (10, 65535), {}, b"\x00\x0a\xff\xff"),
+        ("write_coil", (10, True), {}, b"\x00\x0a\xff\x00"),
+        (
+            "write_registers",
+            (10, [0x414C, 0]),
+            {},
+            b"\x00\x0a\x00\x02\x04\x41\x4c\x00\x00",
+        ),
+    ],
+)
 def test_installed_pymodbus_request_encoding(method, args, kwargs, payload):
     """Use real client methods/codecs, intercepting execution before serial I/O."""
     from unittest.mock import Mock
@@ -476,17 +497,23 @@ def test_installed_pymodbus_request_encoding(method, args, kwargs, payload):
 
     client = ModbusSerialClient(port="/dev/null")
     client.execute = Mock(return_value=_Response([0]))
-    ModbusUsbCoordinator._call_modbus_on_client(client, method, *args, slave=7, **kwargs)
+    ModbusUsbCoordinator._call_modbus_on_client(
+        client, method, *args, slave=7, **kwargs
+    )
     request = client.execute.call_args.args[-1]
     assert request.encode() == payload
     # Pymodbus changed the PDU unit-id attribute along with its call keyword.
     assert getattr(request, "dev_id", getattr(request, "slave_id", None)) == 7
 
 
-@pytest.mark.parametrize(("value", "data_type", "expected"), [
-    (12.75, "float32", [0x414C, 0]), (-1, "int32", [65535, 65535]),
-    (4294967295, "uint32", [65535, 65535]),
-])
+@pytest.mark.parametrize(
+    ("value", "data_type", "expected"),
+    [
+        (12.75, "float32", [0x414C, 0]),
+        (-1, "int32", [65535, 65535]),
+        (4294967295, "uint32", [65535, 65535]),
+    ],
+)
 def test_32bit_write_payload(value, data_type, expected):
     from unittest.mock import Mock
 

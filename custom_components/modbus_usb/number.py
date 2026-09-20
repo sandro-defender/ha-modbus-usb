@@ -147,11 +147,19 @@ class ModbusUsbNumber(CoordinatorEntity[ModbusUsbCoordinator], NumberEntity):
             raise HomeAssistantError("Scaled number value must be finite")
         if data_type != DATA_TYPE_FLOAT32:
             raw_value = round(raw_value)
-        formats = {"uint16": ">H", "int16": ">h", "uint32": ">I", "int32": ">i", "float32": ">f"}
+        formats = {
+            "uint16": ">H",
+            "int16": ">h",
+            "uint32": ">I",
+            "int32": ">i",
+            "float32": ">f",
+        }
         try:
             encoded = struct.pack(formats[data_type], raw_value)
         except (KeyError, struct.error, OverflowError) as err:
-            raise HomeAssistantError(f"Value cannot be represented as {data_type}") from err
+            raise HomeAssistantError(
+                f"Value cannot be represented as {data_type}"
+            ) from err
         # Pymodbus register writes are unsigned 16-bit wire values.
         if data_type == DATA_TYPE_INT16:
             raw_value = struct.unpack(">H", encoded)[0]

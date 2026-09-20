@@ -1,4 +1,5 @@
 """Validate user-supplied configuration before it reaches the serial bus."""
+
 from __future__ import annotations
 
 import math
@@ -38,7 +39,10 @@ def validate_entity(entity: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(entity.get("name"), str) or not entity["name"].strip():
         raise ValueError("Entity name must be a non-empty string")
     register_type = entity.get("register_type")
-    if not isinstance(register_type, str) or register_type not in _REGISTER_TYPES[entity_type]:
+    if (
+        not isinstance(register_type, str)
+        or register_type not in _REGISTER_TYPES[entity_type]
+    ):
         raise ValueError(f"A {entity_type} cannot use register type {register_type!r}")
     entity["address"] = bounded_int(entity.get("address"), "address", 0, 65535)
     data_type = entity.get("data_type", "uint16")
@@ -46,12 +50,16 @@ def validate_entity(entity: dict[str, Any]) -> dict[str, Any]:
         register_type in {"coil", "discrete"} and data_type == "bool"
     ):
         raise ValueError(f"Unsupported data type: {data_type!r}")
-    count = DATA_TYPE_WORD_COUNT[data_type] if register_type in {"holding", "input"} else 1
+    count = (
+        DATA_TYPE_WORD_COUNT[data_type] if register_type in {"holding", "input"} else 1
+    )
     if entity["address"] + count > 65536:
         raise ValueError("Register span exceeds address 65535")
 
     for key in ("id", "device_id"):
-        if key in entity and (not isinstance(entity[key], str) or not entity[key].strip()):
+        if key in entity and (
+            not isinstance(entity[key], str) or not entity[key].strip()
+        ):
             raise ValueError(f"{key} must be a non-empty string")
     for key in ("slave_id", "on_value", "off_value", "state_on_value"):
         if entity.get(key) in (None, ""):
@@ -61,12 +69,18 @@ def validate_entity(entity: dict[str, Any]) -> dict[str, Any]:
         else:
             entity[key] = bounded_int(entity[key], key, 0, 65535)
     if entity.get("addresses") not in (None, ""):
-        if entity_type != "switch" or not isinstance(entity["addresses"], list) or not entity["addresses"]:
+        if (
+            entity_type != "switch"
+            or not isinstance(entity["addresses"], list)
+            or not entity["addresses"]
+        ):
             raise ValueError("Group switch addresses must be a non-empty list")
-        entity["addresses"] = list(dict.fromkeys(
-            bounded_int(address, "group address", 0, 65535)
-            for address in entity["addresses"]
-        ))
+        entity["addresses"] = list(
+            dict.fromkeys(
+                bounded_int(address, "group address", 0, 65535)
+                for address in entity["addresses"]
+            )
+        )
     else:
         entity.pop("addresses", None)
     for key in ("scale", "min_value", "max_value", "step"):
@@ -94,14 +108,18 @@ def validate_entity(entity: dict[str, Any]) -> dict[str, Any]:
 def validate_template(data: Any) -> dict[str, Any]:
     """Validate template structure and all entity definitions before saving."""
     if not isinstance(data, dict):
-        raise ValueError("Template YAML must define a mapping/dictionary at the root level")
+        raise ValueError(
+            "Template YAML must define a mapping/dictionary at the root level"
+        )
     data = dict(data)
     if not data.get("name") and not data.get("id"):
         raise ValueError("Template must contain at least 'name' or 'id'")
     for key in ("name", "id"):
         if key in data and (not isinstance(data[key], str) or not data[key].strip()):
             raise ValueError(f"Template {key} must be a non-empty string")
-    data["default_slave_id"] = bounded_int(data.get("default_slave_id", 1), "default_slave_id", 1, 247)
+    data["default_slave_id"] = bounded_int(
+        data.get("default_slave_id", 1), "default_slave_id", 1, 247
+    )
     if not isinstance(data.get("entities", []), list):
         raise ValueError("Template entities must be a list")
     data["entities"] = [validate_entity(entity) for entity in data.get("entities", [])]

@@ -19,7 +19,7 @@
 ---
 
 > 📖 **Documentation:** start here for the overview, then follow the
-> [User Guide](docs/USER_GUIDE.md) for step-by-step instructions (setup,
+> [User Guide](wiki/USER_GUIDE.md) for step-by-step instructions (setup,
 > devices, entities, templates, board tools, automations, FAQ). Contributors:
 > see [Project structure](#project-structure) and
 > [Architecture](#architecture) below.
@@ -135,7 +135,7 @@ The **Modbus USB** panel is the day-to-day home for this integration. It is phon
 | **Hub & Serial** | View and edit serial settings and poll interval; scan USB ports. |
 | **Diagnostics & Debug** | Connection health, serial-port profile, RS-485 scanner, direct read/write tools, configured-device verification, 🛠 board tools, safe unknown-board discovery, and the live activity log. |
 
-> 📖 **New here?** The [User Guide](docs/USER_GUIDE.md) walks through every
+> 📖 **New here?** The [User Guide](wiki/USER_GUIDE.md) walks through every
 > tab, device setup, entity fields, template authoring, board tools,
 > automations, and troubleshooting step by step.
 
@@ -327,13 +327,65 @@ Pull requests are welcome — especially new verified templates, diagnostics imp
 Use Python 3.12 for the pinned Home Assistant 2025.1.4 test environment.
 Python 3.11 uses Home Assistant 2024.3.3 as an older compatibility check.
 
+### Local development & validation sequence
+
+#### Setup and dependencies
+
+Create and activate a Python 3.12 (recommended) or 3.11 virtual environment:
+
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+python3 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+python -m pip install --upgrade pip
 python -m pip install -r requirements_test.txt
-python -m pytest -q
-ruff check custom_components tests
 ```
+
+#### Required validation sequence
+
+Run this exact sequence before pushing changes:
+
+```bash
+ruff check custom_components tests
+python -m pytest -q
+python -m compileall -q custom_components/modbus_usb
+```
+
+#### Fast testing
+
+To run standalone unit and structural tests without loading the full Home Assistant runtime fixtures, run:
+
+```bash
+python -m pytest -m fast -q
+```
+
+Or target specific fast test suites directly:
+
+```bash
+python -m pytest tests/test_templates.py tests/test_panel.py tests/test_decoding.py tests/test_diagnostics.py tests/test_bus.py tests/test_boards.py tests/test_validation.py -q
+```
+
+### Developer debugging guide
+
+- **Serial connection failures:**
+  - Check whether the OS device exists (`ls -l /dev/serial/by-id/*` or `ls -l /dev/ttyUSB*`).
+  - Verify container device pass-through (`--device /dev/ttyUSB0` or `/dev/serial/by-id/...`).
+  - Ensure no other process (e.g. legacy Modbus integrations, serial terminals, MCP servers) holds `/dev/ttyUSB0`. Only the coordinator may open the port.
+  - Review connection state in **Diagnostics & Debug → Serial Profile** or check `DIAG_FAILED_READS` / `DIAG_LAST_ERROR`.
+- **Wrong slave IDs & baud rate mismatches:**
+  - Use the panel's built-in scanner under **Diagnostics & Debug → Find RS-485 Devices** to sweep IDs across standard baud rates (`9600`, `19200`, etc.) and parities (`N`, `E`, `O`).
+  - Verify the board manual's default slave address (many start at 1, some at 0 or 254).
+- **Read/write errors & register addressing:**
+  - Note register addressing assumptions: Modbus wire protocol uses 0-based indexing. If documentation cites address `40001`, wire address is `0` (`holding`). If registers appear shifted by one, subtract 1.
+  - For multi-register values (`uint32`, `int32`, `float32`), verify register ordering and word count (2 words = 4 bytes).
+  - Verify holding register switch commands (`on_value`/`off_value`, e.g. `256`/`512` on R413E16 vs standard coil values `1`/`0`).
+- **Templates & validation errors:**
+  - Run `python -m pytest tests/test_templates.py` to validate all YAML template schemas.
+  - When editing custom templates in `<config>/modbus_usb_templates/`, edits are checked by `validate_template()` before writing atomically to disk.
+- **Panel & WebSocket/REST API issues:**
+  - All UI scripts in `custom_components/modbus_usb/www/panel/*.js` can be syntax-checked with:
+    `for f in custom_components/modbus_usb/www/panel/*.js; do node --check "$f"; done`
+  - Ensure administrative privileges when making configuration changes or issuing hardware commands.
+  - Check the browser developer console and HA server logs for WebSocket `modbus_usb/...` error responses.
 
 CI runs tests on both Python versions against Pymodbus 3.6.9 and 3.15.0,
 including template validation, API authorization, numeric encoding, and reload
@@ -384,9 +436,9 @@ ha-modbus-usb/
 │       ├── panel/             # Classic scripts by feature (global scope, ordered)
 │       └── images/            # Bundled product photos (served locally, no hotlinks)
 ├── tests/                   # pytest suite (runs in CI on every push/PR)
-├── docs/
-│   ├── USER_GUIDE.md        # End-user manual (setup → automations → FAQ)
-│   └── RS485_MCP_INTEGRATION_PLAN.md  # Bench-test plan for MCP tooling
+├── wiki/
+│   ├── USER_GUIDE.md        # Wiki manual (setup → automations → FAQ)
+│   └── RS485_MCP_INTEGRATION_PLAN.md  # Bench-test & MCP reference
 └── .github/workflows/       # ci.yml (ruff + pytest + node --check), release.yml
 ```
 

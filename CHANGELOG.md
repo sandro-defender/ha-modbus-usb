@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 2.4.0
+
+### Multi-Device Polling & Bus Optimization
+- **Multi-Register Block Read Optimizer**: Automatically packs adjacent and contiguous registers into single Modbus multi-word request frames (`FC03`, `FC04`, `FC01`, `FC02`), respecting vendor span limits (`max_read_registers`) and bridging small register gaps (`max_gap_tolerance`).
+- **Adaptive Polling Intervals**: Supported entity-level `scan_interval` configuration, allowing fast polling for critical telemetry (e.g. active power) while throttling slower environmental or cumulative counter entities.
+- **Configurable Inter-Frame Delay**: Added `inter_frame_delay_ms` quiet-time setting between RS-485 transactions to prevent packet collisions on slow hardware transceivers.
+- **Offline Slave Circuit Breaker**: Added a state machine (`healthy` -> `degraded` -> `offline`) with exponential backoff on unresponsive slave IDs, preventing unresponsive boards from stalling or timing out the shared bus for healthy boards.
+
 ## 2.3.0
 
 ### Hardware-Verified Template Certification

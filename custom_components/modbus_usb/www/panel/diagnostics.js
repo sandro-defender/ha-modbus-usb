@@ -124,9 +124,15 @@
       }
 
       const errorBox = document.getElementById('diag-last-error');
-      if (health.last_error) {
+      const circuitBreaker = diag.circuit_breaker || {};
+      const breakerEntries = Object.values(circuitBreaker).filter(b => b.state !== 'healthy');
+      let breakerWarning = '';
+      if (breakerEntries.length) {
+        breakerWarning = ' · ' + breakerEntries.map(b => `Slave ${b.slave_id}: ${b.state.toUpperCase()} (${b.backoff_seconds}s backoff)`).join(', ');
+      }
+      if (health.last_error || breakerWarning) {
         errorBox.style.display = 'block';
-        errorBox.textContent = `Latest error: ${health.last_error}`;
+        errorBox.textContent = `Latest error: ${health.last_error || 'None'}${breakerWarning}`;
       } else {
         errorBox.style.display = 'none';
       }

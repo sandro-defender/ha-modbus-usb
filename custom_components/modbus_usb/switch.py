@@ -7,7 +7,6 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -177,7 +176,15 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
                     self.coordinator.write_coil, int(address), on, slave
                 )
         else:
-            value = self._ent.get(CONF_ON_VALUE, 1) if on else self._ent.get(CONF_OFF_VALUE, 0)
+            # Older saves and hand-edited templates can hold the command
+            # values as strings or null; Modbus writes need real integers.
+            try:
+                value = int(
+                    self._ent.get(CONF_ON_VALUE, 1) if on
+                    else self._ent.get(CONF_OFF_VALUE, 0)
+                )
+            except (TypeError, ValueError):
+                value = 1 if on else 0
             for address in addresses:
                 await self.hass.async_add_executor_job(
                     self.coordinator.write_register, int(address), value, slave

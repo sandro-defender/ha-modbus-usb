@@ -85,7 +85,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
             frontend_url_path="modbus-usb",
             # Change this asset version when the standalone sidebar HTML changes.
             # It prevents an already-open browser from retaining an old panel.
-            config={"url": "/modbus_usb_panel/modbus-panel.html?v=2.1.90"},
+            config={"url": "/modbus_usb_panel/modbus-panel.html?v=2.2.0"},
             require_admin=False,
         )
         _LOGGER.debug("Modbus USB sidebar panel registered")
@@ -214,9 +214,24 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator: ModbusUsbCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
         await hass.async_add_executor_job(coordinator.close)
 
-    # If no more entries, unregister services
-    if not hass.data.get(DOMAIN):
+    # Unregister services only when no Modbus USB entry remains. The DOMAIN
+    # dict also holds reload-guard helper sets, so its truthiness alone can
+    # never be used to detect "last entry removed".
+    remaining = [
+        item for item in hass.config_entries.async_entries(DOMAIN)
+        if item.entry_id != entry.entry_id
+    ]
+    if not remaining:
         await async_unregister_services(hass)
+        domain_data = hass.data.get(DOMAIN, {})
+        for helper_key in (
+            DATA_SKIP_DEVICE_RELOAD,
+            DATA_PRESERVE_SERIAL_RELOAD,
+            DATA_SKIP_SERIAL_RELOAD,
+        ):
+            domain_data.pop(helper_key, None)
+        if not domain_data:
+            hass.data.pop(DOMAIN, None)
 
     return unload_ok
 

@@ -46,6 +46,9 @@ class _Client:
         self.connected = True
         return True
 
+    def close(self) -> None:
+        self.connected = False
+
     def read_holding_registers(self, address: int, count: int, *, slave: int) -> _Response:
         return _Response([self.value])
 
@@ -180,10 +183,21 @@ def test_r413e16_template_has_16_command_switches() -> None:
     template = yaml.safe_load(template_path.read_text(encoding="utf-8"))
 
     assert 1 <= template["default_slave_id"] <= 247
-    assert len(template["entities"]) == 16
-    assert [entity["address"] for entity in template["entities"]] == list(range(1, 17))
+    channels = [
+        entity for entity in template["entities"]
+        if not entity.get("addresses")
+    ]
+    assert len(channels) == 16
+    assert [entity["address"] for entity in channels] == list(range(1, 17))
     assert all(entity["on_value"] == 0x0100 for entity in template["entities"])
     assert all(entity["off_value"] == 0x0200 for entity in template["entities"])
+
+    # The optional group switch writes every channel and has no feedback
+    # register of its own, so it must stay an assumed-state entity.
+    combined = [entity for entity in template["entities"] if entity.get("addresses")]
+    assert len(combined) == 1
+    assert combined[0]["addresses"] == list(range(1, 17))
+    assert combined[0]["assumed_state"] is True
 
 
 def test_template_fingerprint_matches_only_expected_register_values() -> None:
@@ -214,3 +228,189 @@ def test_template_fingerprint_matches_only_expected_register_values() -> None:
     ]
 
     assert coordinator._match_templates(coordinator.client, 1, templates) == ["Voltage Meter"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Regression tests for configuration-tolerance helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_normalize_enum_treats_none_strings_and_invalid_values_as_none() -> None:
+    from homeassistant.components.sensor import SensorDeviceClass
+
+    from custom_components.modbus_usb.coordinator import normalize_enum
+
+    assert normalize_enum("none", SensorDeviceClass, "x") is None
+    assert normalize_enum(None, SensorDeviceClass, "x") is None
+    assert normalize_enum("", SensorDeviceClass, "x") is None
+    assert normalize_enum("not-a-class", SensorDeviceClass, "x") is None
+    assert normalize_enum("temperature", SensorDeviceClass, "x") is SensorDeviceClass.TEMPERATURE
+
+
+def test_as_float_falls_back_for_null_and_garbage() -> None:
+    from custom_components.modbus_usb.coordinator import as_float
+
+    assert as_float(None, 5) == 5
+    assert as_float("", 5) == 5
+    assert as_float("12.5", 5) == 12.5
+    assert as_float(3, 5) == 3
+
+
+def test_number_entity_tolerates_null_numeric_settings() -> None:
+    """A sidebar save can persist nulls; float(None) used to kill the platform."""
+    from types import SimpleNamespace
+
+    from homeassistant.components.number import NumberMode
+
+    from custom_components.modbus_usb.number import ModbusUsbNumber
+
+    class StubCoordinator:
+        data = {}
+
+        def async_add_listener(self, *args, **kwargs):
+            return lambda: None
+
+    entry = SimpleNamespace(options={}, entry_id="entry-1", title="Hub")
+    ent = {
+        "id": "n1",
+        "entity_type": "number",
+        "name": "Setpoint",
+        "register_type": "holding",
+        "address": 10,
+        "min_value": None,
+        "max_value": None,
+        "step": None,
+        "scale": None,
+        "mode": "slider",
+    }
+
+    number = ModbusUsbNumber(StubCoordinator(), entry, ent)
+
+    assert number.native_min_value == 0
+    assert number.native_max_value == 65535
+    assert number.native_step == 1
+    assert number.mode is NumberMode.SLIDER
+    assert number._scale == 1
+
+
+def test_sensor_entity_tolerates_none_and_invalid_classes() -> None:
+    from types import SimpleNamespace
+
+    from custom_components.modbus_usb.sensor import ModbusUsbSensor
+
+    class StubCoordinator:
+        data = {}
+
+        def async_add_listener(self, *args, **kwargs):
+            return lambda: None
+
+    entry = SimpleNamespace(options={}, entry_id="entry-1", title="Hub")
+    ent = {
+        "id": "s1",
+        "entity_type": "sensor",
+        "name": "Voltage",
+        "register_type": "holding",
+        "address": 0,
+        "device_class": "none",
+        "state_class": "measurement",
+    }
+
+    sensor = ModbusUsbSensor(StubCoordinator(), entry, ent)
+
+    assert sensor.device_class is None
+    assert sensor.state_class == "measurement"
+
+    ent["device_class"] = "voltage"
+    ent["state_class"] = "bogus"
+    sensor = ModbusUsbSensor(StubCoordinator(), entry, ent)
+    assert sensor.device_class == "voltage"
+    assert sensor.state_class is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# R4D6F20 block reads must not swallow entities they do not cover
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _BlockClient:
+    def __init__(self) -> None:
+        self.connected = True
+        self.calls: list[tuple[int, int]] = []
+
+    def connect(self) -> bool:
+        return True
+
+    def read_holding_registers(self, address: int, *, count: int, device_id: int) -> _Response:
+        self.calls.append((address, count))
+        return _Response([0] * count)
+
+
+class _EntryStub:
+    def __init__(self, options: dict, entry_id: str = "test-entry") -> None:
+        self.options = options
+        self.entry_id = entry_id
+        self.title = "Hub"
+        self.data = {}
+
+
+class _HassStub:
+    def __init__(self, entry: _EntryStub) -> None:
+        self.config_entries = self
+        self._entry = entry
+
+    def async_get_entry(self, entry_id: str):
+        return self._entry
+
+
+def test_r4d6f20_uncovered_entity_still_polled_individually() -> None:
+    device = {
+        "id": "d1",
+        "model": "R4D6F20",
+        "slave_id": 4,
+        "device_controls": {"protocol": "eletechsup_r4d6f20"},
+        "m0_short": False,
+    }
+    covered = {
+        "id": "e1",
+        "name": "CH-06",
+        "entity_type": "switch",
+        "device_id": "d1",
+        "register_type": "holding",
+        "data_type": "uint16",
+        "address": 5,
+    }
+    uncovered = {
+        "id": "e2",
+        "name": "Custom float",
+        "entity_type": "sensor",
+        "device_id": "d1",
+        "register_type": "holding",
+        "data_type": "float32",
+        "address": 0,
+    }
+    entry = _EntryStub({"devices": [device]})
+    client = _BlockClient()
+    coordinator = _coordinator(client)
+    coordinator.hass = _HassStub(entry)
+
+    data = coordinator._read_all([covered, uncovered], {})
+
+    assert data["e1"] == 0
+    assert data["e2"] == 0.0
+    # The 20-register block read plus one individual 2-register float32 read.
+    assert (0, 20) in client.calls
+    assert (0, 2) in client.calls
+
+
+def test_scan_bus_defaults_parity_when_serial_profile_lacks_it() -> None:
+    client = _Client()
+    coordinator = _coordinator(client)
+    coordinator.serial_config = {
+        "port": "/dev/null",
+        "baudrate": 9600,
+        "bytesize": 8,
+        "stopbits": 1,
+    }
+
+    result = coordinator.scan_bus([9600])
+
+    assert result["found"] == []
+    assert coordinator.scan_progress["active"] is False

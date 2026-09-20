@@ -4,10 +4,10 @@ Provides:
   - modbus_usb.read_register  → fire-and-forget read, result in event
   - modbus_usb.write_register → write a coil or holding register
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -19,8 +19,8 @@ from .const import (
     CONF_DATA_TYPE,
     CONF_REGISTER_TYPE,
     CONF_SLAVE_ID,
-    DATA_TYPES,
     DATA_TYPE_UINT16,
+    DATA_TYPES,
     DOMAIN,
     EVENT_REGISTER_READ,
     REGISTER_TYPE_COIL,
@@ -44,24 +44,32 @@ _ALL_REGISTER_TYPES = [
 READ_REGISTER_SCHEMA = vol.Schema(
     {
         vol.Required("entry_id"): cv.string,
-        vol.Required(CONF_ADDRESS): vol.All(vol.Coerce(int), vol.Range(min=0, max=65535)),
+        vol.Required(CONF_ADDRESS): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=65535)
+        ),
         vol.Required(CONF_REGISTER_TYPE, default=REGISTER_TYPE_HOLDING): vol.In(
             _ALL_REGISTER_TYPES
         ),
         vol.Optional(CONF_DATA_TYPE, default=DATA_TYPE_UINT16): vol.In(DATA_TYPES),
-        vol.Optional(CONF_SLAVE_ID): vol.All(vol.Coerce(int), vol.Range(min=1, max=247)),
+        vol.Optional(CONF_SLAVE_ID): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=247)
+        ),
     }
 )
 
 WRITE_REGISTER_SCHEMA = vol.Schema(
     {
         vol.Required("entry_id"): cv.string,
-        vol.Required(CONF_ADDRESS): vol.All(vol.Coerce(int), vol.Range(min=0, max=65535)),
+        vol.Required(CONF_ADDRESS): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=65535)
+        ),
         vol.Required(CONF_REGISTER_TYPE, default=REGISTER_TYPE_HOLDING): vol.In(
             [REGISTER_TYPE_HOLDING, REGISTER_TYPE_COIL]
         ),
         vol.Required("value"): vol.Coerce(int),
-        vol.Optional(CONF_SLAVE_ID): vol.All(vol.Coerce(int), vol.Range(min=1, max=247)),
+        vol.Optional(CONF_SLAVE_ID): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=247)
+        ),
     }
 )
 
@@ -110,7 +118,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
                 slave or coordinator.slave_id,
                 value,
             )
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             hass.bus.async_fire(
                 EVENT_REGISTER_READ,
                 {
@@ -151,7 +159,7 @@ async def async_register_services(hass: HomeAssistant) -> None:
                 slave or coordinator.slave_id,
                 value,
             )
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             _LOGGER.error("Service write_register failed: %s", err)
             # A service failure must be visible to scripts and automations;
             # logging alone makes an unsuccessful hardware command look valid.

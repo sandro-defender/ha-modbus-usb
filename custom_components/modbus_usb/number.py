@@ -3,9 +3,8 @@
 Exposes a holding register as a numeric input (slider or text box) that
 can be read and written directly from the HA frontend.
 """
-from __future__ import annotations
 
-from typing import Any
+from __future__ import annotations
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
@@ -16,8 +15,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     CONF_ADDRESS,
     CONF_DATA_TYPE,
-    CONF_DEVICES,
     CONF_DEVICE_ID,
+    CONF_DEVICES,
     CONF_ENTITIES,
     CONF_ENTITY_ID,
     CONF_ENTITY_TYPE,
@@ -25,7 +24,6 @@ from .const import (
     CONF_MIN_VALUE,
     CONF_MODE,
     CONF_NAME,
-    CONF_REGISTER_TYPE,
     CONF_SCALE,
     CONF_SLAVE_ID,
     CONF_STEP,
@@ -33,14 +31,10 @@ from .const import (
     DATA_TYPE_UINT16,
     DATA_TYPE_WORD_COUNT,
     DOMAIN,
-    REGISTER_TYPE_HOLDING,
 )
-from .coordinator import (
-    ModbusUsbCoordinator,
-    as_float,
-    get_device_info,
-    get_entity_picture,
-)
+from .coordinator import ModbusUsbCoordinator
+from .decoding import as_float
+from .device_info import get_device_info, get_entity_picture
 
 
 async def async_setup_entry(
@@ -68,7 +62,9 @@ class ModbusUsbNumber(CoordinatorEntity[ModbusUsbCoordinator], NumberEntity):
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{ent[CONF_ENTITY_ID]}"
         self._attr_name = ent[CONF_NAME]
-        self._attr_native_unit_of_measurement = ent.get(CONF_UNIT_OF_MEASUREMENT) or None
+        self._attr_native_unit_of_measurement = (
+            ent.get(CONF_UNIT_OF_MEASUREMENT) or None
+        )
         # Sidebar edits can persist null for optional numeric settings; a
         # plain float() of None removed the whole number platform on setup.
         min_value = as_float(ent.get(CONF_MIN_VALUE), 0)
@@ -93,8 +89,11 @@ class ModbusUsbNumber(CoordinatorEntity[ModbusUsbCoordinator], NumberEntity):
     def available(self) -> bool:
         device_id = self._ent.get(CONF_DEVICE_ID)
         device = next(
-            (item for item in self._entry.options.get(CONF_DEVICES, [])
-             if str(item.get("id")) == str(device_id)),
+            (
+                item
+                for item in self._entry.options.get(CONF_DEVICES, [])
+                if str(item.get("id")) == str(device_id)
+            ),
             None,
         )
         return (device is None or device.get("enabled", True)) and super().available
@@ -104,7 +103,11 @@ class ModbusUsbNumber(CoordinatorEntity[ModbusUsbCoordinator], NumberEntity):
         if slave is None and self._ent.get(CONF_DEVICE_ID):
             devices = self._entry.options.get(CONF_DEVICES, [])
             dev = next(
-                (d for d in devices if str(d.get("id")) == str(self._ent.get(CONF_DEVICE_ID))),
+                (
+                    d
+                    for d in devices
+                    if str(d.get("id")) == str(self._ent.get(CONF_DEVICE_ID))
+                ),
                 None,
             )
             if dev and dev.get(CONF_SLAVE_ID) is not None:
@@ -130,7 +133,9 @@ class ModbusUsbNumber(CoordinatorEntity[ModbusUsbCoordinator], NumberEntity):
         slave = self._resolve_slave_id()
 
         # Convert display value back to raw integer
-        raw_int = int(round(value / scale)) if scale not in (1.0, 0.0) else int(round(value))
+        raw_int = (
+            int(round(value / scale)) if scale not in (1.0, 0.0) else int(round(value))
+        )
 
         if count == 1:
             await self.hass.async_add_executor_job(
@@ -139,7 +144,11 @@ class ModbusUsbNumber(CoordinatorEntity[ModbusUsbCoordinator], NumberEntity):
         else:
             # 32-bit: write two registers using pymodbus write_registers
             await self.hass.async_add_executor_job(
-                self.coordinator.write_registers_32bit, address, raw_int, data_type, slave
+                self.coordinator.write_registers_32bit,
+                address,
+                raw_int,
+                data_type,
+                slave,
             )
         await self.coordinator.async_request_refresh()
 
@@ -147,4 +156,3 @@ class ModbusUsbNumber(CoordinatorEntity[ModbusUsbCoordinator], NumberEntity):
 # Changelog:
 # 2026-09-06 — Entity picture from device/template image URL.
 # Date modified: 2026-09-06
-

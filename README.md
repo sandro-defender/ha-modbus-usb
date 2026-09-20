@@ -18,6 +18,12 @@
 
 ---
 
+> 📖 **Documentation:** start here for the overview, then follow the
+> [User Guide](docs/USER_GUIDE.md) for step-by-step instructions (setup,
+> devices, entities, templates, board tools, automations, FAQ). Contributors:
+> see [Project structure](#project-structure) and
+> [Architecture](#architecture) below.
+
 ## Why this integration?
 
 Home Assistant's built-in Modbus integration is powerful but YAML-heavy: every register, scale factor, and slave ID is hand-written configuration. **Modbus USB Controller** takes a different approach:
@@ -122,11 +128,16 @@ The **Modbus USB** panel is the day-to-day home for this integration. It is phon
 
 | Tab | What you do there |
 |---|---|
-| **Dashboard** | Live readings, relay toggles, and setpoints for every device. |
-| **Devices** | Add, edit, enable/disable, or remove devices and their entities. Disabled devices pause polling and show entities as unavailable. |
-| **Templates** | Browse bundled templates by manufacturer, preview registers, **Use Template**, or **Save to HA** for an editable copy. |
-| **Diagnostics & Debug** | Connection health, serial-port profile, RS-485 scanner, direct read/write tools, configured-device verification, safe unknown-board discovery, and the live activity log. |
-| **Board Tools** | Template-aware hardware actions: R413E16 channel actions/baud/slave setup, R4D6F20 relay controls and serial setup, plus a documented custom-command form for other boards. |
+| **Devices** | Your configured boards: expand a card to test, edit, enable/disable, or remove it. |
+| **Device Templates** | Browse bundled templates by manufacturer, preview registers, **Use Template**, or **Save to HA** for an editable copy. |
+| **Live Dashboard** | Live readings, relay toggles, and setpoints for every device. |
+| **All Entities** | Flat list of every Home Assistant entity with quick edit/delete. |
+| **Hub & Serial** | View and edit serial settings and poll interval; scan USB ports. |
+| **Diagnostics & Debug** | Connection health, serial-port profile, RS-485 scanner, direct read/write tools, configured-device verification, 🛠 board tools, safe unknown-board discovery, and the live activity log. |
+
+> 📖 **New here?** The [User Guide](docs/USER_GUIDE.md) walks through every
+> tab, device setup, entity fields, template authoring, board tools,
+> automations, and troubleshooting step by step.
 
 The header also offers **Refresh**, hub selection (when you have more than one), **Add device**, and **Check update** (which becomes **Update → Restart** when a release is available via HACS).
 
@@ -320,13 +331,92 @@ python -m pytest
 
 Template contributions should cite the vendor manual (link + page/register table) and note whether the map was verified on hardware. Community-sourced maps stay marked **untested** until someone confirms them.
 
+### Project structure
+
+```text
+ha-modbus-usb/
+├── custom_components/modbus_usb/   # The integration (HACS deploys this)
+│   ├── __init__.py          # Entry setup, sidebar panel + static path registration
+│   ├── config_flow.py       # Hub setup + options flow (poll interval, entities)
+│   ├── coordinator.py       # Polling orchestration; owns the serial-lock discipline
+│   ├── bus.py               # Serial-transport mechanics (pymodbus slave/device_id compat)
+│   ├── diagnostics.py       # CRC16 math + reconstructed request frames for the log
+│   ├── decoding.py          # Pure value decoding/normalization (unit-tested, HA-free)
+│   ├── boards/              # Per-board protocols + BLOCK_READERS registry
+│   │   ├── r413e16.py       # Verified-map detection + ON/OFF/state constants
+│   │   └── r4d6f20.py       # Grouped Command 1/2 block readers + range tables
+│   ├── api/                 # WebSocket commands + REST views, by domain
+│   │   ├── helpers.py       # Shared entry/device/entity helpers
+│   │   ├── hub.py           # Hub data, serial settings, USB-port scan
+│   │   ├── diagnostics.py   # Probes, bus scan, verification, hex write, logs
+│   │   ├── devices.py       # Device CRUD, enable/disable, runtime writes
+│   │   ├── entities.py      # Entity CRUD with validation
+│   │   ├── templates.py     # Template CRUD + application to devices
+│   │   ├── boards.py        # R413E16/R4D6F20 hardware commands
+│   │   ├── updates.py       # Release check, HACS install, HA restart
+│   │   └── views.py         # REST fallback (/api/modbus_usb/…)
+│   ├── sensor.py / switch.py / number.py / binary_sensor.py  # HA platforms
+│   ├── device_info.py       # HA device-registry links (hub ↔ devices)
+│   ├── models.py            # TypedDicts documenting hub/device/entity configs
+│   ├── services.py          # modbus_usb.read_register / write_register
+│   ├── templates.py         # Bundled + user YAML template loading/saving
+│   ├── templates/           # 13 bundled board YAMLs (+ .md protocol notes)
+│   ├── const.py             # Constants + single-sourced integration_version()
+│   └── www/
+│       ├── modbus-panel.html  # Thin shell: markup + asset tags only
+│       ├── panel/             # Classic scripts by feature (global scope, ordered)
+│       └── images/            # Bundled product photos (served locally, no hotlinks)
+├── tests/                   # pytest suite (runs in CI on every push/PR)
+├── docs/
+│   ├── USER_GUIDE.md        # End-user manual (setup → automations → FAQ)
+│   └── RS485_MCP_INTEGRATION_PLAN.md  # Bench-test plan for MCP tooling
+└── .github/workflows/       # ci.yml (ruff + pytest + node --check), release.yml
+```
+
+### Architecture
+
+**Data flow.** Each hub owns one `ModbusUsbCoordinator` (a HA
+`DataUpdateCoordinator`) that polls its RS-485 bus on the configured
+interval and fans results out to HA entities. The sidebar panel talks to the
+backend over 30 WebSocket commands (`modbus_usb/…`) plus two REST views; the
+panel subscribes to HA state-change events so switches update instantly
+instead of waiting for the next poll.
+
+**One owner per serial port.** Modbus RTU is strictly request/response, so
+every I/O operation — polling, board tools, scans, services, hex writes —
+holds the coordinator's serial lock for its entire transaction. Scans
+briefly swap in an isolated short-timeout client under the same lock, then
+restore the configured client. Nothing outside the coordinator may open a
+configured port; the panel's serial-profile card is deliberately read-only.
+
+**Boards plug in, the poll loop doesn't change.** Grouped polling lives
+behind the `boards.BLOCK_READERS` registry keyed by template protocol
+(`device_controls.protocol`), with a model-name fallback for older saves.
+Adding a board with grouped reads means one new module in `boards/`, one
+registry entry, and one template YAML. Board-specific constants (command
+words, state values, block ranges) live with their board module — never as
+magic numbers in the coordinator.
+
+**Failure isolation.** A malformed entity is skipped with a warning instead
+of failing the poll cycle; an offline board returns `None` values instead of
+blocking setup or reloads; device add/remove rebuilds entities without
+closing the shared serial port. Writes that fail raise, so automations see
+them instead of a silent log line.
+
+**Panel conventions.** The panel is dependency-free classic scripts sharing
+one global scope (this keeps all inline handlers working with no build
+step). `panel/state.js` loads first, `panel/main.js` (event wiring) loads
+last; everything else is grouped by feature. Static assets are served with
+no-cache headers, so no manual cache-busting is needed.
+
+Rules of thumb: new board support goes in `boards/` + one template YAML; new panel tabs go in `panel/` + a script tag (state first, main last); every serial operation must hold the coordinator's lock for its whole transaction. CI runs Ruff, pytest, and `node --check` on every push and PR.
+
 <details>
 <summary><strong>Maintainer notes — publishing a release</strong></summary>
 
-1. Bump `version` in `custom_components/modbus_usb/manifest.json`.
-2. Bump the matching panel cache version in `custom_components/modbus_usb/__init__.py` (`modbus-panel.html?v=…`).
-3. Add a user-facing entry under that version in `CHANGELOG.md`.
-4. Merge to `main`. GitHub Actions validates the integration and creates **one** tag + release per manifest version; the matching changelog section becomes the release notes.
+1. Bump `version` in `custom_components/modbus_usb/manifest.json`. The sidebar panel cache-buster and update check read this at runtime — no other file needs the version.
+2. Add a user-facing entry under that version in `CHANGELOG.md`.
+3. Merge to `main`. GitHub Actions validates the integration and creates **one** tag + release per manifest version; the matching changelog section becomes the release notes.
 
 Every release needs a new manifest version — re-pushing an existing version updates code but cannot create a second tag.
 

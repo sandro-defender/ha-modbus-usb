@@ -5,3 +5,17 @@ python_files = ["test_*.py"]
 [tool.coverage.run]
 source = ["custom_components/modbus_usb"]
 
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "RUF100"]
+ignore = [
+  # Line length is managed by `ruff format`; remaining long lines are URLs/strings.
+  "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B017"]  # assertRaises(Exception) is fine in regression tests
+

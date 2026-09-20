@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "arena/**"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Ruff lint and format check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Run Ruff
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: check custom_components tests
+
+      - name: Check formatting
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: format --check custom_components tests
+
+  panel:
+    name: Check panel JavaScript syntax
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Syntax-check panel scripts
+        run: |
+          for file in custom_components/modbus_usb/www/panel/*.js; do
+            node --check "$file" || exit 1
+          done
+
+  test:
+    name: Run pytest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: python -m pip install -r requirements_test.txt
+
+      - name: Run tests
+        run: python -m pytest

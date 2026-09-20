@@ -1,4 +1,5 @@
 """Switch platform for Modbus USB Controller."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -10,12 +11,13 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .boards.r413e16 import is_r413e16_switch_config
 from .const import (
     CONF_ADDRESS,
     CONF_ADDRESSES,
     CONF_ASSUMED_STATE,
-    CONF_DEVICES,
     CONF_DEVICE_ID,
+    CONF_DEVICES,
     CONF_ENTITIES,
     CONF_ENTITY_ID,
     CONF_ENTITY_TYPE,
@@ -23,17 +25,13 @@ from .const import (
     CONF_OFF_VALUE,
     CONF_ON_VALUE,
     CONF_REGISTER_TYPE,
-    CONF_STATE_ON_VALUE,
     CONF_SLAVE_ID,
+    CONF_STATE_ON_VALUE,
     DOMAIN,
     REGISTER_TYPE_COIL,
 )
-from .coordinator import (
-    ModbusUsbCoordinator,
-    get_device_info,
-    get_entity_picture,
-    is_r413e16_switch_config,
-)
+from .coordinator import ModbusUsbCoordinator
+from .device_info import get_device_info, get_entity_picture
 
 
 async def async_setup_entry(
@@ -52,7 +50,9 @@ async def async_setup_entry(
 class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
     """A switch backed by a Modbus coil or holding register."""
 
-    def __init__(self, coordinator: ModbusUsbCoordinator, entry: ConfigEntry, ent: dict) -> None:
+    def __init__(
+        self, coordinator: ModbusUsbCoordinator, entry: ConfigEntry, ent: dict
+    ) -> None:
         super().__init__(coordinator)
         self._ent = ent
         self._entry = entry
@@ -70,8 +70,11 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
         """Make a disabled device unavailable without resetting the USB adapter."""
         device_id = self._ent.get(CONF_DEVICE_ID)
         device = next(
-            (item for item in self._entry.options.get(CONF_DEVICES, [])
-             if str(item.get("id")) == str(device_id)),
+            (
+                item
+                for item in self._entry.options.get(CONF_DEVICES, [])
+                if str(item.get("id")) == str(device_id)
+            ),
             None,
         )
         return (device is None or device.get("enabled", True)) and super().available
@@ -82,9 +85,7 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
         if not self._is_r413e16_switch:
             return
         self.coordinator.register_switch_entity(self)
-        self.async_on_remove(
-            lambda: self.coordinator.unregister_switch_entity(self)
-        )
+        self.async_on_remove(lambda: self.coordinator.unregister_switch_entity(self))
         self.async_on_remove(
             async_dispatcher_connect(
                 self.hass,
@@ -96,9 +97,8 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
     @property
     def _is_r413e16_switch(self) -> bool:
         """Return whether this entity uses the tested R413E16 register map."""
-        return (
-            is_r413e16_switch_config(self._ent)
-            and bool(self._ent.get(CONF_DEVICE_ID))
+        return is_r413e16_switch_config(self._ent) and bool(
+            self._ent.get(CONF_DEVICE_ID)
         )
 
     @callback
@@ -112,7 +112,11 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
         if slave is None and self._ent.get(CONF_DEVICE_ID):
             devices = self._entry.options.get(CONF_DEVICES, [])
             dev = next(
-                (d for d in devices if str(d.get("id")) == str(self._ent.get(CONF_DEVICE_ID))),
+                (
+                    d
+                    for d in devices
+                    if str(d.get("id")) == str(self._ent.get(CONF_DEVICE_ID))
+                ),
                 None,
             )
             if dev and dev.get(CONF_SLAVE_ID) is not None:
@@ -125,10 +129,7 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
             # R413E16 Combined Switches have no separate status register.
             # Their state comes from the live feedback of every selected
             # channel, not merely from the last button press.
-            if (
-                is_r413e16_switch_config(self._ent)
-                and self._ent.get(CONF_DEVICE_ID)
-            ):
+            if is_r413e16_switch_config(self._ent) and self._ent.get(CONF_DEVICE_ID):
                 group_state = self.coordinator.get_r413e16_group_state(
                     self._ent[CONF_DEVICE_ID],
                     [int(address) for address in self._ent.get(CONF_ADDRESSES, [])],
@@ -146,7 +147,9 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
             return None
         if self._ent[CONF_REGISTER_TYPE] == REGISTER_TYPE_COIL:
             return bool(value)
-        state_on_value = self._ent.get(CONF_STATE_ON_VALUE, self._ent.get(CONF_ON_VALUE, 1))
+        state_on_value = self._ent.get(
+            CONF_STATE_ON_VALUE, self._ent.get(CONF_ON_VALUE, 1)
+        )
         try:
             state_on_value = int(state_on_value)
         except (TypeError, ValueError):
@@ -155,9 +158,7 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
         # form) or 0x0100 / 256 (last-command form). Both are the documented
         # ON representation for a channel written with 0x0100; accepting both
         # prevents a physically ON output appearing OFF in Home Assistant.
-        if (
-            state_on_value == 1 and is_r413e16_switch_config(self._ent)
-        ):
+        if state_on_value == 1 and is_r413e16_switch_config(self._ent):
             return value in (1, 0x0100)
         return value == state_on_value
 
@@ -180,7 +181,8 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
             # values as strings or null; Modbus writes need real integers.
             try:
                 value = int(
-                    self._ent.get(CONF_ON_VALUE, 1) if on
+                    self._ent.get(CONF_ON_VALUE, 1)
+                    if on
                     else self._ent.get(CONF_OFF_VALUE, 0)
                 )
             except (TypeError, ValueError):
@@ -189,10 +191,7 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
                 await self.hass.async_add_executor_job(
                     self.coordinator.write_register, int(address), value, slave
                 )
-        if (
-            is_r413e16_switch_config(self._ent)
-            and self._ent.get(CONF_DEVICE_ID)
-        ):
+        if is_r413e16_switch_config(self._ent) and self._ent.get(CONF_DEVICE_ID):
             self.coordinator.set_r413e16_channel_states(
                 self._ent[CONF_DEVICE_ID], {int(address): on for address in addresses}
             )
@@ -210,4 +209,3 @@ class ModbusUsbSwitch(CoordinatorEntity[ModbusUsbCoordinator], SwitchEntity):
 # Changelog:
 # 2026-09-06 — Assumed-state switches (no poll); ON/OFF register values; device image as entity_picture.
 # Date modified: 2026-09-06
-

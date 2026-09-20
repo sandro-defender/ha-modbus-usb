@@ -5,6 +5,9 @@
  */
     let _designerResult = null;
     let _designerInitialized = false;
+    // v2.7.1: 1-based line of the last structural error (highlighted in
+    // the gutter until the draft is edited or re-validated); null = none.
+    let _designerErrorLine = null;
 
     const DESIGNER_SAMPLE_YAML = `name: My Custom Meter
 manufacturer: Custom
@@ -42,7 +45,12 @@ entities:
         if (!textarea.value.trim()) textarea.value = DESIGNER_SAMPLE_YAML;
         // v2.7.0: syntax-aware editing — line-number gutter, Tab/Shift+Tab
         // indentation, and Ctrl+Enter (or Cmd+Enter) to validate.
-        textarea.addEventListener('input', () => updateDesignerLineNumbers());
+        textarea.addEventListener('input', () => {
+          // v2.7.1: an edit invalidates the highlighted error line (line
+          // numbers may shift); the message stays in the results pane.
+          if (_designerErrorLine !== null) setDesignerErrorLine(null);
+          updateDesignerLineNumbers();
+        });
         textarea.addEventListener('scroll', () => syncDesignerGutterScroll(textarea));
         textarea.addEventListener('keydown', handleDesignerEditorKeydown);
       }
@@ -58,10 +66,92 @@ entities:
       const gutter = document.getElementById('designer-line-numbers');
       if (!textarea || !gutter) return;
       const lineCount = textarea.value.split('\n').length;
+      // One element per line so a structural error can mark its line
+      // (v2.7.1); the gutter shares the editor's font metrics, so the
+      // stacked blocks line up with the textarea rows.
       let numbers = '';
-      for (let line = 1; line <= lineCount; line += 1) numbers += `${line}\n`;
-      gutter.textContent = numbers;
+      for (let line = 1; line <= lineCount; line += 1) {
+        const isError = line === _designerErrorLine;
+        numbers += `<div class="designer-gutter-line${isError ? ' designer-gutter-line-error' : ''}" data-line="${line}"${isError ? ' title="Structural error on this line"' : ''}>${line}</div>`;
+      }
+      gutter.innerHTML = numbers;
+      gutter.classList.toggle('has-error', _designerErrorLine !== null);
       syncDesignerGutterScroll(textarea);
+    }
+
+    // ─── v2.7.1: structural error line highlighting & draft export ──
+
+    function setDesignerErrorLine(line) {
+      const textarea = document.getElementById('designer-yaml');
+      const lineCount = textarea ? textarea.value.split('\n').length : 0;
+      const parsed = Number(line);
+      _designerErrorLine = Number.isInteger(parsed) && parsed >= 1 && parsed <= Math.max(lineCount, 1)
+        ? parsed
+        : null;
+      updateDesignerLineNumbers();
+      return _designerErrorLine;
+    }
+
+    function designerLineRange(value, line) {
+      // [start, end) character offsets of a 1-based line in the draft.
+      const lines = value.split('\n');
+      const index = Math.min(Math.max(line, 1), lines.length) - 1;
+      let start = 0;
+      for (let i = 0; i < index; i += 1) start += lines[i].length + 1;
+      return [start, start + lines[index].length];
+    }
+
+    function focusDesignerLine(line, column) {
+      const textarea = document.getElementById('designer-yaml');
+      if (!textarea) return;
+      const [start, end] = designerLineRange(textarea.value, line);
+      const caret = column ? Math.min(start + Math.max(column - 1, 0), end) : start;
+      textarea.focus();
+      textarea.setSelectionRange(caret, end);
+      // Scroll the line roughly into the middle of the editor viewport.
+      const lineHeight = parseFloat(getComputedStyle(textarea).lineHeight) || 20;
+      textarea.scrollTop = Math.max(0, (line - 1) * lineHeight - textarea.clientHeight / 2 + lineHeight);
+      syncDesignerGutterScroll(textarea);
+    }
+
+    function designerDraftFilename(content) {
+      const filenameInput = document.getElementById('designer-filename');
+      let filename = (filenameInput?.value || '').trim();
+      if (!filename) {
+        const nameMatch = String(content || '').match(/^name:\s*(.+)$/m);
+        filename = `${(nameMatch ? nameMatch[1] : 'custom_template').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'custom_template'}.yaml`;
+      } else if (!/\.ya?ml$/i.test(filename)) {
+        filename += '.yaml';
+      }
+      return filename;
+    }
+
+    function exportDesignerDraft() {
+      // Download the editor content as a .yaml file via a blob URL — the
+      // draft never touches the server, so unsaved work can be backed up
+      // or shared before it validates.
+      const textarea = document.getElementById('designer-yaml');
+      if (!textarea) return;
+      const content = textarea.value;
+      if (!content.trim()) {
+        toast('Nothing to export — the editor is empty', 'err');
+        return;
+      }
+      const filename = designerDraftFilename(content);
+      try {
+        const blob = new Blob([content.endsWith('\n') ? content : `${content}\n`], { type: 'text/yaml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+        URL.revokeObjectURL(url);
+        toast(`Exported draft as ${filename}`, 'ok');
+      } catch (error) {
+        toast(`Export failed: ${error.message}`, 'err');
+      }
     }
 
     function syncDesignerGutterScroll(textarea) {
@@ -152,6 +242,7 @@ entities:
         filenameInput.value = template.filename || '';
       }
       _designerResult = null;
+      _designerErrorLine = null;
       renderDesignerResults();
       updateDesignerLineNumbers();
       textarea.focus();
@@ -176,6 +267,7 @@ entities:
       if (!textarea) return;
       textarea.value = DESIGNER_SAMPLE_YAML;
       _designerResult = null;
+      _designerErrorLine = null;
       renderDesignerResults();
       updateDesignerLineNumbers();
       toast('Sample template loaded — run a validation to test it', 'ok');
@@ -208,16 +300,21 @@ entities:
           ...(slaveId ? { slave_id: slaveId } : {}),
           test_reads: testReads,
         });
+        // v2.7.1: mark the structural error line in the gutter (or clear
+        // a stale marker once the draft validates).
+        setDesignerErrorLine(_designerResult?.valid ? null : _designerResult?.error_line);
         renderDesignerResults();
         if (_designerResult?.valid && _designerResult.failed === 0) {
           toast(`Validation passed: ${_designerResult.passed} register read(s) verified`, 'ok');
         } else if (_designerResult?.valid) {
           toast(`Validation finished with ${_designerResult.failed} failed read(s)`, 'err');
         } else {
-          toast('Template structure is invalid — see the report', 'err');
+          const where = _designerErrorLine ? ` (line ${_designerErrorLine})` : '';
+          toast(`Template structure is invalid${where} — see the report`, 'err');
         }
       } catch (error) {
         _designerResult = { valid: false, error: error.message, entities: [] };
+        setDesignerErrorLine(null);
         renderDesignerResults();
         toast(`Validation failed: ${error.message}`, 'err');
       } finally {
@@ -269,7 +366,7 @@ entities:
       }
       if (!result.valid) {
         subtitle.textContent = 'The draft template could not be validated.';
-        container.innerHTML = `<div class="frame-errors"><div>❌ ${escapeHtml(result.error || 'Unknown validation error')}</div></div>`;
+        container.innerHTML = designerStructuralErrorBox(result);
         return;
       }
 
@@ -290,6 +387,25 @@ entities:
         ${designerFingerprintSection(result)}
         ${(result.entities || []).map(designerEntityCard).join('') || '<div class="text-sm" style="color:var(--text-dim);">This template defines no entities.</div>'}
       `;
+    }
+
+    function designerStructuralErrorBox(result) {
+      // v2.7.1: structural errors from designer_validate carry error_line /
+      // error_column / error_path; render them with a "jump to line" action
+      // (the gutter marker itself is driven by setDesignerErrorLine).
+      const line = Number.isInteger(result.error_line) && result.error_line > 0 ? result.error_line : null;
+      const column = Number.isInteger(result.error_column) && result.error_column > 0 ? result.error_column : null;
+      const location = line
+        ? `<button type="button" class="badge badge-red designer-error-location mono" onclick="focusDesignerLine(${line}, ${column || 0})" title="Jump to line ${line}${column ? `, column ${column}` : ''}">line ${line}${column ? `:${column}` : ''}</button>`
+        : '';
+      const path = result.error_path
+        ? `<span class="badge badge-slate mono" title="Template key path">${escapeHtml(result.error_path)}</span>`
+        : '';
+      return `<div class="frame-errors designer-structural-error">
+        <div class="designer-structural-error-head">${location}${path}</div>
+        <div>❌ ${escapeHtml(result.error || 'Unknown validation error')}</div>
+        ${line ? '<div class="text-sm designer-structural-error-hint">The offending line is marked in the editor gutter.</div>' : ''}
+      </div>`;
     }
 
     function designerFingerprintSection(result) {
@@ -387,11 +503,7 @@ entities:
         toast('Paste a template YAML first', 'err');
         return;
       }
-      let filename = filenameInput.value.trim();
-      if (!filename) {
-        const nameMatch = content.match(/^name:\s*(.+)$/m);
-        filename = `${(nameMatch ? nameMatch[1] : 'custom_template').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'custom_template'}.yaml`;
-      }
+      const filename = designerDraftFilename(content);
       const validated = _designerResult?.valid && (_designerResult.failed === 0 || !_designerResult.test_reads);
       if (!validated && !window.confirm('This draft has not passed live validation. Save it anyway?')) {
         return;

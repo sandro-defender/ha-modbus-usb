@@ -26,6 +26,12 @@ from ..const import (
     REGISTER_TYPE_COIL,
 )
 from ..coordinator import traffic_signal
+from ..diagnostics import (
+    ACTIVITY_LOG_CSV_FIELDS,
+    activity_log_csv_rows,
+    redact_frame_address,
+    redact_response_frame,
+)
 from ..inspector import analyze_transaction, build_inspector_view
 from ..templates import (
     async_load_templates,
@@ -529,12 +535,17 @@ async def ws_export_activity_log(
             row = dict(item)
             if do_redact:
                 row["address"] = "[REDACTED_ADDR]"
-                if "request_hex" in row and row["request_hex"]:
-                    hex_parts = str(row["request_hex"]).split()
-                    if len(hex_parts) >= 4:
-                        hex_parts[2] = "XX"
-                        hex_parts[3] = "XX"
-                        row["request_hex"] = " ".join(hex_parts)
+                if row.get("request_hex"):
+                    row["request_hex"] = redact_frame_address(row["request_hex"])
+                # Captured RX frames: write echoes repeat the register
+                # address, so they are masked like the request frame.
+                if row.get("response_hex"):
+                    row["response_hex"] = redact_response_frame(row["response_hex"])
+                if isinstance(row.get("response_frames"), (list, tuple)):
+                    row["response_frames"] = [
+                        redact_response_frame(frame_hex)
+                        for frame_hex in row["response_frames"]
+                    ]
                 op = str(row.get("operation") or "")
                 # Redact entity ID / name inside operation if any
                 for prefix in ("read_", "write_"):
@@ -551,31 +562,24 @@ async def ws_export_activity_log(
             processed.append(row)
 
         export_format = msg.get("format", "json")
+        row_count = len(processed)
         if export_format == "json":
             output = json.dumps(processed, indent=2)
             content_type = "application/json"
             filename = f"modbus_activity_log_{msg['entry_id']}.json"
         elif export_format == "csv":
+            # v2.7.1: one CSV row per captured response frame (frame_index /
+            # frame_count / response_hex / frame_time_ms); transactions
+            # without RX keep a single row with empty frame columns.
             buf = io.StringIO()
-            fieldnames = [
-                "timestamp",
-                "status",
-                "operation",
-                "function_code",
-                "request_hex",
-                "slave",
-                "address",
-                "count",
-                "value",
-                "result",
-                "duration_ms",
-                "retries_configured",
-                "error",
-            ]
-            writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+            writer = csv.DictWriter(
+                buf, fieldnames=ACTIVITY_LOG_CSV_FIELDS, extrasaction="ignore"
+            )
             writer.writeheader()
-            for r in processed:
+            csv_rows = activity_log_csv_rows(processed)
+            for r in csv_rows:
                 writer.writerow(r)
+            row_count = len(csv_rows)
             output = buf.getvalue()
             content_type = "text/csv"
             filename = f"modbus_activity_log_{msg['entry_id']}.csv"
@@ -611,6 +615,8 @@ async def ws_export_activity_log(
                 "filename": filename,
                 "data": output,
                 "count": len(processed),
+                # Data rows written (CSV emits one row per captured frame).
+                "rows": row_count,
             },
         )
     except Exception as err:

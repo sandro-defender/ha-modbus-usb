@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## 2.7.1
+
+### Traffic Inspector: function-code filter & saved views
+- New **Function** filter alongside the slave / status / hex filters: pick a Modbus function code (**FC01–FC06, FC0F, FC10**) or **exception (0x8x)**. A transaction matches when the code appears in its recorded `function_code`, its request frame, or **any** captured response frame — exception frames match both *exception* and their base function code, so `FC03` also finds `0x83` replies.
+- **Saved views**: the current filter set can be stored as a **named preset** (💾 Save view / 🗑 Delete view, up to 24 per browser) in `localStorage` (`modbus_usb_inspector_filter_presets`). The last-applied view is remembered (`modbus_usb_inspector_active_preset`) and **re-applied automatically when the Traffic Inspector tab is opened**; hand-editing any filter deselects the preset without touching the filters, and ✕ Clear drops both.
+
+### Traffic Inspector: per-frame RX timing & capture coverage
+- `capture.py` now records a **monotonic arrival timestamp for every captured response frame** (thread-safe, bounded by the same `MAX_RESPONSE_FRAMES` cap, clock injectable for tests). Log entries gain `response_frame_times_ms` — offsets in milliseconds from the first TX of the transaction, aligned 1:1 with `response_frames`.
+- `inspector.py` decodes the timing into per-frame `arrival_ms` / `gap_ms` (`frame_timing()`), and the detail pane renders multi-frame responses with an **Inter-frame gaps mini waterfall** (bar = arrival offset, tick = previous frame, per-row gap label, exception frames highlighted) plus a `t+N ms` chip on every decoded frame.
+- New **Capture coverage** stat card (fraction of logged transactions with captured RX bytes; `stats.capture_coverage` in `modbus_usb/traffic_inspector`), colored green ≥ 90 % / amber ≥ 50 % / red, `n/a` when the pymodbus release exposes no tracing hook. It updates live with every streamed transaction.
+
+### Template Designer: line-error highlighting & draft export
+- Structural validation errors are now **located in the draft**: `designer.py` raises `TemplateDraftError` (a `ValueError`) carrying 1-based `line` / `column` and a key `path` such as `entities[1].entity_type` — entity errors point at the offending key of the first failing entity, template-level errors at the named root key, and YAML syntax errors at PyYAML's problem mark (or the opening construct for unterminated flow sequences). `modbus_usb/designer_validate` invalid replies include `error_line` / `error_column` / `error_path`; YAML syntax messages are single-line.
+- The panel marks the reported line in the **editor gutter** (red marker), shows a clickable `line N:M` badge and the key path in the report, and **Jump to line** focuses/selects that line in the textarea. The marker clears as soon as the draft is edited or validates.
+- New **⬇️ Export current draft** button downloads the editor content as a `.yaml` file via a Blob URL (filename from the *Save as* box or a slug of the template `name`), without any server round-trip. Saving a draft now also appends `.yaml` when the filename box omits the extension.
+
+### Diagnostics: response frames in the activity-log export
+- The **CSV** activity-log export now contains the captured response frames: **one row per frame** with `frame_index` (1-based), `frame_count`, `response_hex` and `frame_time_ms` columns (transactions without captured RX keep a single row with empty frame columns; pre-v2.7.0 entries with only `response_hex` yield one frame row). The **JSON** export is unchanged in shape (it already carried `response_frames`, and now `response_frame_times_ms`), and the reply reports `rows` (data rows written) next to `count` (transactions).
+- Redaction (`redact: true`) also masks captured response frames: write echoes (FC05 / FC06 / FC0F / FC10) repeat the register address at bytes 2-3 and get `XX XX`; read and exception responses carry no address and stay intact.
+
+### Development
+- New pytest coverage for capture timing (clock injection, multi-frame offsets, chunked and shared-chunk stamps, caps, window resets, thread safety), coordinator log entries, `frame_timing` / `capture_coverage` / inspector view timing, CSV row expansion and redaction (`activity_log_csv_rows`, `redact_response_frame`, `ws_export_activity_log` shape), designer error location (entity / template-level / YAML syntax / unlocatable cases, WS reply), and all new panel wiring (FC filter, saved views, waterfall, coverage, gutter highlighting, export button) — 357 tests total.
+- `ruff check` and `ruff format` pass; `node --check` passes on every `www/panel/*.js` script.
+
 ## 2.7.0
 
 ### Traffic Inspector: live client-side filters

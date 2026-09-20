@@ -778,3 +778,78 @@ def test_reconfigure_serial_reinstalls_capture_hook() -> None:
     assert isinstance(coordinator.client, _NewPymodbusClient)
     assert coordinator.capture_hook == "trace_packet"
     assert coordinator.serial_config[CONF_BAUDRATE] == 19200
+
+
+# ───────────── v2.7.1: per-frame RX arrival times in log entries ─────────────
+
+
+def test_record_transaction_keeps_per_frame_arrival_times() -> None:
+    from unittest.mock import Mock
+
+    from custom_components.modbus_usb.capture import ResponseCapture
+
+    # One clock reading per traced chunk: TX1, RX1, TX2, RX2.
+    ticks = iter([100.0, 100.015, 100.02, 100.035])
+    client = _Client(value=0x2A)
+    client.write_register = Mock(return_value=_Response([]))
+    coordinator = _coordinator(client)
+    capture = ResponseCapture(clock=lambda: next(ticks))
+    coordinator.response_capture = capture
+
+    tx_one = _capture_frame("010600010002")
+    tx_two = _capture_frame("010600020004")
+    capture.on_trace(True, tx_one)  # t=0
+    capture.on_trace(False, tx_one)  # t=15 ms
+    capture.on_trace(True, tx_two)  # t=20 ms
+    capture.on_trace(False, tx_two)  # t=35 ms
+
+    coordinator.batch_write(
+        [{"address": 1, "value": 2}, {"address": 2, "value": 4}], slave=1
+    )
+    entry = coordinator.transaction_log[0]
+    assert entry["response_frames"] == [_capture_hex(tx_one), _capture_hex(tx_two)]
+    assert entry["response_frame_times_ms"] == [15.0, 35.0]
+    # Frame list and timing list always have the same length.
+    assert len(entry["response_frame_times_ms"]) == len(entry["response_frames"])
+
+
+def test_record_transaction_without_frames_has_no_frame_times() -> None:
+    from custom_components.modbus_usb.capture import ResponseCapture
+
+    client = _Client(value=1)
+
+    def timeout(*args, **kwargs):
+        raise TimeoutError("no response received from slave")
+
+    client.read_holding_registers = timeout
+    coordinator = _coordinator(client)
+    capture = ResponseCapture()
+    coordinator.response_capture = capture
+    capture.on_trace(True, TX_READ)
+    with pytest.raises(TimeoutError):
+        coordinator.read_register_raw(7, REGISTER_TYPE_HOLDING, DATA_TYPE_UINT16, 1)
+    entry = coordinator.transaction_log[0]
+    assert "response_frames" not in entry
+    assert "response_frame_times_ms" not in entry
+
+
+def test_record_transaction_dispatches_frame_times_to_subscribers() -> None:
+    from types import SimpleNamespace
+
+    from custom_components.modbus_usb.capture import ResponseCapture
+
+    coordinator = _coordinator(_Client(value=0x2A))
+    capture = ResponseCapture(clock=iter([1.0, 1.008]).__next__)
+    coordinator.response_capture = capture
+    scheduled: list[tuple] = []
+
+    class _FakeLoop:
+        def call_soon_threadsafe(self, func, *args):
+            scheduled.append((func, args))
+
+    coordinator.hass = SimpleNamespace(loop=_FakeLoop())
+    capture.on_trace(True, TX_READ)
+    capture.on_trace(False, RX_READ)
+    coordinator.read_register_raw(7, REGISTER_TYPE_HOLDING, DATA_TYPE_UINT16, 1)
+    _, args = scheduled[0]
+    assert args[2]["response_frame_times_ms"] == [8.0]

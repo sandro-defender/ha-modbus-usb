@@ -689,7 +689,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         Operations that send several frames before one record (batch writes,
         board block readers) keep the last TX frame as ``request_hex`` and
         the full raw RX stream as ``response_frames`` (one entry per
-        response frame, oldest first).
+        response frame, oldest first) together with the per-frame arrival
+        times ``response_frame_times_ms`` (milliseconds since the first TX
+        of the operation, same index as ``response_frames``).
         """
         timestamp = datetime.now().astimezone().isoformat()
         detected_function, detected_request = diagnostic_request_frame(
@@ -726,6 +728,12 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 # multi-frame responses (batch reads, block readers) keep
                 # every frame instead of only the last one.
                 item["response_frames"] = list(window["response_frames"])
+                frame_times = window.get("response_frame_times_ms")
+                if frame_times and len(frame_times) == len(item["response_frames"]):
+                    # Per-frame arrival times (ms since the first TX) feed
+                    # the inspector's inter-frame gap waterfall and the
+                    # per-frame CSV export.
+                    item["response_frame_times_ms"] = list(frame_times)
         if duration_ms is not None:
             item["duration_ms"] = round(duration_ms, 1)
         tx_stages = self._get_tx_stages()
@@ -1674,6 +1682,8 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
 
 
 # Changelog:
+# 2026-09-20 — v2.7.1: recorded transactions carry per-frame RX arrival times
+#              (response_frame_times_ms) next to response_frames.
 # 2026-09-20 — v2.7.0: recorded transactions keep the full framed RX stream
 #              (response_frames) of multi-frame operations, not only the last pair.
 # 2026-09-20 — v2.6.0: real TX/RX response capture (capture.py) attached to every

@@ -606,12 +606,37 @@
                 <option value="exception">exception</option>
               </select>
             </label>
+            <label class="inspector-filter">
+              <span class="inspector-filter-label">Function</span>
+              <select class="form-input inspector-filter-select" id="inspector-filter-fc" onchange="setInspectorFilter('fc', this.value)" aria-label="Filter transactions by Modbus function code">
+                <option value="all">all</option>
+                <option value="01">FC01 · Read Coils</option>
+                <option value="02">FC02 · Read Discrete Inputs</option>
+                <option value="03">FC03 · Read Holding Registers</option>
+                <option value="04">FC04 · Read Input Registers</option>
+                <option value="05">FC05 · Write Single Coil</option>
+                <option value="06">FC06 · Write Single Register</option>
+                <option value="0F">FC0F · Write Multiple Coils</option>
+                <option value="10">FC10 · Write Multiple Registers</option>
+                <option value="exception">exception (0x8x)</option>
+              </select>
+            </label>
             <label class="inspector-filter inspector-filter-hex">
               <span class="inspector-filter-label">Hex</span>
               <input class="form-input mono inspector-filter-input" id="inspector-filter-hex" type="text" spellcheck="false" placeholder="e.g. 01 03 or 8302" oninput="setInspectorFilter('hex', this.value)" aria-label="Free-text hex search across request and response frames" />
             </label>
             <button class="btn btn-secondary btn-sm" id="btn-inspector-clear-filters" onclick="clearInspectorFilters()" hidden>✕ Clear</button>
             <span class="inspector-filter-count mono" id="inspector-filter-count" aria-live="polite"></span>
+          </div>
+          <div class="inspector-presets" id="inspector-presets">
+            <label class="inspector-filter">
+              <span class="inspector-filter-label">Saved views</span>
+              <select class="form-input inspector-filter-select inspector-preset-select" id="inspector-filter-preset" onchange="applyInspectorFilterPreset(this.value)" aria-label="Apply a saved filter view">
+                <option value="">Saved views…</option>
+              </select>
+            </label>
+            <button class="btn btn-secondary btn-sm" id="btn-inspector-save-preset" onclick="saveInspectorFilterPreset()" title="Save the current filters as a named view (kept in this browser)">💾 Save view</button>
+            <button class="btn btn-secondary btn-sm" id="btn-inspector-delete-preset" onclick="deleteInspectorFilterPreset()" hidden>🗑 Delete view</button>
           </div>
           <div class="inspector-list" id="inspector-list"></div>
         </div>
@@ -685,6 +710,7 @@
             <button class="btn btn-primary" id="btn-designer-validate" onclick="runDesignerValidation()">▶ Validate &amp; test reads</button>
             <input class="form-input mono" type="text" id="designer-filename" placeholder="my_template.yaml" style="max-width:220px;" />
             <button class="btn btn-secondary" onclick="saveDesignerTemplate()">💾 Save template</button>
+            <button class="btn btn-secondary" id="btn-designer-export" onclick="exportDesignerDraft()" title="Download the editor content as a .yaml file (nothing is sent to the server)">⬇️ Export current draft</button>
           </div>
           <div class="flex gap-1 designer-apply-row" style="flex-wrap:wrap; align-items:center;">
             <label class="form-label" for="designer-apply-device" style="margin:0;">Apply to</label>

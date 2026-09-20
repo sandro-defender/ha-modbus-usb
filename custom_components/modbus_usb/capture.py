@@ -13,6 +13,11 @@ one log entry, and every response frame that traveled for it (write
 echoes, the frames of a batch read, an exception plus a follow-up read)
 is captured and handed to the inspector as a list of decoded frames.
 
+Since v2.7.1 every captured response frame also carries its *arrival time*
+(milliseconds since the transaction window opened, i.e. since the first TX
+of the operation), so the inspector can render the inter-frame gaps of a
+multi-frame stream as a mini waterfall and exports can list them per frame.
+
 The frame extraction logic is pure and Home Assistant-free so it stays
 trivially unit-testable: response length is derived from the received bytes
 themselves (exception frames, byte-count frames, and write echoes) exactly
@@ -24,6 +29,8 @@ from __future__ import annotations
 import logging
 import re
 import threading
+import time
+from collections.abc import Callable
 from typing import Any
 
 from .diagnostics import modbus_crc16
@@ -146,13 +153,19 @@ class ResponseCapture:
     responses (batch reads, block readers, exception plus follow-up) arrive
     at the inspector as a list instead of only the last pair.
 
+    Every complete frame is stamped with its arrival time (the trace call
+    that completed it) relative to the moment the window opened, so the
+    per-frame timing of a multi-frame stream survives into the log entry.
+    ``clock`` defaults to ``time.monotonic`` and is injectable for tests.
+
     The class is thread-safe: pymodbus tracing may run on the serial
     executor thread while ``consume`` is called by the coordinator when it
     records the finished transaction.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, clock: Callable[[], float] | None = None) -> None:
         self._lock = threading.Lock()
+        self._clock = clock or time.monotonic
         self._tx: bytes | None = None
         self._rx = b""
         # Offset into ``_rx`` up to which bytes have already been framed
@@ -164,6 +177,13 @@ class ResponseCapture:
         # stale re-pass of an already fully framed buffer.
         self._tx_pending = False
         self._frames: list[bytes] = []
+        # Arrival time of every frame in ``_frames`` (same index), in
+        # seconds on ``clock``; appended in lockstep so the frame cap bounds
+        # both lists.
+        self._frame_times: list[float] = []
+        # Clock reading when the current window opened (first TX, or the
+        # first RX byte when no TX was observed); None between windows.
+        self._window_start: float | None = None
         # Last complete frame of the window; kept for callers that only
         # care about the most recent response (backward compatibility).
         self._response: bytes | None = None
@@ -189,6 +209,7 @@ class ResponseCapture:
             chunk = bytes(data)
         except TypeError:
             return data
+        now = self._clock()
         with self._lock:
             if sending:
                 # A new request updates the recorded TX frame. The receive
@@ -200,17 +221,24 @@ class ResponseCapture:
                 # receive buffer.
                 self._tx = chunk
                 self._tx_pending = True
+                if not self._active:
+                    self._window_start = now
                 self._active = True
                 self._rx = self._rx[: self._rx_offset]
                 return data
             if not self._active:
                 # RX observed without a TX (hook installed mid-transaction).
                 self._active = True
-            self._merge_rx(chunk)
+                self._window_start = now
+            self._merge_rx(chunk, now)
         return data
 
-    def _merge_rx(self, chunk: bytes) -> None:
-        """Merge one RX chunk into the per-transaction buffer and reframe it."""
+    def _merge_rx(self, chunk: bytes, now: float) -> None:
+        """Merge one RX chunk into the per-transaction buffer and reframe it.
+
+        ``now`` is the clock reading of the trace call delivering ``chunk``;
+        every frame completed by this chunk is stamped with it.
+        """
         if not chunk:
             return
         fully_consumed = self._rx_offset == len(self._rx)
@@ -241,6 +269,7 @@ class ResponseCapture:
             if len(self._frames) >= MAX_RESPONSE_FRAMES:
                 break
             self._frames.append(frame)
+            self._frame_times.append(now)
             self._response = frame
         self._rx_offset += consumed
         if len(self._frames) >= MAX_RESPONSE_FRAMES:
@@ -264,7 +293,12 @@ class ResponseCapture:
           pre-v2.7.0 behaviour;
         - ``response_frames``: every complete response frame of the window
           (list of hex strings, oldest first), or None when no frame was
-          captured.
+          captured;
+        - ``response_frame_times_ms``: the arrival time of every frame in
+          ``response_frames`` (same index), in milliseconds since the window
+          opened — the first TX of the operation, or the first RX byte when
+          no TX was traced — or None when no frame was captured. Consecutive
+          differences are the inter-frame gaps of the stream.
 
         Returns None when no serial I/O was observed since the previous
         consume, so recorded bookkeeping entries never adopt stale frames.
@@ -272,6 +306,7 @@ class ResponseCapture:
         with self._lock:
             if not self._active:
                 return None
+            start = self._window_start
             window: dict[str, Any] = {
                 "request_hex": _format_bytes(self._tx) if self._tx else None,
                 "response_hex": (
@@ -282,12 +317,22 @@ class ResponseCapture:
                     if self._frames
                     else None
                 ),
+                "response_frame_times_ms": (
+                    [
+                        round(max(0.0, (stamp - start) * 1000.0), 3)
+                        for stamp in self._frame_times
+                    ]
+                    if self._frames and start is not None
+                    else None
+                ),
             }
             self._tx = None
             self._rx = b""
             self._rx_offset = 0
             self._tx_pending = False
             self._frames = []
+            self._frame_times = []
+            self._window_start = None
             self._response = None
             self._active = False
             return window

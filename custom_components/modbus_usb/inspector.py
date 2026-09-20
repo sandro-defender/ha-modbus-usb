@@ -359,6 +359,37 @@ def _safe_parse_frame(
         }
 
 
+def frame_timing(frame_times_ms: Any, frame_count: int) -> list[dict[str, float]]:
+    """Turn per-frame arrival offsets into ``arrival_ms``/``gap_ms`` pairs.
+
+    ``frame_times_ms`` is the ``response_frame_times_ms`` list recorded by
+    ``capture.py`` (milliseconds since the transaction window opened, one
+    entry per response frame). The result holds one dict per frame with the
+    arrival offset and the gap since the previous frame (for the first frame
+    the gap is measured from the window start, i.e. the request). An
+    absent, malformed, or mismatched list yields an empty result so
+    pre-v2.7.1 log entries decode exactly as before.
+    """
+    if not isinstance(frame_times_ms, (list, tuple)) or not frame_times_ms:
+        return []
+    if len(frame_times_ms) != frame_count:
+        return []
+    timing: list[dict[str, float]] = []
+    previous = 0.0
+    for raw in frame_times_ms:
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            return []
+        arrival = float(raw)
+        timing.append(
+            {
+                "arrival_ms": round(arrival, 3),
+                "gap_ms": round(max(0.0, arrival - previous), 3),
+            }
+        )
+        previous = arrival
+    return timing
+
+
 def analyze_transaction(transaction: dict[str, Any]) -> dict[str, Any]:
     """Attach decoded request/response frame breakdowns to one transaction.
 
@@ -374,20 +405,38 @@ def analyze_transaction(transaction: dict[str, Any]) -> dict[str, Any]:
     frame for backward compatibility; when only ``response_hex`` is present
     (pre-v2.7.0 log entries, single-frame capture) the list holds exactly
     that one frame.
+
+    Since v2.7.1 the per-frame arrival times recorded by the capture
+    (``response_frame_times_ms``) are passed through and each decoded
+    response frame gains ``arrival_ms`` (since the window opened) and
+    ``gap_ms`` (since the previous frame), which the panel renders as a
+    mini waterfall of inter-frame gaps.
     """
     request_hex = transaction.get("request_hex")
     response_hex = transaction.get("response_hex")
     response_frames_hex = transaction.get("response_frames")
+    frame_times_ms = transaction.get("response_frame_times_ms")
     last_response_frame = _safe_parse_frame(response_hex, as_response=True)
     if response_frames_hex:
         response_frames = [
             _safe_parse_frame(frame_hex, as_response=True)
             for frame_hex in response_frames_hex
         ]
+        timing = frame_timing(frame_times_ms, len(response_frames))
+        if timing:
+            for frame, stamps in zip(response_frames, timing, strict=True):
+                if frame is not None:
+                    frame.update(stamps)
+            if last_response_frame is not None:
+                last_response_frame.update(timing[-1])
     elif response_hex:
         response_frames = [last_response_frame]
+        timing = frame_timing(frame_times_ms, 1)
+        if timing and last_response_frame is not None:
+            last_response_frame.update(timing[0])
     else:
         response_frames = None
+        timing = []
     return {
         "transaction": {
             "timestamp": transaction.get("timestamp"),
@@ -403,6 +452,9 @@ def analyze_transaction(transaction: dict[str, Any]) -> dict[str, Any]:
             "response_hex": response_hex,
             "response_frames": (
                 list(response_frames_hex) if response_frames_hex else None
+            ),
+            "response_frame_times_ms": (
+                [stamps["arrival_ms"] for stamps in timing] if timing else None
             ),
             "duration_ms": transaction.get("duration_ms"),
             "latency": dict(transaction.get("latency") or {}),
@@ -465,6 +517,9 @@ def build_inspector_view(coordinator: Any, limit: int = 100) -> dict[str, Any]:
         bucket.update(stats)
 
     capture_hook = getattr(coordinator, "capture_hook", None)
+    responses = sum(
+        1 for transaction in transactions if transaction.get("response_hex")
+    )
     return {
         "entry_id": getattr(coordinator, "entry_id", None),
         "connected": bool(getattr(coordinator.client, "connected", False)),
@@ -480,11 +535,19 @@ def build_inspector_view(coordinator: Any, limit: int = 100) -> dict[str, Any]:
                 for transaction in transactions
                 if transaction.get("status") == "error"
             ),
-            "responses": sum(
-                1 for transaction in transactions if transaction.get("response_hex")
-            ),
+            "responses": responses,
+            # Fraction of transactions whose RX bytes were captured from the
+            # wire (0.0–1.0); None when the log is empty.
+            "capture_coverage": capture_coverage(responses, len(transactions)),
             **_duration_stats(durations),
         },
         "per_slave": per_slave,
         "transactions": analyzed,
     }
+
+
+def capture_coverage(responses: int, total: int) -> float | None:
+    """Return the fraction of transactions with RX captured, or None if empty."""
+    if total <= 0:
+        return None
+    return round(min(max(responses, 0), total) / total, 3)

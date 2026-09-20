@@ -269,6 +269,22 @@ Designer** tab (since v2.5.0):
      from the template name automatically.
    Saving warns you if the draft hasn't passed live validation.
 
+**Structural errors are located in the draft (since v2.7.1).** When the
+YAML cannot be parsed or fails the template rules (unknown `entity_type`,
+out-of-range `address`, bad `default_slave_id`, …), the report shows a
+clickable **`line N:M`** badge and the key path of the problem (for
+example `entities[1].entity_type`), and the offending line is marked in
+red in the editor gutter. Click the badge to jump to that line; the
+marker disappears as soon as you edit the draft or it validates. YAML
+syntax errors point at the exact character PyYAML complained about (or
+at the opening bracket of an unterminated `[ … ]`).
+
+**⬇️ Export current draft (since v2.7.1)** downloads whatever is in the
+editor as a `.yaml` file — handy for sharing a work-in-progress template
+or keeping a copy before experimenting. The filename comes from the
+*Save as* box, or is derived from the template `name`; nothing is sent
+to the server.
+
 > Test reads and fingerprint probes are real bus traffic. Leave **Live test
 > reads** enabled for the certification workflow; disable it only for an
 > offline structure check (fingerprint probes are skipped too).
@@ -343,7 +359,7 @@ collapsed with a one-line live summary; expand any card for details.
 | **🔎 Find RS-485 Devices** | Scans slave IDs × baud/parity under the serial lock, then restores your client. **Use this target** prefills Board Tools. |
 | **🔬 Live Modbus Read / Write** | One-shot reads/writes for testing, without creating entities. |
 | **✅ Template read verification** | Read-only check of every non-switch entity (outputs are never toggled). |
-| **📜 RS-485 Activity & Error Log** | History of requests, replies, timing, and errors, with one-click JSON/CSV/Text export, sensitive data redaction, and multi-field filtering (slave ID, function code, errors). |
+| **📜 RS-485 Activity & Error Log** | History of requests, replies, timing, and errors, with one-click JSON/CSV/Text export, sensitive data redaction, and multi-field filtering (slave ID, function code, errors). Since v2.7.1 the CSV export lists **every captured response frame** (one row per frame with `frame_index`, `frame_count`, `response_hex`, `frame_time_ms`); JSON keeps the nested `response_frames` / `response_frame_times_ms` lists. Redaction also masks the register address inside write-echo response frames. |
 | **🛠 Board tools** | Launcher for template-aware hardware actions (chapter 8). |
 | **Automatic safe discovery** | Checks the four standard read functions at address 0, then expands only functions that answer. Read-only, with a Stop button. |
 | **Safe board discovery** | Read-only unknown-board probe across functions/addresses, with plain-language interpretation of each reply. |
@@ -370,17 +386,43 @@ one decodes its RTU frames byte by byte:
   an exception followed by a follow-up read). The detail pane renders the
   whole stream as a **list of decoded frames** — each with its own chips and
   CRC validation — and the row badge shows `RX ×N`.
+- **Inter-frame gaps (since v2.7.1)**: every captured response frame is
+  time-stamped on arrival, so multi-frame streams come with a small
+  **waterfall** above the frame list — each bar is the frame's arrival
+  offset from the first request byte (`t+12.5 ms`), the tick marks the
+  previous frame, and the label on the right is the gap between the two
+  (exception frames are drawn in red). Single frames show the arrival
+  chip only. Use it to spot a slow slave inside a batch, or a board that
+  answers an exception first and the real data much later.
 - **Live filters (since v2.7.0)**: the transaction list filters client-side
   and instantly, without touching the live stream:
   - **Slave** — dropdown of every slave ID seen recently;
   - **Status** — `ok`, `error`, or `exception` (matches any transaction
     whose captured RX stream contains an exception response);
+  - **Function** (since v2.7.1) — one Modbus function code (`FC01`–`FC06`,
+    `FC0F`, `FC10`) or `exception (0x8x)`. A transaction matches when the
+    code appears in its request, its recorded function code, or *any*
+    captured response frame — exception replies also match their base
+    code, so `FC03` finds `0x83` responses too;
   - **Hex** — free-text search across request *and* response frames
     (e.g. `01 03`, `0x0103`, or `8302` to find an Illegal Data Address
     exception).
   The counter shows `matching / total` rows, **✕ Clear** resets everything,
   and the filters survive tab switches — new transactions streamed in while
   a filter is active are hidden or shown by it automatically.
+- **Saved views (since v2.7.1)**: once a filter combination is useful
+  (say *slave 3 + exception*), **💾 Save view** stores it under a name in
+  this browser's `localStorage` (up to 24 views). Pick a view from the
+  **Saved view** dropdown to re-apply it; the last-used view is
+  **re-applied automatically whenever the Traffic Inspector tab is
+  opened**. Editing any filter by hand keeps the filters but deselects the
+  view, **🗑 Delete view** removes the selected one, and **✕ Clear** drops
+  both filters and selection. Views never leave the browser.
+- **Capture coverage (since v2.7.1)**: a stats-bar card showing the share
+  of logged transactions that carry captured RX bytes (green ≥ 90 %,
+  amber ≥ 50 %, red below; `n/a` when the pymodbus release exposes no
+  tracing hook). A low value with a working hook usually means many
+  timeouts — the slave never answered — rather than a capture problem.
 - **Checking capture support**: the integration's options flow
   (Settings → Devices & Services → Modbus USB Controller → gear icon →
   **Traffic capture status**) shows the active pymodbus version and hook —
@@ -408,7 +450,11 @@ one decodes its RTU frames byte by byte:
 2. Open the **Activity Log** — the exact failing operation, slave, and error.
 3. For timing or CRC questions, open the **Traffic Inspector** and inspect
    the failing transaction's request/response pair, checksums, and latency
-   waterfall — an exception RX frame tells you *why* the board refused.
+   waterfall — an exception RX frame tells you *why* the board refused, and
+   the inter-frame gap waterfall shows *which* frame of a batch was slow.
+   Save the filter combination as a view so it is one click away next time;
+   export the Activity Log as CSV (one row per captured response frame) when
+   you need to share the raw exchange.
 4. Run **Find RS-485 Devices** on a narrow range to confirm ID/baud/parity.
 5. Use **Live Read** with the detected settings to prove the register map.
 6. For unknown boards, use **Safe discovery** + **Watch inputs** — never guess

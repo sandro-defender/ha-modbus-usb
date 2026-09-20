@@ -9,8 +9,9 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant.components import websocket_api
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from ..const import (
     CONF_ADDRESS,
@@ -24,7 +25,8 @@ from ..const import (
     DOMAIN,
     REGISTER_TYPE_COIL,
 )
-from ..inspector import build_inspector_view
+from ..coordinator import traffic_signal
+from ..inspector import analyze_transaction, build_inspector_view
 from ..templates import (
     async_load_templates,
 )
@@ -700,3 +702,52 @@ async def ws_traffic_inspector(
     except Exception as err:
         _LOGGER.warning("Traffic inspector view failed: %s", err)
         connection.send_error(msg["id"], "inspector_failed", str(err))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "modbus_usb/subscribe_traffic",
+        vol.Required("entry_id"): cv.string,
+    }
+)
+@websocket_api.async_response
+async def ws_subscribe_traffic(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Stream new RS-485 transactions to the panel as they are recorded.
+
+    Replaces Traffic Inspector polling: the coordinator announces every
+    recorded transaction on its per-entry dispatcher signal, and each one is
+    pushed to the subscriber already decoded (paired request/response frames,
+    latency waterfall). The subscription is removed automatically when the
+    WebSocket connection closes.
+    """
+    coordinator = hass.data.get(DOMAIN, {}).get(msg["entry_id"])
+    if coordinator is None:
+        connection.send_error(
+            msg["id"], "not_found", f"Unknown config entry '{msg['entry_id']}'"
+        )
+        return
+
+    @callback
+    def forward_transaction(transaction: dict[str, Any]) -> None:
+        connection.send_message(
+            websocket_api.event_message(
+                msg["id"], {"transaction": analyze_transaction(transaction)}
+            )
+        )
+
+    connection.subscriptions[msg["id"]] = async_dispatcher_connect(
+        hass, traffic_signal(msg["entry_id"]), forward_transaction
+    )
+    connection.send_result(
+        msg["id"],
+        {
+            "subscribed": True,
+            "entry_id": msg["entry_id"],
+            "capture": {
+                "hook": getattr(coordinator, "capture_hook", None),
+                "supported": getattr(coordinator, "capture_hook", None) is not None,
+            },
+        },
+    )

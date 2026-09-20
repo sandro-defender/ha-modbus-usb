@@ -361,7 +361,7 @@ python -m pytest -m fast -q
 Or target specific fast test suites directly:
 
 ```bash
-python -m pytest tests/test_templates.py tests/test_panel.py tests/test_decoding.py tests/test_diagnostics.py tests/test_bus.py tests/test_boards.py tests/test_validation.py -q
+python -m pytest tests/test_templates.py tests/test_panel.py tests/test_decoding.py tests/test_diagnostics.py tests/test_bus.py tests/test_boards.py tests/test_validation.py tests/test_capture.py tests/test_inspector.py tests/test_designer.py tests/test_ws_commands.py -q
 ```
 
 ### Developer debugging guide
@@ -411,6 +411,11 @@ ha-modbus-usb/
 │   ├── bus.py               # Serial-transport mechanics (pymodbus slave/device_id compat)
 │   ├── diagnostics.py       # CRC16 math + reconstructed request frames for the log
 │   ├── decoding.py          # Pure value decoding/normalization (unit-tested, HA-free)
+│   ├── capture.py           # Real RTU response capture via pymodbus transaction tracing
+│   ├── inspector.py         # RTU frame analyzer + latency waterfall for Traffic Inspector
+│   ├── designer.py          # Template Designer live validation (test reads + fingerprints)
+│   ├── optimizer.py         # Multi-register block-read grouping
+│   ├── circuit_breaker.py   # Per-slave offline circuit breaker (healthy→degraded→offline)
 │   ├── boards/              # Per-board protocols + BLOCK_READERS registry
 │   │   ├── r413e16.py       # Verified-map detection + ON/OFF/state constants
 │   │   └── r4d6f20.py       # Grouped Command 1/2 block readers + range tables
@@ -427,7 +432,7 @@ ha-modbus-usb/
 │   ├── sensor.py / switch.py / number.py / binary_sensor.py  # HA platforms
 │   ├── device_info.py       # HA device-registry links (hub ↔ devices)
 │   ├── models.py            # TypedDicts documenting hub/device/entity configs
-│   ├── services.py          # modbus_usb.read_register / write_register
+│   ├── services.py          # read/write/batch_write/boost_polling/reset_circuit_breaker
 │   ├── templates.py         # Bundled + user YAML template loading/saving
 │   ├── templates/           # 13 bundled board YAMLs (+ .md protocol notes)
 │   ├── const.py             # Constants + single-sourced integration_version()
@@ -449,7 +454,9 @@ ha-modbus-usb/
 interval and fans results out to HA entities. The sidebar panel talks to the
 backend over 30 WebSocket commands (`modbus_usb/…`) plus two REST views; the
 panel subscribes to HA state-change events so switches update instantly
-instead of waiting for the next poll.
+instead of waiting for the next poll, and the Traffic Inspector streams
+decoded transactions (paired request/response frames) live over
+`modbus_usb/subscribe_traffic`.
 
 **One owner per serial port.** Modbus RTU is strictly request/response, so
 every I/O operation — polling, board tools, scans, services, hex writes —

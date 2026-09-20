@@ -568,11 +568,14 @@
           <div class="context-bar-title">Live bus traffic inspector</div>
           <div class="context-bar-copy">
             Every recorded RS-485 transaction decoded byte by byte: Slave ID, Function Code,
-            Address, Byte Count, Data payload, and CRC16 low/high validation — plus the
-            latency waterfall for each transaction.
+            Address, Byte Count, Data payload, and CRC16 low/high validation — with the real
+            response bytes captured from the wire paired with each request, plus the latency
+            waterfall. New transactions stream in live while this tab is open.
           </div>
         </div>
         <div class="context-bar-actions">
+          <span class="badge badge-green inspector-live-badge" id="inspector-live-badge" hidden>● live stream</span>
+          <button class="btn btn-secondary btn-sm" id="btn-inspector-pause" onclick="toggleInspectorPause()">⏸ Pause stream</button>
           <button class="btn btn-secondary btn-sm" onclick="loadTrafficInspector(true)">↻ Reload traffic</button>
         </div>
       </div>
@@ -609,7 +612,8 @@
           <div class="context-bar-title">Interactive template designer</div>
           <div class="context-bar-copy">
             Draft a custom YAML template, test-read its registers against the connected board,
-            and verify every data type live before saving.
+            verify every data type live, probe declared fingerprints, and save &amp; apply the
+            template to a new or existing device in one step.
           </div>
         </div>
         <div class="context-bar-actions">
@@ -645,6 +649,14 @@
             <button class="btn btn-primary" id="btn-designer-validate" onclick="runDesignerValidation()">▶ Validate &amp; test reads</button>
             <input class="form-input mono" type="text" id="designer-filename" placeholder="my_template.yaml" style="max-width:220px;" />
             <button class="btn btn-secondary" onclick="saveDesignerTemplate()">💾 Save template</button>
+          </div>
+          <div class="flex gap-1 designer-apply-row" style="flex-wrap:wrap; align-items:center;">
+            <label class="form-label" for="designer-apply-device" style="margin:0;">Apply to</label>
+            <select class="form-input" id="designer-apply-device" style="max-width:250px;">
+              <option value="">➕ Create new device…</option>
+            </select>
+            <input class="form-input" type="text" id="designer-apply-name" placeholder="new device name (optional)" style="max-width:220px;" />
+            <button class="btn btn-primary" id="btn-designer-apply" onclick="saveAndApplyDesignerTemplate()">🚀 Save &amp; apply to device</button>
           </div>
         </div>
         <div class="card">

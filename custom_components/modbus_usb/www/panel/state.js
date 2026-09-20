@@ -13,6 +13,13 @@
     let _statesCache = {};
     let _unsubscribeStateChanges = null;
     let _liveStateRenderTimer = null;
+
+    // ─── TRAFFIC INSPECTOR LIVE STREAM ──────────────────────────
+    let _inspectorUnsubscribe = null;      // active WS subscription disposer
+    let _inspectorStreamEntryId = null;    // entry the stream is bound to
+    let _inspectorPaused = false;          // UI pause switch
+    let _inspectorBuffered = 0;            // pushes skipped while paused
+    let _inspectorLive = false;            // stream connected & rendering
     let _dashboardFilter = 'all';
     const _deviceTestReports = {};
     const _r413e16StateReports = {};

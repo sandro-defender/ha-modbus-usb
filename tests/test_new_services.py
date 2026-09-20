@@ -289,7 +289,7 @@ def test_services_yaml_documents_every_service() -> None:
         assert "entry_id" in service["fields"]
 
 
-def test_manifest_version_is_250() -> None:
+def test_manifest_version_is_260() -> None:
     import json
     import os
 
@@ -301,7 +301,7 @@ def test_manifest_version_is_250() -> None:
         "manifest.json",
     )
     with open(path, encoding="utf-8") as file:
-        assert json.load(file)["version"] == "2.5.0"
+        assert json.load(file)["version"] == "2.6.0"
 
 
 # ───────────────────────────── batch_write ──────────────────────────────
@@ -596,8 +596,10 @@ async def test_api_registers_inspector_and_designer_commands() -> None:
         await api.async_register_api(hass)
         commands = hass.data["websocket_api"]
         assert "modbus_usb/traffic_inspector" in commands
+        assert "modbus_usb/subscribe_traffic" in commands
         assert "modbus_usb/designer_validate" in commands
         assert "modbus_usb/save_template" in commands
+        assert "modbus_usb/save_and_apply_template" in commands
     finally:
         api._API_REGISTERED = False
 

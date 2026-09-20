@@ -1,11 +1,16 @@
 /* inspector.js — Traffic Inspector tab: RTU frame analyzer & latency waterfall.
  * Split from modbus-panel.html; loaded as a classic script (global scope).
- * The backend parses frames (custom_components/modbus_usb/inspector.py); this
- * module only renders the decoded view returned by modbus_usb/traffic_inspector.
+ * The backend parses frames (custom_components/modbus_usb/inspector.py) and
+ * captures real response bytes (custom_components/modbus_usb/capture.py);
+ * this module renders the decoded view returned by modbus_usb/traffic_inspector
+ * and keeps it live through the modbus_usb/subscribe_traffic WebSocket stream.
  */
     let _inspectorView = null;
     let _inspectorSelected = null;
     let _inspectorLoading = false;
+    let _inspectorRenderTimer = null;
+
+    const INSPECTOR_STREAM_LIMIT = 100;
 
     const INSPECTOR_STAGE_LABELS = {
       lock_wait_ms: 'Bus lock wait',
@@ -37,7 +42,7 @@
       if (_inspectorLoading) return;
       _inspectorLoading = true;
       try {
-        _inspectorView = await apiCall('traffic_inspector', { entry_id: entry.entry_id, limit: 100 });
+        _inspectorView = await apiCall('traffic_inspector', { entry_id: entry.entry_id, limit: INSPECTOR_STREAM_LIMIT });
         if (_inspectorSelected !== null && _inspectorView?.transactions?.length <= _inspectorSelected) {
           _inspectorSelected = null;
         }
@@ -49,6 +54,142 @@
       }
     }
 
+    // ─── Live WebSocket stream ──────────────────────────────────
+    function setInspectorLive(live) {
+      _inspectorLive = live;
+      const badge = document.getElementById('inspector-live-badge');
+      if (badge) badge.hidden = !live;
+      const subtitle = document.getElementById('inspector-list-subtitle');
+      if (subtitle) {
+        subtitle.textContent = live
+          ? 'Live stream active — new transactions appear as they happen.'
+          : 'Select a transaction to decode its RTU frame.';
+      }
+    }
+
+    async function ensureTrafficSubscription() {
+      const pane = document.getElementById('pane-inspector');
+      if (!pane || !pane.classList.contains('active')) return;
+      const entry = getCurrentEntry();
+      if (!_isLiveHA || !_hass?.connection?.subscribeMessage || !entry) {
+        setInspectorLive(false);
+        return;
+      }
+      if (_inspectorUnsubscribe && _inspectorStreamEntryId === entry.entry_id) return;
+      await teardownTrafficSubscription();
+      try {
+        _inspectorStreamEntryId = entry.entry_id;
+        _inspectorUnsubscribe = await _hass.connection.subscribeMessage(
+          (message) => handleTrafficStreamMessage(message),
+          { type: 'modbus_usb/subscribe_traffic', entry_id: entry.entry_id },
+        );
+        setInspectorLive(true);
+      } catch (error) {
+        // The reload button and periodic polling remain as a fallback when
+        // the subscription command is unavailable (e.g. older integration).
+        console.debug('Traffic stream unavailable, falling back to polling:', error);
+        _inspectorUnsubscribe = null;
+        _inspectorStreamEntryId = null;
+        setInspectorLive(false);
+      }
+    }
+
+    async function teardownTrafficSubscription() {
+      const dispose = _inspectorUnsubscribe;
+      _inspectorUnsubscribe = null;
+      _inspectorStreamEntryId = null;
+      setInspectorLive(false);
+      if (dispose) {
+        try { await dispose(); } catch (_) { /* connection already gone */ }
+      }
+    }
+
+    function handleTrafficStreamMessage(message) {
+      if (message?.type !== 'event' || !message.event?.transaction) return;
+      if (_inspectorPaused) {
+        _inspectorBuffered += 1;
+        updateInspectorPauseButton();
+        return;
+      }
+      pushInspectorTransaction(message.event.transaction);
+    }
+
+    function pushInspectorTransaction(analyzed) {
+      if (!_inspectorView || !Array.isArray(_inspectorView.transactions)) {
+        loadTrafficInspector(true);
+        return;
+      }
+      _inspectorView.transactions.unshift(analyzed);
+      if (_inspectorView.transactions.length > INSPECTOR_STREAM_LIMIT) {
+        _inspectorView.transactions.length = INSPECTOR_STREAM_LIMIT;
+      }
+      if (_inspectorSelected !== null) {
+        _inspectorSelected += 1;
+        if (_inspectorSelected >= _inspectorView.transactions.length) _inspectorSelected = null;
+      }
+      const txn = analyzed.transaction || {};
+      const stats = _inspectorView.stats || (_inspectorView.stats = {});
+      stats.total = (stats.total || 0) + 1;
+      if (txn.status === 'error') stats.errors = (stats.errors || 0) + 1;
+      if (txn.response_hex) stats.responses = (stats.responses || 0) + 1;
+      if (txn.slave != null) {
+        const perSlave = _inspectorView.per_slave || (_inspectorView.per_slave = {});
+        const bucket = perSlave[String(txn.slave)] || (perSlave[String(txn.slave)] = {
+          count: 0, errors: 0, samples: 0, avg_ms: null, min_ms: null, max_ms: null, p95_ms: null, last_seen: null,
+        });
+        const duration = txn.duration_ms;
+        if (typeof duration === 'number') {
+          const samples = bucket.samples || 0;
+          bucket.avg_ms = samples
+            ? Math.round((((bucket.avg_ms || 0) * samples) + duration) / (samples + 1) * 10) / 10
+            : Math.round(duration * 10) / 10;
+          bucket.min_ms = bucket.min_ms == null ? duration : Math.min(bucket.min_ms, duration);
+          bucket.max_ms = bucket.max_ms == null ? duration : Math.max(bucket.max_ms, duration);
+          bucket.p95_ms = bucket.max_ms;
+          bucket.samples = samples + 1;
+        }
+        bucket.count += 1;
+        if (txn.status === 'error') bucket.errors += 1;
+        bucket.last_seen = txn.timestamp;
+      }
+      scheduleInspectorRender();
+    }
+
+    function scheduleInspectorRender() {
+      // Fast polling cycles can push several transactions per second; batch
+      // them into at most one DOM update every 250 ms.
+      if (_inspectorRenderTimer) return;
+      _inspectorRenderTimer = setTimeout(() => {
+        _inspectorRenderTimer = null;
+        renderInspectorTab();
+      }, 250);
+    }
+
+    function toggleInspectorPause() {
+      _inspectorPaused = !_inspectorPaused;
+      if (_inspectorPaused) {
+        updateInspectorPauseButton();
+        return;
+      }
+      const missed = _inspectorBuffered;
+      _inspectorBuffered = 0;
+      updateInspectorPauseButton();
+      // Re-sync with the server log so nothing recorded while paused is lost.
+      loadTrafficInspector(true);
+      if (missed) toast(`Stream resumed — reloaded after ${missed} paused transaction(s)`, 'inf');
+    }
+
+    function updateInspectorPauseButton() {
+      const button = document.getElementById('btn-inspector-pause');
+      if (!button) return;
+      button.textContent = _inspectorPaused
+        ? `▶ Resume stream${_inspectorBuffered ? ` (${_inspectorBuffered})` : ''}`
+        : '⏸ Pause stream';
+      button.classList.toggle('btn-primary', _inspectorPaused);
+      button.classList.toggle('btn-secondary', !_inspectorPaused);
+    }
+
+    // ─── Rendering ──────────────────────────────────────────────
     function renderInspectorTab() {
       const statsBar = document.getElementById('inspector-stats');
       const list = document.getElementById('inspector-list');
@@ -69,6 +210,7 @@
       statsBar.innerHTML = `
         <div class="stat-card"><div class="stat-num" style="color:#60a5fa;">${stats.total ?? 0}</div><div class="stat-label">Transactions</div></div>
         <div class="stat-card"><div class="stat-num" style="color:${stats.errors ? '#f87171' : '#34d399'};">${stats.errors ?? 0}</div><div class="stat-label">Errors</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:#2dd4bf;">${stats.responses ?? 0}</div><div class="stat-label">RX captured</div></div>
         <div class="stat-card"><div class="stat-num" style="color:#38bdf8;">${formatMs(stats.avg_ms)}</div><div class="stat-label">Avg duration</div></div>
         <div class="stat-card"><div class="stat-num" style="color:#fbbf24;">${formatMs(stats.p95_ms)}</div><div class="stat-label">p95 duration</div></div>
         <div class="stat-card"><div class="stat-num" style="color:#c084fc;">${formatMs(stats.max_ms)}</div><div class="stat-label">Slowest</div></div>
@@ -87,12 +229,17 @@
           ? '<span class="badge badge-red">error</span>'
           : '<span class="badge badge-green">ok</span>';
         const durationBadge = `<span class="badge badge-${durationTone(txn.duration_ms)}">${formatMs(txn.duration_ms)}</span>`;
+        const responseBadge = item.response_frame
+          ? (item.response_frame.frame_kind === 'exception_response'
+            ? '<span class="badge badge-red" title="Exception response captured from the bus">RX EXC</span>'
+            : '<span class="badge badge-blue" title="Real response bytes captured from the bus">RX</span>')
+          : '<span class="badge badge-slate" title="No raw response bytes captured">no RX</span>';
         const selected = index === _inspectorSelected ? ' selected' : '';
         return `<button class="inspector-row${selected}" onclick="selectInspectorTransaction(${index})" aria-pressed="${index === _inspectorSelected}">
           <span class="inspector-row-time">${escapeHtml(formatLogTime(txn.timestamp))}</span>
           <span class="inspector-row-op mono">${escapeHtml(txn.operation || '—')} · slave ${escapeHtml(txn.slave ?? '—')}</span>
           <span class="inspector-row-frame mono">${escapeHtml(frame.summary || frame.function_code || txn.function_code || 'no frame')}</span>
-          <span class="inspector-row-badges">${statusBadge}${durationBadge}</span>
+          <span class="inspector-row-badges">${responseBadge}${statusBadge}${durationBadge}</span>
         </button>`;
       }).join('');
 
@@ -170,6 +317,22 @@
         </div>`;
     }
 
+    function frameAnalyzerSection(title, frame, fallbackHtml) {
+      if (!frame) {
+        return `<div class="inspector-detail-section">
+          <div class="card-title" style="margin-bottom:0.5rem;">${escapeHtml(title)}</div>
+          ${fallbackHtml}
+        </div>`;
+      }
+      return `<div class="inspector-detail-section">
+        <div class="card-title" style="margin-bottom:0.5rem;">${escapeHtml(title)}</div>
+        <div class="frame-hex mono">${escapeHtml(frame.raw_hex || 'no frame recorded')}</div>
+        <div class="frame-grid">${frameFieldChips(frame).join('')}</div>
+        <div class="frame-grid" style="margin-top:0.5rem;">${crcChips(frame)}</div>
+        ${(frame.errors || []).length ? `<div class="frame-errors">${frame.errors.map((message) => `<div>⚠️ ${escapeHtml(message)}</div>`).join('')}</div>` : ''}
+      </div>`;
+    }
+
     function renderInspectorDetail() {
       const detail = document.getElementById('inspector-detail');
       if (!detail) return;
@@ -178,25 +341,24 @@
         detail.innerHTML = '<div class="empty-box"><div class="empty-icon">🔍</div><h3>No transaction selected</h3><p>Pick a transaction on the left to decode its RTU frame.</p></div>';
         return;
       }
-      const { transaction, frame } = view.transactions[_inspectorSelected];
-      const frameSection = frame ? `
-        <div class="inspector-detail-section">
-          <div class="card-title" style="margin-bottom:0.5rem;">Frame analyzer</div>
-          <div class="frame-hex mono">${escapeHtml(frame.raw_hex || transaction.request_hex || 'no frame recorded')}</div>
-          <div class="frame-grid">${frameFieldChips(frame).join('')}</div>
-          <div class="frame-grid" style="margin-top:0.5rem;">${crcChips(frame)}</div>
-          ${(frame.errors || []).length ? `<div class="frame-errors">${frame.errors.map((message) => `<div>⚠️ ${escapeHtml(message)}</div>`).join('')}</div>` : ''}
-        </div>` : '<div class="text-sm" style="color:var(--text-dim);">This transaction has no reconstructed request frame.</div>';
+      const { transaction, frame, response_frame: responseFrame } = view.transactions[_inspectorSelected];
+      const requestFallback = '<div class="text-sm" style="color:var(--text-dim);">This transaction has no request frame — the operation could not be captured or reconstructed.</div>';
+      const responseFallback = `<div class="text-sm" style="color:var(--text-dim);">${transaction.status === 'error'
+        ? 'No response bytes captured — the board did not answer or the reply was unreadable.'
+        : (view.capture && view.capture.supported === false)
+          ? 'Raw response capture is unavailable: this pymodbus release exposes no transaction tracing hook, so only the request frame is shown.'
+          : 'No raw response bytes were captured for this transaction.'}</div>`;
 
       detail.innerHTML = `
         <div class="card-header">
           <div>
             <div class="card-title">${escapeHtml(frame?.summary || transaction.operation || 'Transaction')}</div>
-            <div class="card-subtitle">${escapeHtml(formatLogTime(transaction.timestamp))} · ${escapeHtml(transaction.operation || '')} · slave ${escapeHtml(transaction.slave ?? '—')}</div>
+            <div class="card-subtitle">${escapeHtml(formatLogTime(transaction.timestamp))} · ${escapeHtml(transaction.operation || '')} · slave ${escapeHtml(transaction.slave ?? '—')}${transaction.request_captured ? ' · <span class="badge badge-blue">TX captured</span>' : ''}</div>
           </div>
           <span class="badge badge-${durationTone(transaction.duration_ms)}">${formatMs(transaction.duration_ms)}</span>
         </div>
-        ${frameSection}
+        ${frameAnalyzerSection('Request frame (TX)', frame, requestFallback)}
+        ${frameAnalyzerSection('Response frame (RX)', responseFrame, responseFallback)}
         <div class="inspector-detail-section">
           <div class="card-title" style="margin-bottom:0.5rem;">Latency waterfall</div>
           ${latencyWaterfall(transaction)}

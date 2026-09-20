@@ -26,6 +26,11 @@ def _html() -> str:
         return f.read()
 
 
+def _panel_script(name: str) -> str:
+    with open(os.path.join(WWW_DIR, "panel", name), encoding="utf-8") as f:
+        return f.read()
+
+
 def test_panel_has_no_inline_script_or_style() -> None:
     html = _html()
     assert "<style" not in html, "CSS must live in panel/panel.css"
@@ -71,3 +76,41 @@ def test_panel_wires_inspector_and_designer_tabs() -> None:
     assert "panel/inspector.js" in scripts
     assert "panel/designer.js" in scripts
     assert scripts.index("panel/inspector.js") < scripts.index("panel/designer.js")
+
+
+def test_panel_wires_inspector_live_stream_controls() -> None:
+    html = _html()
+    assert 'id="btn-inspector-pause"' in html, "missing pause/resume stream button"
+    assert "toggleInspectorPause()" in html, "pause button is not wired"
+    assert 'id="inspector-live-badge"' in html, "missing live stream badge"
+
+    inspector_js = _panel_script("inspector.js")
+    state_js = _panel_script("state.js")
+    core_js = _panel_script("core.js")
+    assert "modbus_usb/subscribe_traffic" in inspector_js
+    assert "subscribeMessage" in inspector_js
+    assert "toggleInspectorPause" in inspector_js
+    assert "ensureTrafficSubscription" in core_js
+    assert "teardownTrafficSubscription" in core_js
+    for variable in (
+        "_inspectorUnsubscribe",
+        "_inspectorStreamEntryId",
+        "_inspectorPaused",
+        "_inspectorBuffered",
+        "_inspectorLive",
+    ):
+        assert variable in state_js, f"{variable} must live in state.js"
+
+
+def test_panel_wires_designer_save_and_apply() -> None:
+    html = _html()
+    assert 'id="designer-apply-device"' in html, "missing apply-target device select"
+    assert 'id="btn-designer-apply"' in html, "missing save & apply button"
+    assert "saveAndApplyDesignerTemplate()" in html, "apply button is not wired"
+
+    designer_js = _panel_script("designer.js")
+    assert "save_and_apply_template" in designer_js
+    assert "renderDesignerApplyTargets" in designer_js
+    assert "designerFingerprintSection" in designer_js
+    # The one-step flow must render the fingerprint probe results.
+    assert "fingerprint_all_matched" in designer_js

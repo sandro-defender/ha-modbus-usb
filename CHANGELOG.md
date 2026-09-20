@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 2.6.0
+
+### Traffic Inspector: real response-frame capture
+- The inspector now shows **actual response bytes from the wire**: a new pure `capture.py` module hooks pymodbus transaction tracing (`trace_packet` on the sync/async transaction manager, pymodbus ≥ 3.7) and falls back to parsing `pymodbus.logging` frame dumps on older releases.
+- Captured RX streams are re-framed per the Modbus RTU spec — byte-count read responses, 5-byte exception responses, FC05/FC06/FC0F/FC10 write echoes, and a CRC scan for exotic function codes — with chunked (async) and growing-buffer (sync) receive patterns normalized, local-echo retries handled, and a runaway-noise buffer guard.
+- Request/response **pairing**: every transaction row carries `request_captured` (real TX bytes beat reconstructed requests) and `response_hex`; `inspector.py` gained direction-aware parsing (`as_response=True` resolves the 8-byte FC01–FC04 request/response ambiguity, exception frames are always tagged `direction: response`), and the detail pane renders paired **Request frame (TX)** and **Response frame (RX)** analyzers with an `RX`/`RX EXC` badge per row and an "RX captured" stat card.
+- Capture is installed automatically on hub setup and on serial reconfiguration, detached on unload, and never breaks serial I/O when a pymodbus release exposes no tracing hook.
+
+### Traffic Inspector: live streaming
+- New read-only `modbus_usb/subscribe_traffic` WebSocket subscription: the coordinator announces every recorded transaction on a per-entry dispatcher signal (thread-hopping from the serial executor onto the event loop), and subscribers receive each transaction **already decoded** (paired frames + latency waterfall) as it happens — replacing panel polling.
+- The panel subscribes while the Traffic Inspector tab is open, re-subscribes on hub switch, falls back to polling when the stream is unavailable, and batches fast poll bursts into throttled renders.
+- New **⏸ Pause stream / ▶ Resume** control with a live badge: paused pushes are counted, and resuming re-syncs the full view from the server so nothing is lost.
+
+### Template Designer: fingerprint validation & one-step apply
+- `modbus_usb/designer_validate` now runs the template's declared **fingerprint probes** as part of validation and reports match/no-match/error per entry (read value vs. expected range), mirroring the RS-485 scanner's template matching; the designer renders a 🔏 Fingerprint section with per-probe badges.
+- New admin-only `modbus_usb/save_and_apply_template` WebSocket command: validates the draft, saves it as a user template, and applies it to a **new or existing device in one step** — reusing the `ws_apply_template` machinery, now extracted into a shared `async_apply_template_to_entry` helper (device inheritance, entity selection, address offsets, M0 defaults all unchanged).
+- The designer gained an **Apply to** device picker (existing devices or "Create new device"), an optional device-name field, and a **🚀 Save & apply to device** button; filenames are derived server-side from the template name when left blank (`template_filename_from_draft`).
+
+### Development
+- Comprehensive pytest coverage for the new capture parser paths (frame extraction, chunked/growing buffers, noise guards, logging fallback, hook installation incl. a real `ModbusSerialClient`), response-aware frame parsing, request/response pairing, the traffic subscription, fingerprint evaluation, and the save-&-apply flow (267 tests total).
+- Panel wiring tests for the live-stream controls and designer apply flow; `ruff check` and `ruff format` pass cleanly across the repository.
+
 ## 2.5.0
 
 ### Live Interactive Bus Traffic Inspector & Frame Analyzer

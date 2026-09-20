@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tempfile
 from typing import Any
 
@@ -152,6 +153,13 @@ def _template_filename(filename: str, *, add_extension: bool = False) -> str:
     return filename
 
 
+def template_filename_from_draft(template: dict[str, Any]) -> str:
+    """Derive a safe ``.yaml`` filename from a draft template's name or id."""
+    base = str(template.get("name") or template.get("id") or "custom_template")
+    slug = re.sub(r"[^a-z0-9]+", "_", base.lower()).strip("_")
+    return f"{slug or 'custom_template'}.yaml"
+
+
 def save_template_sync(
     hass: HomeAssistant, filename: str, content: str
 ) -> dict[str, Any]:
@@ -210,5 +218,7 @@ async def async_delete_template(hass: HomeAssistant, filename: str) -> bool:
 
 
 # Changelog:
+# 2026-09-20 — Derive safe draft filenames (template_filename_from_draft) for the
+#              Template Designer one-step save & apply flow.
 # 2026-09-06 — Parse optional template image/picture URL for sidebar device photos.
-# Date modified: 2026-09-06
+# Date modified: 2026-09-20

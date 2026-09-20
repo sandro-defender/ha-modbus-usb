@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import struct
 import threading
@@ -21,6 +22,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .boards import select_block_reader
 from .boards.r413e16 import R413E16_STATE_ON_VALUES, is_r413e16_switch_config
 from .bus import call_modbus_on_client
+from .capture import ResponseCapture, install_response_capture
 from .circuit_breaker import SlaveCircuitBreaker
 from .const import (
     CONF_ADDRESS,
@@ -62,6 +64,15 @@ from .optimizer import group_entities_into_blocks
 _LOGGER = logging.getLogger(__name__)
 # Compatibility alias for callers of the former coordinator-local helper.
 _decode_words = decode_words
+
+
+def traffic_signal(entry_id: str) -> str:
+    """Return the dispatcher signal carrying live traffic for one hub.
+
+    Every transaction the coordinator records is announced on this signal so
+    the Traffic Inspector WebSocket subscription can push it to open panels.
+    """
+    return f"{DOMAIN}_{entry_id}_traffic"
 
 
 class ModbusUsbCoordinator(DataUpdateCoordinator):
@@ -109,6 +120,13 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         # does not retain raw RTU bytes reliably across serial implementations, so
         # log every decoded Modbus request and its response instead.
         self.transaction_log: deque[dict[str, Any]] = deque(maxlen=200)
+        # Raw TX/RX byte capture for the Traffic Inspector. When pymodbus
+        # transaction tracing is available, every transaction records the real
+        # response frame from the wire (and the real request bytes); without
+        # tracing the log keeps only reconstructed requests.
+        self.response_capture = ResponseCapture()
+        self.capture_hook: str | None = None
+        self._install_response_capture()
         self.scan_progress: dict[str, Any] = {
             "active": False,
             "completed": 0,
@@ -292,6 +310,55 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             stages = self._tx_stages = threading.local()
         return stages
 
+    def traffic_signal(self) -> str:
+        """Return this hub's live traffic dispatcher signal."""
+        return traffic_signal(self.entry_id)
+
+    def _install_response_capture(self) -> None:
+        """Hook pymodbus tracing on the current client for real RX bytes.
+
+        Response capture is a diagnostic nicety: a client that exposes no
+        supported tracing hook simply keeps the reconstructed-request
+        behaviour, and failures here must never break serial I/O.
+        """
+        capture = getattr(self, "response_capture", None)
+        if capture is None:
+            capture = self.response_capture = ResponseCapture()
+        try:
+            self.capture_hook = install_response_capture(self.client, capture)
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.debug("Response capture hook unavailable: %s", err)
+            self.capture_hook = None
+        if self.capture_hook:
+            _LOGGER.debug(
+                "Traffic inspector response capture active via %s", self.capture_hook
+            )
+
+    def _notify_traffic_subscribers(self, item: dict[str, Any]) -> None:
+        """Push one recorded transaction to WebSocket traffic subscribers.
+
+        ``_record_transaction`` runs in executor threads; the dispatcher must
+        run on the Home Assistant event loop, so the signal hops threads when
+        needed. Minimal unit-test coordinators without a hass object simply
+        skip the notification.
+        """
+        hass = getattr(self, "hass", None)
+        loop = getattr(hass, "loop", None)
+        if loop is None:
+            return
+        signal = self.traffic_signal()
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is loop:
+            async_dispatcher_send(hass, signal, dict(item))
+            return
+        try:
+            loop.call_soon_threadsafe(async_dispatcher_send, hass, signal, dict(item))
+        except RuntimeError:
+            pass  # loop already closed during shutdown
+
     def _resolve_port_path(self, port: str) -> str:
         """Detect when /dev/ttyUSB* dynamically switches index or has a persistent /dev/serial/by-id link."""
         import os
@@ -368,6 +435,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         config = {**self.serial_config, **serial_config}
         with self._serial_lock:
             self.client.close()
+            capture = getattr(self, "response_capture", None)
+            if capture is not None:
+                capture.detach()  # drop any logging fallback for the old client
             self.client = ModbusSerialClient(
                 port=config[CONF_PORT],
                 baudrate=config[CONF_BAUDRATE],
@@ -377,6 +447,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 timeout=3,
             )
             self.serial_config = config
+            self._install_response_capture()
             return self._connect_with_retries()
 
     def _apply_inter_frame_delay(self) -> None:
@@ -608,7 +679,16 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         function_code: str | None = None,
         request_hex: str | None = None,
     ) -> None:
-        """Keep a rolling, UI-safe record of every RS-485 operation and health."""
+        """Keep a rolling, UI-safe record of every RS-485 operation and health.
+
+        When pymodbus transaction tracing is hooked (see ``capture.py``), the
+        real TX/RX bytes of the transaction that just finished are attached:
+        ``request_captured`` marks a request frame read from the wire instead
+        of reconstructed, and ``response_hex`` carries the actual response
+        frame (byte-count frames, write echoes, and exception frames).
+        Operations that send several frames before one record (batch writes,
+        board block readers) keep the last request/response pair.
+        """
         timestamp = datetime.now().astimezone().isoformat()
         detected_function, detected_request = diagnostic_request_frame(
             operation, slave, address, count, value
@@ -630,6 +710,15 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 else 0
             ),
         }
+        capture = getattr(self, "response_capture", None)
+        window = capture.consume() if capture is not None else None
+        if window:
+            if request_hex is None and window.get("request_hex"):
+                # Real TX bytes beat the reconstructed request frame.
+                item["request_hex"] = window["request_hex"]
+                item["request_captured"] = True
+            if window.get("response_hex"):
+                item["response_hex"] = window["response_hex"]
         if duration_ms is not None:
             item["duration_ms"] = round(duration_ms, 1)
         tx_stages = self._get_tx_stages()
@@ -640,6 +729,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         if error:
             item["error"] = str(error)
         self.transaction_log.appendleft(item)
+        self._notify_traffic_subscribers(item)
 
         # Health must reflect every real wire transaction, not just coordinator
         # polling. Boards with assumed-state switches (including R413E16) are
@@ -833,6 +923,12 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             "circuit_breaker": self.circuit_breaker.get_summary()
             if hasattr(self, "circuit_breaker")
             else {},
+            "capture": {
+                # Which pymodbus tracing hook (if any) records real RX bytes
+                # for the Traffic Inspector: trace_packet, client_trace_packet,
+                # logging, or None when unavailable.
+                "hook": getattr(self, "capture_hook", None),
+            },
             "serial": {
                 "port": self.serial_config.get(CONF_PORT),
                 "baudrate": self.serial_config.get(CONF_BAUDRATE),
@@ -852,6 +948,11 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         """Close the serial client only after any in-flight transaction finishes."""
         with self._serial_lock:
             self.client.close()
+        capture = getattr(self, "response_capture", None)
+        if capture is not None:
+            # Remove a logging-fallback handler so an unloaded hub does not
+            # keep receiving (and buffering) pymodbus frame dumps.
+            capture.detach()
 
     def _get_entities(self) -> list[dict]:
         entry = self.hass.config_entries.async_get_entry(self.entry_id)
@@ -1566,5 +1667,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
 
 
 # Changelog:
+# 2026-09-20 — v2.6.0: real TX/RX response capture (capture.py) attached to every
+#              recorded transaction, plus a per-entry live traffic dispatcher signal.
 # 2026-09-08 — Support both Pymodbus device_id and legacy slave keywords.
-# Date modified: 2026-09-08
+# Date modified: 2026-09-20

@@ -82,8 +82,8 @@ update**, and **Add device** actions.
 | **All Entities** | Flat list of every Home Assistant entity with quick edit/delete. |
 | **Hub & Serial** | View and edit the hub's serial settings and poll interval; scan USB ports. |
 | **Diagnostics & Debug** | Health, scanner, direct tools, verification, board tools, discovery, activity log. |
-| **Traffic Inspector** | Live RS-485 traffic: decoded RTU frames (with CRC16 pass/fail) and per-transaction latency waterfalls. |
-| **Template Designer** | Draft a custom YAML template and live-test every register against the board before saving. |
+| **Traffic Inspector** | Live-streaming RS-485 traffic: decoded RTU request **and real captured response** frames (with CRC16 pass/fail) plus per-transaction latency waterfalls; pausable live stream. |
+| **Template Designer** | Draft a custom YAML template, live-test every register and fingerprint probe against the board, then save **and apply to a device in one step**. |
 
 Device cards and diagnostics cards start **collapsed** — click a card header
 to expand it. The panel remembers what you expanded, and switches update
@@ -248,14 +248,24 @@ Designer** tab (since v2.5.0):
    - structurally validates the YAML (same rules as saving),
    - reads **every** entity's registers from the live bus,
    - decodes each response as *all* compatible data types, so you can spot a
-     wrong `data_type` (e.g. a float32 field declared as uint16) at a glance.
+     wrong `data_type` (e.g. a float32 field declared as uint16) at a glance,
+   - **probes every declared `fingerprint` entry** (since v2.6.0) and reports
+     *match / no match / error* per probe with the value it read, so you can
+     certify that the board really is the device your template claims —
+     the same checks the RS-485 scanner uses for suggestions.
 4. Fix any ❌ rows (bad address, wrong register type, unreachable slave),
-   re-run, and once everything shows **pass**, enter a filename and
-   **💾 Save template**. Saving warns you if the draft hasn't passed live
-   validation.
+   re-run, and once everything shows **pass**, either:
+   - enter a filename and **💾 Save template** (file only), or
+   - use **🚀 Save & apply to device** (since v2.6.0): pick an existing
+     device in **Apply to** — or keep *➕ Create new device…* and optionally
+     type a device name — and the template is saved **and** applied in one
+     step, creating the entities immediately. A blank filename is derived
+     from the template name automatically.
+   Saving warns you if the draft hasn't passed live validation.
 
-> Test reads are real bus traffic. Leave **Live test reads** enabled for the
-> certification workflow; disable it only for an offline structure check.
+> Test reads and fingerprint probes are real bus traffic. Leave **Live test
+> reads** enabled for the certification workflow; disable it only for an
+> offline structure check (fingerprint probes are skipped too).
 
 ### Fingerprints (scan suggestions)
 
@@ -272,7 +282,9 @@ fingerprint:
 ```
 
 Pick registers with stable, distinctive values (e.g. mains voltage range).
-See `sdm120.yaml` and `xy_md02.yaml` for working examples.
+See `sdm120.yaml` and `xy_md02.yaml` for working examples. Since v2.6.0 the
+**Template Designer** test-runs every fingerprint entry live and reports
+match/no-match per probe before you save a template.
 
 ### M0 jumper templates (R413E16 / R4D6F20)
 
@@ -335,9 +347,18 @@ collapsed with a one-line live summary; expand any card for details.
 ### Traffic Inspector (frame analyzer)
 
 For wire-level analysis, open the **Traffic Inspector** tab (since v2.5.0).
-It lists the hub's recent RS-485 transactions; clicking one decodes its RTU
-frame byte by byte:
+It lists the hub's recent RS-485 transactions — **streamed live** over a
+WebSocket subscription while the tab is open (since v2.6.0) — and clicking
+one decodes its RTU frames byte by byte:
 
+- **Paired request/response frames**: the **Request frame (TX)** analyzer
+  plus, when pymodbus transaction tracing is available, a **Response frame
+  (RX)** analyzer built from the *real bytes received from the board* —
+  byte-count read responses, write echoes, and exception responses. Rows
+  carry an `RX` / `RX EXC` / `no RX` badge, and the stats bar counts
+  captured responses. Response bytes are captured from the wire, never
+  invented; without a tracing hook the inspector says so and shows only the
+  request side.
 - **Slave ID** and **Function Code** with the plain-language name
   (FC01–FC06, FC0F, FC10, and exception responses).
 - **Address**, **Count**, **Byte Count**, and the **Data payload** in hex.
@@ -349,16 +370,18 @@ frame byte by byte:
   avg/p95/max duration indicators per hub and per slave. Slow `request`
   stages point at the board; slow `lock wait` stages point at very aggressive
   polling or long batch scans.
-
-> The inspector decodes the integration's *reconstructed request frames* —
-  response bytes are never invented.
+- **⏸ Pause stream / ▶ Resume**: freeze the list to study a frame while the
+  bus keeps talking; the button counts transactions buffered while paused,
+  and resuming re-syncs the full view so nothing is lost. **↻ Reload
+  traffic** forces a full refresh at any time.
 
 ### Recommended debugging workflow
 
 1. Check **Connection Health** — are requests failing or just slow?
 2. Open the **Activity Log** — the exact failing operation, slave, and error.
 3. For timing or CRC questions, open the **Traffic Inspector** and inspect
-   the failing frame's checksum and latency waterfall.
+   the failing transaction's request/response pair, checksums, and latency
+   waterfall — an exception RX frame tells you *why* the board refused.
 4. Run **Find RS-485 Devices** on a narrow range to confirm ID/baud/parity.
 5. Use **Live Read** with the detected settings to prove the register map.
 6. For unknown boards, use **Safe discovery** + **Watch inputs** — never guess

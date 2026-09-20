@@ -39,6 +39,20 @@ entities:
       if (!textarea || _designerInitialized) return;
       _designerInitialized = true;
       if (!textarea.value.trim()) textarea.value = DESIGNER_SAMPLE_YAML;
+      renderDesignerApplyTargets();
+    }
+
+    function renderDesignerApplyTargets() {
+      const select = document.getElementById('designer-apply-device');
+      if (!select) return;
+      const entry = getCurrentEntry();
+      const devices = entry?.devices || [];
+      const previous = select.value;
+      select.innerHTML = '<option value="">\u2795 Create new device\u2026</option>' + devices.map((device) =>
+        `<option value="${escapeHtml(device.id)}">${escapeHtml(device.name || device.id)} (slave ${escapeHtml(device.slave_id ?? '?')})</option>`).join('');
+      if (previous && [...select.options].some((option) => option.value === previous)) {
+        select.value = previous;
+      }
     }
 
     function loadDesignerSample() {
@@ -144,6 +158,7 @@ entities:
 
       subtitle.textContent = `Slave ${result.slave_id} · ${result.passed} passed · ${result.failed} failed`
         + (result.skipped ? ` · ${result.skipped} skipped` : '')
+        + (result.fingerprint_total ? ` · fingerprint ${result.fingerprint_matched}/${result.fingerprint_total}` : '')
         + ` · ${formatMs(result.duration_ms)}`;
       const verdict = result.all_passed
         ? '<span class="badge badge-green">All test reads passed — safe to save</span>'
@@ -155,8 +170,95 @@ entities:
         : '';
       container.innerHTML = `
         <div class="designer-summary">${verdict}${truncatedNote}</div>
+        ${designerFingerprintSection(result)}
         ${(result.entities || []).map(designerEntityCard).join('') || '<div class="text-sm" style="color:var(--text-dim);">This template defines no entities.</div>'}
       `;
+    }
+
+    function designerFingerprintSection(result) {
+      if (!result.test_reads) return '';
+      const probes = result.fingerprint || [];
+      if (!probes.length) {
+        return '<div class="text-sm" style="color:var(--text-dim); margin-bottom:0.75rem;">This template declares no fingerprint probes — add a <code class="mono">fingerprint:</code> block so the RS-485 scanner can recognize the board.</div>';
+      }
+      const verdict = result.fingerprint_all_matched
+        ? '<span class="badge badge-green">Fingerprint matched — the connected board looks like this template</span>'
+        : '<span class="badge badge-amber">Fingerprint did not fully match — check probe addresses and ranges</span>';
+      const rows = probes.map((probe) => {
+        const badge = probe.status === 'match'
+          ? '<span class="badge badge-green">match</span>'
+          : probe.status === 'mismatch'
+            ? '<span class="badge badge-amber">no match</span>'
+            : '<span class="badge badge-red">error</span>';
+        const value = typeof probe.value === 'number' || typeof probe.value === 'boolean'
+          ? String(probe.value)
+          : '\u2014';
+        return `<div class="designer-entity-card">
+          <div class="designer-entity-head">
+            <div>
+              <span class="designer-entity-name mono">${escapeHtml(probe.register_type || '?')} @ ${escapeHtml(probe.address ?? '?')}</span>
+              <span class="badge badge-slate mono">${escapeHtml(probe.data_type || 'uint16')} \u00B7 expected ${escapeHtml(probe.min_value ?? '?')} \u2026 ${escapeHtml(probe.max_value ?? '?')}</span>
+            </div>
+            ${badge}
+          </div>
+          <div class="designer-entity-value">Read value: <span class="mono">${escapeHtml(value)}</span></div>
+          ${probe.error ? `<div class="frame-errors"><div>\u26A0\uFE0F ${escapeHtml(probe.error)}</div></div>` : ''}
+        </div>`;
+      }).join('');
+      return `<div class="designer-fingerprint-section">
+        <div class="card-title" style="margin-bottom:0.5rem;">\uD83D\uDD0F Fingerprint probes</div>
+        <div class="designer-summary">${verdict}</div>
+        ${rows}
+      </div>`;
+    }
+
+    async function saveAndApplyDesignerTemplate() {
+      const textarea = document.getElementById('designer-yaml');
+      const filenameInput = document.getElementById('designer-filename');
+      const deviceSelect = document.getElementById('designer-apply-device');
+      const nameInput = document.getElementById('designer-apply-name');
+      const button = document.getElementById('btn-designer-apply');
+      const entry = getCurrentEntry();
+      if (!textarea || !button) return;
+      if (!entry) {
+        toast('Configure a hub before applying templates', 'err');
+        return;
+      }
+      const content = textarea.value;
+      if (!content.trim()) {
+        toast('Paste a template YAML first', 'err');
+        return;
+      }
+      const validated = _designerResult?.valid && (_designerResult.failed === 0 || !_designerResult.test_reads);
+      if (!validated && !window.confirm('This draft has not passed live validation. Save and apply it anyway?')) {
+        return;
+      }
+      const payload = { entry_id: entry.entry_id, content };
+      const filename = filenameInput?.value.trim();
+      if (filename) payload.filename = filename;
+      const deviceId = deviceSelect?.value;
+      if (deviceId) {
+        payload.device_id = deviceId;
+      } else {
+        const deviceName = nameInput?.value.trim();
+        if (deviceName) payload.device_name = deviceName;
+        const slaveInput = document.getElementById('designer-slave-id');
+        const slaveId = slaveInput && slaveInput.value ? parseInt(slaveInput.value, 10) : null;
+        if (slaveId) payload.slave_id = slaveId;
+      }
+      button.disabled = true;
+      button.textContent = 'Applying\u2026';
+      try {
+        const result = await apiCall('save_and_apply_template', payload);
+        const savedAs = result.filename || filename || 'draft';
+        toast(`Template saved as ${savedAs} \u2014 ${result.added_count} entit${result.added_count === 1 ? 'y' : 'ies'} applied`, 'ok');
+        await refreshData();
+      } catch (error) {
+        toast(`Save & apply failed: ${error.message}`, 'err');
+      } finally {
+        button.disabled = false;
+        button.textContent = '\uD83D\uDE80 Save & apply to device';
+      }
     }
 
     async function saveDesignerTemplate() {

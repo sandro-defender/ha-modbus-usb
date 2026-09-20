@@ -119,28 +119,33 @@
       }
       if (type === 'traffic_inspector') {
         // Standalone preview: a canned, pre-parsed inspector view. Live mode
-        // parses frames server-side in custom_components/modbus_usb/inspector.py.
+        // parses frames server-side in custom_components/modbus_usb/inspector.py
+        // and captures real RX bytes via custom_components/modbus_usb/capture.py.
         return {
           entry_id: entry.entry_id,
           connected: true,
           default_slave_id: 1,
-          stats: { total: 3, errors: 1, samples: 3, avg_ms: 32.4, min_ms: 12.8, max_ms: 65.2, p95_ms: 65.2 },
+          capture: { hook: 'trace_packet', supported: true },
+          stats: { total: 3, errors: 1, responses: 3, samples: 3, avg_ms: 32.4, min_ms: 12.8, max_ms: 65.2, p95_ms: 65.2 },
           per_slave: {
             1: { count: 2, errors: 1, last_seen: new Date().toISOString(), samples: 2, avg_ms: 19.1, min_ms: 12.8, max_ms: 25.4, p95_ms: 25.4 },
             3: { count: 1, errors: 0, last_seen: new Date().toISOString(), samples: 1, avg_ms: 65.2, min_ms: 65.2, max_ms: 65.2, p95_ms: 65.2 },
           },
           transactions: [
             {
-              transaction: { timestamp: new Date().toISOString(), operation: 'read_input', slave: 1, address: 0, count: 2, status: 'ok', function_code: '0x04', request_hex: '01 04 00 00 00 02 71 CB', duration_ms: 25.4, latency: { lock_wait_ms: 0.3, connect_ms: 0.1, frame_delay_ms: 0, request_ms: 25 }, error: null },
-              frame: { raw_hex: '01 04 00 00 00 02 71 CB', frame_length: 8, slave_id: 1, function_code: 4, function_name: 'Read Input Registers', frame_kind: 'read_request', address: 0, count: 2, crc_present: true, crc_low: 113, crc_high: 203, crc_received: 52081, crc_expected: 52081, crc_valid: true, errors: [], valid: true, summary: 'Read Input Registers · slave 1 · addr 0000 · count 2' },
+              transaction: { timestamp: new Date().toISOString(), operation: 'read_input', slave: 1, address: 0, count: 2, status: 'ok', function_code: '0x04', request_hex: '01 04 00 00 00 02 71 CB', request_captured: true, response_hex: '01 04 04 43 66 66 66 A5 95', duration_ms: 25.4, latency: { lock_wait_ms: 0.3, connect_ms: 0.1, frame_delay_ms: 0, request_ms: 25 }, error: null },
+              frame: { raw_hex: '01 04 00 00 00 02 71 CB', frame_length: 8, direction: 'request', slave_id: 1, function_code: 4, function_name: 'Read Input Registers', frame_kind: 'read_request', address: 0, count: 2, crc_present: true, crc_low: 113, crc_high: 203, crc_received: 52081, crc_expected: 52081, crc_valid: true, errors: [], valid: true, summary: 'Read Input Registers · slave 1 · addr 0000 · count 2' },
+              response_frame: { raw_hex: '01 04 04 43 66 66 66 A5 95', frame_length: 9, direction: 'response', slave_id: 1, function_code: 4, function_name: 'Read Input Registers', frame_kind: 'read_response', byte_count: 4, data_hex: '43 66 66 66', values: [17254, 26214], crc_present: true, crc_low: 165, crc_high: 149, crc_received: 38309, crc_expected: 38309, crc_valid: true, errors: [], valid: true, summary: 'Read Input Registers · slave 1 · 4 data bytes' },
             },
             {
-              transaction: { timestamp: new Date().toISOString(), operation: 'write_holding', slave: 3, address: 128, count: 1, status: 'ok', function_code: '0x06', request_hex: '03 06 00 80 00 01 48 00', duration_ms: 65.2, latency: { lock_wait_ms: 4.8, connect_ms: 0, frame_delay_ms: 10, request_ms: 50.4 }, error: null },
-              frame: { raw_hex: '03 06 00 80 00 01 48 00', frame_length: 8, slave_id: 3, function_code: 6, function_name: 'Write Single Register', frame_kind: 'write_frame', address: 128, value: 1, crc_present: true, crc_low: 72, crc_high: 0, crc_received: 72, crc_expected: 72, crc_valid: true, errors: [], valid: true, summary: 'Write Single Register · slave 3 · addr 0080 · value 0001' },
+              transaction: { timestamp: new Date().toISOString(), operation: 'write_holding', slave: 3, address: 128, count: 1, status: 'ok', function_code: '0x06', request_hex: '03 06 00 80 00 01 48 00', request_captured: true, response_hex: '03 06 00 80 00 01 48 00', duration_ms: 65.2, latency: { lock_wait_ms: 4.8, connect_ms: 0, frame_delay_ms: 10, request_ms: 50.4 }, error: null },
+              frame: { raw_hex: '03 06 00 80 00 01 48 00', frame_length: 8, direction: 'request', slave_id: 3, function_code: 6, function_name: 'Write Single Register', frame_kind: 'write_frame', address: 128, value: 1, crc_present: true, crc_low: 72, crc_high: 0, crc_received: 72, crc_expected: 72, crc_valid: true, errors: [], valid: true, summary: 'Write Single Register · slave 3 · addr 0080 · value 0001' },
+              response_frame: { raw_hex: '03 06 00 80 00 01 48 00', frame_length: 8, direction: 'response', slave_id: 3, function_code: 6, function_name: 'Write Single Register', frame_kind: 'write_frame', address: 128, value: 1, crc_present: true, crc_low: 72, crc_high: 0, crc_received: 72, crc_expected: 72, crc_valid: true, errors: [], valid: true, summary: 'Write Single Register · slave 3 · addr 0080 · value 0001' },
             },
             {
-              transaction: { timestamp: new Date().toISOString(), operation: 'read_holding', slave: 1, address: 10, count: 2, status: 'error', function_code: '0x83', request_hex: '01 83 02 C0 F1', duration_ms: 12.8, latency: { lock_wait_ms: 0.2, connect_ms: 0, frame_delay_ms: 0, request_ms: 12.6 }, error: 'ExceptionResponse: Illegal Data Address' },
-              frame: { raw_hex: '01 83 02 C0 F1', frame_length: 5, slave_id: 1, function_code: 131, base_function_code: 3, function_name: 'Read Holding Registers', frame_kind: 'exception_response', exception_code: 2, exception_name: 'Illegal Data Address', crc_present: true, crc_low: 192, crc_high: 241, crc_received: 61888, crc_expected: 61888, crc_valid: true, errors: [], valid: true, summary: 'Exception 02 (Illegal Data Address) from slave 1 for Read Holding Registers' },
+              transaction: { timestamp: new Date().toISOString(), operation: 'read_holding', slave: 1, address: 10, count: 2, status: 'error', function_code: '0x03', request_hex: '01 03 00 0A 00 01 A4 08', request_captured: true, response_hex: '01 83 02 C0 F1', duration_ms: 12.8, latency: { lock_wait_ms: 0.2, connect_ms: 0, frame_delay_ms: 0, request_ms: 12.6 }, error: 'ExceptionResponse: Illegal Data Address' },
+              frame: { raw_hex: '01 03 00 0A 00 01 A4 08', frame_length: 8, direction: 'request', slave_id: 1, function_code: 3, function_name: 'Read Holding Registers', frame_kind: 'read_request', address: 10, count: 1, crc_present: true, crc_low: 164, crc_high: 8, crc_received: 2212, crc_expected: 2212, crc_valid: true, errors: [], valid: true, summary: 'Read Holding Registers · slave 1 · addr 000A · count 1' },
+              response_frame: { raw_hex: '01 83 02 C0 F1', frame_length: 5, direction: 'response', slave_id: 1, function_code: 131, base_function_code: 3, function_name: 'Read Holding Registers', frame_kind: 'exception_response', exception_code: 2, exception_name: 'Illegal Data Address', crc_present: true, crc_low: 192, crc_high: 241, crc_received: 61888, crc_expected: 61888, crc_valid: true, errors: [], valid: true, summary: 'Exception 02 (Illegal Data Address) from slave 1 for Read Holding Registers' },
             },
           ],
         };
@@ -152,6 +157,7 @@
           slave_id: payload.slave_id || 1,
           test_reads: payload.test_reads !== false,
           entity_count: 3, tested: 3, passed: 3, failed: 0, skipped: 0, truncated: false, all_passed: true,
+          fingerprint: [], fingerprint_total: 0, fingerprint_matched: 0, fingerprint_all_matched: false,
           duration_ms: 214.6,
           entities: [
             { name: 'Voltage', address: 0, register_type: 'input', data_type: 'float32', word_count: 2, success: true, status: 'pass', raw_words: [17222, 26214], value: 230.4, scaled: false, decodings: { uint32: 1128529920, int32: 1128529920, float32: 230.4 } },
@@ -247,6 +253,15 @@
         MOCK_DATA.templates = MOCK_DATA.templates.filter(t => t.filename !== payload.filename);
         return { success: true };
       }
+      if (type === 'save_and_apply_template') {
+        // Designer one-step flow: save the draft, then reuse the apply logic.
+        const nameMatch = payload.content.match(/^name:\s*(.+)$/m);
+        const filename = payload.filename
+          || `${((nameMatch ? nameMatch[1] : 'custom_template') + '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'custom_template'}.yaml`;
+        handleMockCall('save_template', { filename, content: payload.content });
+        const applied = handleMockCall('apply_template', { ...payload, template_filename: filename });
+        return { ...applied, filename, template_id: filename.replace(/\.ya?ml$/, '') };
+      }
       if (type === 'apply_template') {
         const tpl = MOCK_DATA.templates.find(t => t.filename === payload.template_filename || t.id === payload.template_id);
         if (!tpl) throw new Error('Template not found');
@@ -313,8 +328,12 @@
         renderEntitiesTab();
         renderHubTab();
         renderDiagnosticsTab();
+        renderDesignerApplyTargets();
         if (document.getElementById('pane-inspector')?.classList.contains('active')) {
-          loadTrafficInspector(true);
+          // Prefer the live WebSocket stream; poll only as a fallback and
+          // never while the user paused the inspector.
+          ensureTrafficSubscription();
+          if (!_inspectorLive && !_inspectorPaused) loadTrafficInspector(true);
         }
       } catch(e) {
         console.error('[Modbus USB] Refresh failed:', e);
@@ -419,7 +438,12 @@
         pane.hidden = false;
         pane.classList.add('active');
       }
-      if (tabName === 'inspector') loadTrafficInspector();
+      if (tabName === 'inspector') {
+        loadTrafficInspector();
+        ensureTrafficSubscription();
+      } else {
+        teardownTrafficSubscription();
+      }
       if (tabName === 'designer') initDesignerTab();
     }
 

@@ -50,14 +50,8 @@ from .const import (
     REGISTER_TYPE_HOLDING,
     REGISTER_TYPE_INPUT,
 )
-from .decoding import as_float, decode_words
-from .decoding import normalize_enum as normalize_enum
-from .device_info import (
-    get_device_info as get_device_info,
-)
-from .device_info import (
-    get_entity_picture as get_entity_picture,
-)
+from .decoding import as_float, decode_words, normalize_enum
+from .device_info import get_device_info, get_entity_picture
 from .diagnostics import diagnostic_request_frame, modbus_crc16
 
 _LOGGER = logging.getLogger(__name__)

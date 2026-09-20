@@ -1,4 +1,5 @@
 """Config and options flow for Modbus USB Controller."""
+
 from __future__ import annotations
 
 import uuid
@@ -7,6 +8,7 @@ from typing import Any
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
+
 try:
     from homeassistant.config_entries import ConfigFlowResult
 except ImportError:
@@ -64,25 +66,28 @@ def _hub_schema(defaults: dict | None = None) -> vol.Schema:
     d = defaults or {}
     return vol.Schema(
         {
-            vol.Required(CONF_NAME, default=d.get(CONF_NAME, "Modbus USB Controller")): str,
-            vol.Required(CONF_PORT, default=d.get(CONF_PORT, DEFAULT_PORT)): str,
-            vol.Required(CONF_BAUDRATE, default=d.get(CONF_BAUDRATE, DEFAULT_BAUDRATE)): vol.In(
-                BAUDRATE_OPTIONS
-            ),
-            vol.Required(CONF_BYTESIZE, default=d.get(CONF_BYTESIZE, DEFAULT_BYTESIZE)): vol.In(
-                BYTESIZE_OPTIONS
-            ),
-            vol.Required(CONF_PARITY, default=d.get(CONF_PARITY, DEFAULT_PARITY)): vol.In(
-                list(PARITY_OPTIONS.keys())
-            ),
-            vol.Required(CONF_STOPBITS, default=d.get(CONF_STOPBITS, DEFAULT_STOPBITS)): vol.In(
-                STOPBITS_OPTIONS
-            ),
-            vol.Required(CONF_SLAVE_ID, default=d.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID)): vol.All(
-                vol.Coerce(int), vol.Range(min=1, max=247)
-            ),
             vol.Required(
-                CONF_SCAN_INTERVAL, default=d.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+                CONF_NAME, default=d.get(CONF_NAME, "Modbus USB Controller")
+            ): str,
+            vol.Required(CONF_PORT, default=d.get(CONF_PORT, DEFAULT_PORT)): str,
+            vol.Required(
+                CONF_BAUDRATE, default=d.get(CONF_BAUDRATE, DEFAULT_BAUDRATE)
+            ): vol.In(BAUDRATE_OPTIONS),
+            vol.Required(
+                CONF_BYTESIZE, default=d.get(CONF_BYTESIZE, DEFAULT_BYTESIZE)
+            ): vol.In(BYTESIZE_OPTIONS),
+            vol.Required(
+                CONF_PARITY, default=d.get(CONF_PARITY, DEFAULT_PARITY)
+            ): vol.In(list(PARITY_OPTIONS.keys())),
+            vol.Required(
+                CONF_STOPBITS, default=d.get(CONF_STOPBITS, DEFAULT_STOPBITS)
+            ): vol.In(STOPBITS_OPTIONS),
+            vol.Required(
+                CONF_SLAVE_ID, default=d.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID)
+            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=247)),
+            vol.Required(
+                CONF_SCAN_INTERVAL,
+                default=d.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
             ): vol.All(vol.Coerce(int), vol.Range(min=1, max=3600)),
         }
     )
@@ -93,10 +98,14 @@ class ModbusUsbConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
-            await self.async_set_unique_id(f"{user_input[CONF_PORT]}_{user_input[CONF_SLAVE_ID]}")
+            await self.async_set_unique_id(
+                f"{user_input[CONF_PORT]}_{user_input[CONF_SLAVE_ID]}"
+            )
             self._abort_if_unique_id_configured()
             return self.async_create_entry(
                 title=user_input[CONF_NAME],
@@ -114,11 +123,15 @@ class ModbusUsbConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 },
             )
 
-        return self.async_show_form(step_id="user", data_schema=_hub_schema(), errors=errors)
+        return self.async_show_form(
+            step_id="user", data_schema=_hub_schema(), errors=errors
+        )
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> "ModbusUsbOptionsFlow":
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> ModbusUsbOptionsFlow:
         # Do NOT pass/store config_entry ourselves. Since Home Assistant
         # 2025.12, OptionsFlow.config_entry is a read-only property that
         # the frontend/flow manager sets automatically; manually assigning
@@ -144,20 +157,26 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
         return self.async_create_entry(title="", data=new_options)
 
     # ---------- Main menu ----------
-    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         return self.async_show_menu(
             step_id="init",
             menu_options=["settings", "add_entity", "manage_entities"],
         )
 
     # ---------- Global settings (scan interval) ----------
-    async def async_step_settings(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_settings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         if user_input is not None:
             new_options = dict(self.config_entry.options)
             new_options[CONF_SCAN_INTERVAL] = user_input[CONF_SCAN_INTERVAL]
             return self.async_create_entry(title="", data=new_options)
 
-        current = self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        current = self.config_entry.options.get(
+            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+        )
         schema = vol.Schema(
             {
                 vol.Required(CONF_SCAN_INTERVAL, default=current): vol.All(
@@ -168,7 +187,9 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(step_id="settings", data_schema=schema)
 
     # ---------- Add entity: choose type ----------
-    async def async_step_add_entity(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_add_entity(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         if user_input is not None:
             self._pending_entity_type = user_input[CONF_ENTITY_TYPE]
             self._editing_id = None
@@ -203,7 +224,9 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
             )
 
         choices = {
-            e[CONF_ENTITY_ID]: f"{e[CONF_NAME]} ({e[CONF_ENTITY_TYPE]}, addr {e[CONF_ADDRESS]})"
+            e[
+                CONF_ENTITY_ID
+            ]: f"{e[CONF_NAME]} ({e[CONF_ENTITY_TYPE]}, addr {e[CONF_ADDRESS]})"
             for e in entities
         }
 
@@ -234,11 +257,14 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(step_id="manage_entities", data_schema=schema)
 
     # ---------- Sensor add/edit form ----------
-    async def async_step_edit_sensor(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_edit_sensor(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         existing = None
         if self._editing_id:
             existing = next(
-                (e for e in self._entities() if e[CONF_ENTITY_ID] == self._editing_id), None
+                (e for e in self._entities() if e[CONF_ENTITY_ID] == self._editing_id),
+                None,
             )
         d = existing or {}
 
@@ -261,7 +287,8 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
             }
             if self._editing_id:
                 entities = [
-                    new_entry if e[CONF_ENTITY_ID] == self._editing_id else e for e in entities
+                    new_entry if e[CONF_ENTITY_ID] == self._editing_id else e
+                    for e in entities
                 ]
             else:
                 entities.append(new_entry)
@@ -271,16 +298,22 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
             {
                 vol.Required(CONF_NAME, default=d.get(CONF_NAME, "")): str,
                 vol.Required(
-                    CONF_REGISTER_TYPE, default=d.get(CONF_REGISTER_TYPE, REGISTER_TYPE_HOLDING)
+                    CONF_REGISTER_TYPE,
+                    default=d.get(CONF_REGISTER_TYPE, REGISTER_TYPE_HOLDING),
                 ): vol.In(REGISTER_TYPES_SENSOR),
                 vol.Required(CONF_ADDRESS, default=d.get(CONF_ADDRESS, 0)): vol.All(
                     vol.Coerce(int), vol.Range(min=0, max=65535)
                 ),
-                vol.Required(CONF_DATA_TYPE, default=d.get(CONF_DATA_TYPE, "uint16")): vol.In(
-                    DATA_TYPES
+                vol.Required(
+                    CONF_DATA_TYPE, default=d.get(CONF_DATA_TYPE, "uint16")
+                ): vol.In(DATA_TYPES),
+                vol.Optional(CONF_SCALE, default=d.get(CONF_SCALE, 1)): vol.Coerce(
+                    float
                 ),
-                vol.Optional(CONF_SCALE, default=d.get(CONF_SCALE, 1)): vol.Coerce(float),
-                vol.Optional(CONF_UNIT_OF_MEASUREMENT, default=d.get(CONF_UNIT_OF_MEASUREMENT, "")): str,
+                vol.Optional(
+                    CONF_UNIT_OF_MEASUREMENT,
+                    default=d.get(CONF_UNIT_OF_MEASUREMENT, ""),
+                ): str,
                 vol.Optional(
                     CONF_DEVICE_CLASS, default=d.get(CONF_DEVICE_CLASS) or "none"
                 ): vol.In(DEVICE_CLASS_OPTIONS),
@@ -292,11 +325,14 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(step_id="edit_sensor", data_schema=schema)
 
     # ---------- Switch add/edit form ----------
-    async def async_step_edit_switch(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+    async def async_step_edit_switch(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         existing = None
         if self._editing_id:
             existing = next(
-                (e for e in self._entities() if e[CONF_ENTITY_ID] == self._editing_id), None
+                (e for e in self._entities() if e[CONF_ENTITY_ID] == self._editing_id),
+                None,
             )
         d = existing or {}
 
@@ -313,7 +349,8 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
             }
             if self._editing_id:
                 entities = [
-                    new_entry if e[CONF_ENTITY_ID] == self._editing_id else e for e in entities
+                    new_entry if e[CONF_ENTITY_ID] == self._editing_id else e
+                    for e in entities
                 ]
             else:
                 entities.append(new_entry)
@@ -323,13 +360,18 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
             {
                 vol.Required(CONF_NAME, default=d.get(CONF_NAME, "")): str,
                 vol.Required(
-                    CONF_REGISTER_TYPE, default=d.get(CONF_REGISTER_TYPE, REGISTER_TYPE_COIL)
+                    CONF_REGISTER_TYPE,
+                    default=d.get(CONF_REGISTER_TYPE, REGISTER_TYPE_COIL),
                 ): vol.In(REGISTER_TYPES_SWITCH),
                 vol.Required(CONF_ADDRESS, default=d.get(CONF_ADDRESS, 0)): vol.All(
                     vol.Coerce(int), vol.Range(min=0, max=65535)
                 ),
-                vol.Optional(CONF_ON_VALUE, default=d.get(CONF_ON_VALUE, 1)): vol.Coerce(int),
-                vol.Optional(CONF_OFF_VALUE, default=d.get(CONF_OFF_VALUE, 0)): vol.Coerce(int),
+                vol.Optional(
+                    CONF_ON_VALUE, default=d.get(CONF_ON_VALUE, 1)
+                ): vol.Coerce(int),
+                vol.Optional(
+                    CONF_OFF_VALUE, default=d.get(CONF_OFF_VALUE, 0)
+                ): vol.Coerce(int),
             }
         )
         return self.async_show_form(step_id="edit_switch", data_schema=schema)
@@ -341,7 +383,8 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
         existing = None
         if self._editing_id:
             existing = next(
-                (e for e in self._entities() if e[CONF_ENTITY_ID] == self._editing_id), None
+                (e for e in self._entities() if e[CONF_ENTITY_ID] == self._editing_id),
+                None,
             )
         d = existing or {}
 
@@ -367,14 +410,24 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
 
         _BINARY_REGISTER_TYPES = [REGISTER_TYPE_COIL, REGISTER_TYPE_DISCRETE]
         _BINARY_DEVICE_CLASSES = [
-            "none", "motion", "door", "window", "smoke", "moisture",
-            "connectivity", "power", "plug", "battery", "occupancy",
+            "none",
+            "motion",
+            "door",
+            "window",
+            "smoke",
+            "moisture",
+            "connectivity",
+            "power",
+            "plug",
+            "battery",
+            "occupancy",
         ]
         schema = vol.Schema(
             {
                 vol.Required(CONF_NAME, default=d.get(CONF_NAME, "")): str,
                 vol.Required(
-                    CONF_REGISTER_TYPE, default=d.get(CONF_REGISTER_TYPE, REGISTER_TYPE_COIL)
+                    CONF_REGISTER_TYPE,
+                    default=d.get(CONF_REGISTER_TYPE, REGISTER_TYPE_COIL),
                 ): vol.In(_BINARY_REGISTER_TYPES),
                 vol.Required(CONF_ADDRESS, default=d.get(CONF_ADDRESS, 0)): vol.All(
                     vol.Coerce(int), vol.Range(min=0, max=65535)
@@ -393,7 +446,8 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
         existing = None
         if self._editing_id:
             existing = next(
-                (e for e in self._entities() if e[CONF_ENTITY_ID] == self._editing_id), None
+                (e for e in self._entities() if e[CONF_ENTITY_ID] == self._editing_id),
+                None,
             )
         d = existing or {}
 
@@ -426,17 +480,21 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
             {
                 vol.Required(CONF_NAME, default=d.get(CONF_NAME, "")): str,
                 vol.Required(
-                    CONF_REGISTER_TYPE, default=d.get(CONF_REGISTER_TYPE, REGISTER_TYPE_HOLDING)
+                    CONF_REGISTER_TYPE,
+                    default=d.get(CONF_REGISTER_TYPE, REGISTER_TYPE_HOLDING),
                 ): vol.In([REGISTER_TYPE_HOLDING]),
                 vol.Required(CONF_ADDRESS, default=d.get(CONF_ADDRESS, 0)): vol.All(
                     vol.Coerce(int), vol.Range(min=0, max=65535)
                 ),
-                vol.Required(CONF_DATA_TYPE, default=d.get(CONF_DATA_TYPE, "uint16")): vol.In(
-                    DATA_TYPES
+                vol.Required(
+                    CONF_DATA_TYPE, default=d.get(CONF_DATA_TYPE, "uint16")
+                ): vol.In(DATA_TYPES),
+                vol.Optional(CONF_SCALE, default=d.get(CONF_SCALE, 1)): vol.Coerce(
+                    float
                 ),
-                vol.Optional(CONF_SCALE, default=d.get(CONF_SCALE, 1)): vol.Coerce(float),
                 vol.Optional(
-                    CONF_UNIT_OF_MEASUREMENT, default=d.get(CONF_UNIT_OF_MEASUREMENT, "")
+                    CONF_UNIT_OF_MEASUREMENT,
+                    default=d.get(CONF_UNIT_OF_MEASUREMENT, ""),
                 ): str,
                 vol.Optional(
                     CONF_MIN_VALUE, default=d.get(CONF_MIN_VALUE, 0)

@@ -1,39 +1,35 @@
 """Data update coordinator for the Modbus USB Controller integration."""
+
 from __future__ import annotations
 
 import logging
 import struct
 from collections import deque
-from enum import Enum
 from datetime import datetime, timedelta
 from threading import Lock
 from time import sleep
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
+from .boards import select_block_reader
+from .boards.r413e16 import R413E16_STATE_ON_VALUES, is_r413e16_switch_config
+from .bus import call_modbus_on_client
 from .const import (
     CONF_ADDRESS,
     CONF_ASSUMED_STATE,
     CONF_BAUDRATE,
     CONF_BYTESIZE,
     CONF_DATA_TYPE,
-    CONF_DEVICES,
-    CONF_DEVICE_CONTROLS,
     CONF_DEVICE_ID,
+    CONF_DEVICES,
+    CONF_ENABLED,
     CONF_ENTITIES,
     CONF_ENTITY_ID,
     CONF_ENTITY_TYPE,
-    CONF_ENABLED,
-    CONF_IMAGE,
-    CONF_MANUFACTURER,
-    CONF_MODEL,
-    CONF_M0_SHORT,
     CONF_NAME,
     CONF_PARITY,
     CONF_PORT,
@@ -41,11 +37,7 @@ from .const import (
     CONF_SCALE,
     CONF_SLAVE_ID,
     CONF_STOPBITS,
-    DATA_TYPE_FLOAT32,
-    DATA_TYPE_INT16,
-    DATA_TYPE_INT32,
     DATA_TYPE_UINT16,
-    DATA_TYPE_UINT32,
     DATA_TYPE_WORD_COUNT,
     DIAG_CONSECUTIVE_FAILURES,
     DIAG_FAILED_READS,
@@ -58,109 +50,17 @@ from .const import (
     REGISTER_TYPE_HOLDING,
     REGISTER_TYPE_INPUT,
 )
+from .decoding import as_float, decode_words
+from .decoding import normalize_enum as normalize_enum
+from .device_info import (
+    get_device_info as get_device_info,
+)
+from .device_info import (
+    get_entity_picture as get_entity_picture,
+)
+from .diagnostics import diagnostic_request_frame, modbus_crc16
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def normalize_enum(value: Any, enum_cls: type[Enum], entity_name: str) -> Any:
-    """Return a valid enum member, treating "none"/empty/invalid values as None.
-
-    The sidebar and options flows store the literal string ``"none"`` for
-    "no class selected". Home Assistant rejects unknown device/state class
-    strings while adding the entity, which previously removed the whole
-    platform from setup, so unsupported values fall back to None with a
-    warning instead of breaking every entity of that platform.
-    """
-    if value in (None, "", "none"):
-        return None
-    try:
-        return enum_cls(value)
-    except ValueError:
-        _LOGGER.warning(
-            "Unsupported %s value %r for entity %s; using no class instead",
-            enum_cls.__name__, value, entity_name,
-        )
-        return None
-
-
-def as_float(value: Any, default: float) -> float:
-    """Return ``value`` as float, falling back to ``default`` for None/"" /garbage.
-
-    Sidebar edits can persist explicit ``null`` values for optional numeric
-    settings; ``float(None)`` raised TypeError and removed the platform.
-    """
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
-
-
-def _decode_words(words: list[int], data_type: str) -> float | int:
-    """Decode a list of 16-bit register words into a number."""
-    if data_type == DATA_TYPE_UINT16:
-        return words[0]
-    if data_type == DATA_TYPE_INT16:
-        val = words[0]
-        return val - 0x10000 if val >= 0x8000 else val
-    # 32-bit types: big-endian word order (high word first)
-    raw = struct.pack(">HH", words[0], words[1])
-    if data_type == DATA_TYPE_UINT32:
-        return struct.unpack(">I", raw)[0]
-    if data_type == DATA_TYPE_INT32:
-        return struct.unpack(">i", raw)[0]
-    if data_type == DATA_TYPE_FLOAT32:
-        return struct.unpack(">f", raw)[0]
-    return words[0]
-
-
-def is_r413e16_switch_config(entity: dict[str, Any]) -> bool:
-    """Return whether a config uses the tested R413E16 register map.
-
-    Older panel versions could save numeric settings as JSON strings. Normalize
-    them here so existing configured boards do not need to be recreated.
-    """
-    try:
-        return (
-            entity.get(CONF_REGISTER_TYPE) == REGISTER_TYPE_HOLDING
-            and int(entity.get("on_value", 0)) == 0x0100
-            and int(entity.get("off_value", 0)) == 0x0200
-        )
-    except (TypeError, ValueError):
-        return False
-
-
-def get_device_info(entry: ConfigEntry, ent: dict) -> DeviceInfo:
-    """Return DeviceInfo for an entity, linking it to a separated device or the hub."""
-    device_id = ent.get(CONF_DEVICE_ID)
-    if device_id:
-        devices = entry.options.get(CONF_DEVICES, [])
-        device = next((d for d in devices if str(d.get("id")) == str(device_id)), None)
-        if device:
-            return DeviceInfo(
-                identifiers={(DOMAIN, f"{entry.entry_id}_{device_id}")},
-                name=device.get(CONF_NAME, f"Device {device_id}"),
-                manufacturer=device.get(CONF_MANUFACTURER, "Modbus USB"),
-                model=device.get(CONF_MODEL, "Modbus Device"),
-                via_device=(DOMAIN, entry.entry_id),
-            )
-    return DeviceInfo(
-        identifiers={(DOMAIN, entry.entry_id)},
-        name=entry.title,
-        manufacturer="Modbus USB",
-        model="Modbus Serial Hub",
-    )
-
-
-def get_entity_picture(entry: ConfigEntry, ent: dict) -> str | None:
-    """Return a device/template image URL for HA entity_picture, if set."""
-    picture = ent.get(CONF_IMAGE)
-    device_id = ent.get(CONF_DEVICE_ID)
-    if device_id:
-        devices = entry.options.get(CONF_DEVICES, [])
-        device = next((d for d in devices if str(d.get("id")) == str(device_id)), None)
-        if device and device.get(CONF_IMAGE):
-            picture = device.get(CONF_IMAGE)
-    return picture or None
 
 
 class ModbusUsbCoordinator(DataUpdateCoordinator):
@@ -248,9 +148,8 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         """Ask HA to write only the R413E16 channels changed by this command."""
         for switch_entity in tuple(self._switch_entities):
             config = getattr(switch_entity, "_ent", {})
-            if (
-                str(config.get(CONF_DEVICE_ID)) != str(device_id)
-                or config.get(CONF_ASSUMED_STATE)
+            if str(config.get(CONF_DEVICE_ID)) != str(device_id) or config.get(
+                CONF_ASSUMED_STATE
             ):
                 continue
             try:
@@ -287,7 +186,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 # all configured registers so HA reflects the board's actual
                 # state, including every channel controlled by a group switch.
                 await self.async_request_refresh()
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:
                 # The next scheduled poll will retry. Never leave an unhandled
                 # task exception when a device is disconnected during reload.
                 _LOGGER.debug("Post-command R413E16 refresh failed: %s", err)
@@ -352,10 +251,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             # cache. This guarantees that HA entities receive the new state
             # immediately after an on-demand channel read or group command.
             updated_data = dict(self.data or {})
-            updated_data.update({
-                entity_id: 1 if state else 0
-                for entity_id, state in updates.items()
-            })
+            updated_data.update(
+                {entity_id: 1 if state else 0 for entity_id, state in updates.items()}
+            )
             self.async_set_updated_data(updated_data)
             self._publish_r413e16_channel_entities(device_id, channel_states)
             self._schedule_r413e16_full_refresh()
@@ -407,35 +305,20 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             self.serial_config = config
             return self._connect_with_retries()
 
-    @staticmethod
-    def _call_modbus_on_client(
-        client: Any, method_name: str, *args: Any, slave: int, **kwargs: Any
-    ) -> Any:
-        """Call Pymodbus using its current or legacy unit-ID keyword.
-
-        Pymodbus 3.8+ renamed ``slave`` to ``device_id``.  Supporting both
-        keeps the integration working with the manifest's older supported
-        versions as well as current Home Assistant installations.
-        """
-        method = getattr(client, method_name)
-        try:
-            return method(*args, device_id=slave, **kwargs)
-        except TypeError as err:
-            if "device_id" not in str(err):
-                raise
-            return method(*args, slave=slave, **kwargs)
-
     def _call_modbus(
         self, method_name: str, *args: Any, slave: int, **kwargs: Any
     ) -> Any:
         """Call a method on this hub's configured serial client."""
-        return self._call_modbus_on_client(
+        return call_modbus_on_client(
             self.client, method_name, *args, slave=slave, **kwargs
         )
 
     def scan_bus(
-        self, baudrates: list[int], parities: list[str] | None = None,
-        start_slave: int = 1, end_slave: int = 20,
+        self,
+        baudrates: list[int],
+        parities: list[str] | None = None,
+        start_slave: int = 1,
+        end_slave: int = 20,
         templates: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Probe a bounded RS-485 range and report devices that answer.
@@ -452,7 +335,10 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         if not valid_bauds:
             raise ValueError("Select at least one baud rate to scan")
         valid_parities = sorted(
-            {str(parity).upper() for parity in (parities or [self.serial_config.get(CONF_PARITY, "N")])}
+            {
+                str(parity).upper()
+                for parity in (parities or [self.serial_config.get(CONF_PARITY, "N")])
+            }
         )
         if not set(valid_parities).issubset({"N", "E", "O"}):
             raise ValueError("Parity must be N (none), E (even), or O (odd)")
@@ -487,30 +373,45 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                                 probed += 1
                                 self.scan_progress["completed"] = probed
                                 try:
-                                    result = self._call_modbus_on_client(
-                                        probe, "read_holding_registers", 0,
-                                        count=1, slave=slave,
+                                    result = call_modbus_on_client(
+                                        probe,
+                                        "read_holding_registers",
+                                        0,
+                                        count=1,
+                                        slave=slave,
                                     )
                                     message = str(result)
-                                    no_response = "no response received" in message.lower()
+                                    no_response = (
+                                        "no response received" in message.lower()
+                                    )
                                     if not no_response:
-                                        response_kind = "register response" if not result.isError() else "exception response"
+                                        response_kind = (
+                                            "register response"
+                                            if not result.isError()
+                                            else "exception response"
+                                        )
                                         suggestions = self._match_templates(
                                             probe, slave, templates or []
                                         )
-                                        found.append({
-                                            "slave_id": slave,
-                                            "baudrate": baudrate,
-                                            "parity": parity,
-                                            "response": response_kind,
-                                            "suggestions": suggestions,
-                                        })
+                                        found.append(
+                                            {
+                                                "slave_id": slave,
+                                                "baudrate": baudrate,
+                                                "parity": parity,
+                                                "response": response_kind,
+                                                "suggestions": suggestions,
+                                            }
+                                        )
                                         self.scan_progress["found"] = len(found)
                                         self._record_transaction(
-                                            "scan_found", slave=slave, address=0,
+                                            "scan_found",
+                                            slave=slave,
+                                            address=0,
                                             result=f"{baudrate} baud, {parity} parity — {response_kind}",
                                         )
-                                except Exception:  # A timeout is expected for unused IDs.
+                                except (
+                                    Exception
+                                ):  # A timeout is expected for unused IDs.
                                     continue
                         finally:
                             probe.close()
@@ -518,7 +419,12 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 self.client.connect()
                 self.scan_progress["active"] = False
                 self.scan_progress["completed"] = probed
-        return {"found": found, "probed": probed, "start_slave": start_slave, "end_slave": end_slave}
+        return {
+            "found": found,
+            "probed": probed,
+            "start_slave": start_slave,
+            "end_slave": end_slave,
+        }
 
     def _match_templates(
         self, client: Any, slave: int, templates: list[dict[str, Any]]
@@ -536,21 +442,37 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                     data_type = probe.get(CONF_DATA_TYPE, DATA_TYPE_UINT16)
                     count = DATA_TYPE_WORD_COUNT.get(data_type, 1)
                     if register_type == REGISTER_TYPE_HOLDING:
-                        result = self._call_modbus_on_client(
-                            client, "read_holding_registers", address, count=count, slave=slave
+                        result = call_modbus_on_client(
+                            client,
+                            "read_holding_registers",
+                            address,
+                            count=count,
+                            slave=slave,
                         )
                     elif register_type == REGISTER_TYPE_INPUT:
-                        result = self._call_modbus_on_client(
-                            client, "read_input_registers", address, count=count, slave=slave
+                        result = call_modbus_on_client(
+                            client,
+                            "read_input_registers",
+                            address,
+                            count=count,
+                            slave=slave,
                         )
                     else:
-                        raise ValueError("Fingerprint register type must be holding or input")
+                        raise ValueError(
+                            "Fingerprint register type must be holding or input"
+                        )
                     if result.isError():
                         raise UpdateFailed(str(result))
-                    value = _decode_words(result.registers, data_type)
-                    if not float(probe["min_value"]) <= value <= float(probe["max_value"]):
+                    value = decode_words(result.registers, data_type)
+                    if (
+                        not float(probe["min_value"])
+                        <= value
+                        <= float(probe["max_value"])
+                    ):
                         raise ValueError("Value outside expected range")
-                matches.append(template.get("name", template.get("id", "Unknown template")))
+                matches.append(
+                    template.get("name", template.get("id", "Unknown template"))
+                )
             except Exception:  # A mismatch is normal; do not present a weak match.
                 continue
         return matches
@@ -571,7 +493,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
     ) -> None:
         """Keep a rolling, UI-safe record of every RS-485 operation and health."""
         timestamp = datetime.now().astimezone().isoformat()
-        detected_function, detected_request = self._diagnostic_request_frame(
+        detected_function, detected_request = diagnostic_request_frame(
             operation, slave, address, count, value
         )
         item: dict[str, Any] = {
@@ -604,17 +526,27 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             self.diag[DIAG_LAST_ERROR] = str(error)
             _LOGGER.warning(
                 "RS-485 %s failed: slave=%s address=%s error=%s",
-                operation, slave, address, error,
+                operation,
+                slave,
+                address,
+                error,
             )
         else:
             self.diag[DIAG_CONSECUTIVE_FAILURES] = 0
             self.diag[DIAG_LAST_SUCCESS] = timestamp
             _LOGGER.debug(
                 "RS-485 %s: slave=%s address=%s value=%s result=%s duration=%.1fms",
-                operation, slave, address, value, result, duration_ms or 0,
+                operation,
+                slave,
+                address,
+                value,
+                result,
+                duration_ms or 0,
             )
 
-    def execute_manual_hex_write(self, frame_hex: str, generate_crc: bool = False) -> dict[str, Any]:
+    def execute_manual_hex_write(
+        self, frame_hex: str, generate_crc: bool = False
+    ) -> dict[str, Any]:
         """Execute one CRC-checked standard Modbus RTU write via the owned client.
 
         The Diagnostics page accepts complete RTU frames for documented writes,
@@ -623,26 +555,40 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         handling, and transaction audit trail.
         """
         compact = "".join(frame_hex.replace("0x", "").replace("0X", "").split())
-        if not compact or len(compact) % 2 or any(char not in "0123456789abcdefABCDEF" for char in compact):
-            raise ValueError("Paste hexadecimal bytes only, for example: 01 06 00 80 00 01 49 E0")
+        if (
+            not compact
+            or len(compact) % 2
+            or any(char not in "0123456789abcdefABCDEF" for char in compact)
+        ):
+            raise ValueError(
+                "Paste hexadecimal bytes only, for example: 01 06 00 80 00 01 49 E2"
+            )
         frame = bytes.fromhex(compact)
         if generate_crc:
-            if len(frame) >= 4 and self._modbus_crc16(frame[:-2]) == (frame[-2] | (frame[-1] << 8)):
+            if len(frame) >= 4 and modbus_crc16(frame[:-2]) == (
+                frame[-2] | (frame[-1] << 8)
+            ):
                 # A valid CRC is already present; keep the exact documented frame.
                 pass
             else:
-                crc = self._modbus_crc16(frame)
+                crc = modbus_crc16(frame)
                 frame += bytes((crc & 0xFF, crc >> 8))
         if len(frame) < 8:
-            raise ValueError("A complete Modbus RTU write frame must include slave, function, data, and two CRC bytes")
+            raise ValueError(
+                "A complete Modbus RTU write frame must include slave, function, data, and two CRC bytes"
+            )
         crc_expected = frame[-2] | (frame[-1] << 8)
-        crc_actual = self._modbus_crc16(frame[:-2])
+        crc_actual = modbus_crc16(frame[:-2])
         if crc_actual != crc_expected:
-            raise ValueError(f"CRC mismatch: frame has {crc_expected:04X}, expected {crc_actual:04X}")
+            raise ValueError(
+                f"CRC mismatch: frame has {crc_expected:04X}, expected {crc_actual:04X}"
+            )
 
         slave, function_code = frame[0], frame[1]
         if not 1 <= slave <= 247:
-            raise ValueError("Broadcast or invalid slave IDs are not allowed for dangerous manual writes")
+            raise ValueError(
+                "Broadcast or invalid slave IDs are not allowed for dangerous manual writes"
+            )
         payload = frame[:-2]
         address = (frame[2] << 8) | frame[3]
         count = 1
@@ -652,98 +598,102 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             with self._serial_lock:
                 self._ensure_connected()
                 if function_code == 0x05:
-                    if len(payload) != 6 or payload[4:] not in (b"\x00\x00", b"\xFF\x00"):
-                        raise ValueError("FC05 must contain exactly one coil value: FF00 (on) or 0000 (off)")
-                    value = payload[4:] == b"\xFF\x00"
-                    result = self._call_modbus("write_coil", address, value, slave=slave)
+                    if len(payload) != 6 or payload[4:] not in (
+                        b"\x00\x00",
+                        b"\xff\x00",
+                    ):
+                        raise ValueError(
+                            "FC05 must contain exactly one coil value: FF00 (on) or 0000 (off)"
+                        )
+                    value = payload[4:] == b"\xff\x00"
+                    result = self._call_modbus(
+                        "write_coil", address, value, slave=slave
+                    )
                 elif function_code == 0x06:
                     if len(payload) != 6:
-                        raise ValueError("FC06 must contain exactly one 16-bit holding-register value")
+                        raise ValueError(
+                            "FC06 must contain exactly one 16-bit holding-register value"
+                        )
                     value = (payload[4] << 8) | payload[5]
-                    result = self._call_modbus("write_register", address, value, slave=slave)
+                    result = self._call_modbus(
+                        "write_register", address, value, slave=slave
+                    )
                 elif function_code == 0x0F:
                     if len(payload) < 8:
                         raise ValueError("FC0F frame is incomplete")
                     count = (payload[4] << 8) | payload[5]
                     byte_count = payload[6]
-                    if not 1 <= count <= 1968 or byte_count != (count + 7) // 8 or len(payload) != 7 + byte_count:
-                        raise ValueError("FC0F count or byte count does not match the supplied coil data")
-                    value = [bool(payload[7 + index // 8] & (1 << (index % 8))) for index in range(count)]
-                    result = self._call_modbus("write_coils", address, value, slave=slave)
+                    if (
+                        not 1 <= count <= 1968
+                        or byte_count != (count + 7) // 8
+                        or len(payload) != 7 + byte_count
+                    ):
+                        raise ValueError(
+                            "FC0F count or byte count does not match the supplied coil data"
+                        )
+                    value = [
+                        bool(payload[7 + index // 8] & (1 << (index % 8)))
+                        for index in range(count)
+                    ]
+                    result = self._call_modbus(
+                        "write_coils", address, value, slave=slave
+                    )
                 elif function_code == 0x10:
                     if len(payload) < 9:
                         raise ValueError("FC10 frame is incomplete")
                     count = (payload[4] << 8) | payload[5]
                     byte_count = payload[6]
-                    if not 1 <= count <= 123 or byte_count != count * 2 or len(payload) != 7 + byte_count:
-                        raise ValueError("FC10 register count or byte count does not match the supplied data")
-                    value = [(payload[index] << 8) | payload[index + 1] for index in range(7, 7 + byte_count, 2)]
-                    result = self._call_modbus("write_registers", address, value, slave=slave)
+                    if (
+                        not 1 <= count <= 123
+                        or byte_count != count * 2
+                        or len(payload) != 7 + byte_count
+                    ):
+                        raise ValueError(
+                            "FC10 register count or byte count does not match the supplied data"
+                        )
+                    value = [
+                        (payload[index] << 8) | payload[index + 1]
+                        for index in range(7, 7 + byte_count, 2)
+                    ]
+                    result = self._call_modbus(
+                        "write_registers", address, value, slave=slave
+                    )
                 else:
-                    raise ValueError("Only documented write functions FC05, FC06, FC0F, and FC10 are accepted")
+                    raise ValueError(
+                        "Only documented write functions FC05, FC06, FC0F, and FC10 are accepted"
+                    )
                 if result.isError():
                     raise UpdateFailed(str(result))
             self._record_transaction(
-                "manual_hex_write", slave=slave, address=address, count=count,
-                value=value, result="accepted", duration_ms=(datetime.now() - started).total_seconds() * 1000,
+                "manual_hex_write",
+                slave=slave,
+                address=address,
+                count=count,
+                value=value,
+                result="accepted",
+                duration_ms=(datetime.now() - started).total_seconds() * 1000,
                 function_code=f"0x{function_code:02X}",
                 request_hex=" ".join(f"{byte:02X}" for byte in frame),
             )
-            return {"slave_id": slave, "function_code": f"0x{function_code:02X}", "address": address, "count": count}
+            return {
+                "slave_id": slave,
+                "function_code": f"0x{function_code:02X}",
+                "address": address,
+                "count": count,
+            }
         except Exception as err:
             self._record_transaction(
-                "manual_hex_write", slave=slave, address=address, count=count,
-                value=value, error=err, duration_ms=(datetime.now() - started).total_seconds() * 1000,
+                "manual_hex_write",
+                slave=slave,
+                address=address,
+                count=count,
+                value=value,
+                error=err,
+                duration_ms=(datetime.now() - started).total_seconds() * 1000,
                 function_code=f"0x{function_code:02X}",
                 request_hex=" ".join(f"{byte:02X}" for byte in frame),
             )
             raise
-
-    @staticmethod
-    def _modbus_crc16(payload: bytes) -> int:
-        """Return the standard Modbus RTU CRC16 for a request payload."""
-        crc = 0xFFFF
-        for byte in payload:
-            crc ^= byte
-            for _ in range(8):
-                crc = (crc >> 1) ^ 0xA001 if crc & 1 else crc >> 1
-        return crc
-
-    @staticmethod
-    def _diagnostic_request_frame(
-        operation: str, slave: int, address: int, count: int, value: Any
-    ) -> tuple[str | None, str | None]:
-        """Return a reconstructed request frame for the Diagnostics display.
-
-        Pymodbus does not make raw RTU request/response buffers portable across
-        its transports.  These bytes are therefore clearly labelled as a
-        reconstructed request; response bytes are never invented.
-        """
-        operations = {
-            "read_coil": 0x01,
-            "read_discrete": 0x02,
-            "read_holding": 0x03,
-            "read_input": 0x04,
-            "write_coil": 0x05,
-            "write_holding": 0x06,
-        }
-        function_code = operations.get(operation)
-        if function_code is None:
-            return None, None
-        if function_code in {0x01, 0x02, 0x03, 0x04}:
-            payload = bytes((slave, function_code, address >> 8, address & 0xFF, count >> 8, count & 0xFF))
-        elif function_code == 0x05:
-            coil_value = 0xFF00 if bool(value) else 0x0000
-            payload = bytes((slave, function_code, address >> 8, address & 0xFF, coil_value >> 8, coil_value & 0xFF))
-        else:
-            try:
-                register_value = int(value) & 0xFFFF
-            except (TypeError, ValueError):
-                return f"0x{function_code:02X}", None
-            payload = bytes((slave, function_code, address >> 8, address & 0xFF, register_value >> 8, register_value & 0xFF))
-        crc = ModbusUsbCoordinator._modbus_crc16(payload)
-        frame = payload + bytes((crc & 0xFF, crc >> 8))
-        return f"0x{function_code:02X}", " ".join(f"{byte:02X}" for byte in frame)
 
     def get_diagnostics(self) -> dict[str, Any]:
         """Return a serial-health snapshot and rolling RS-485 transaction log."""
@@ -784,7 +734,8 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             if device.get("id")
         }
         return [
-            entity for entity in entry.options.get(CONF_ENTITIES, [])
+            entity
+            for entity in entry.options.get(CONF_ENTITIES, [])
             if entity.get(CONF_DEVICE_ID) is None
             or enabled_devices.get(str(entity.get(CONF_DEVICE_ID)), True)
         ]
@@ -797,7 +748,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         return {
             str(d.get("id")): int(d.get(CONF_SLAVE_ID, self.slave_id))
             for d in devices
-            if d.get(CONF_ENABLED, True) and "id" in d and d.get(CONF_SLAVE_ID) is not None
+            if d.get(CONF_ENABLED, True)
+            and "id" in d
+            and d.get(CONF_SLAVE_ID) is not None
         }
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -809,8 +762,10 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             return await self.hass.async_add_executor_job(
                 self._read_all, entities, device_slave_map
             )
-        except Exception as err:  # noqa: BLE001
-            raise UpdateFailed(f"Error communicating with Modbus device: {err}") from err
+        except Exception as err:
+            raise UpdateFailed(
+                f"Error communicating with Modbus device: {err}"
+            ) from err
 
     def _read_all(
         self, entities: list[dict], device_slave_map: dict[str, int] | None = None
@@ -818,23 +773,20 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         device_slave_map = device_slave_map or {}
         data: dict[str, Any] = {}
         entry = self.hass.config_entries.async_get_entry(self.entry_id)
-        devices = {str(item.get("id")): item for item in (entry.options.get(CONF_DEVICES, []) if entry else [])}
+        devices = {
+            str(item.get("id")): item
+            for item in (entry.options.get(CONF_DEVICES, []) if entry else [])
+        }
         handled: set[str] = set()
         for device_id, device in devices.items():
-            controls = device.get(CONF_DEVICE_CONTROLS, {})
-            is_r4d6f20 = controls.get("protocol") == "eletechsup_r4d6f20" or "r4d6f20" in str(device.get(CONF_MODEL, "")).lower()
-            members = [item for item in entities if str(item.get(CONF_DEVICE_ID)) == device_id]
-            if not is_r4d6f20 or not members:
+            reader = select_block_reader(device)
+            members = [
+                item for item in entities if str(item.get(CONF_DEVICE_ID)) == device_id
+            ]
+            if reader is None or not members:
                 continue
-            if device.get(CONF_M0_SHORT, False):
-                block_data, block_handled = self._read_r4d6f20_command2_blocks(
-                    members, int(device.get(CONF_SLAVE_ID, self.slave_id))
-                )
-                data.update(block_data)
-                handled.update(block_handled)
-                continue
-            block_data, block_handled = self._read_r4d6f20_blocks(
-                members, int(device.get(CONF_SLAVE_ID, self.slave_id))
+            block_data, block_handled = reader(
+                self, members, int(device.get(CONF_SLAVE_ID, self.slave_id))
             )
             data.update(block_data)
             # Only entities actually covered by a block read may skip the
@@ -860,93 +812,18 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 # Tested R413E16 boards report 1 for ON and 0 for OFF from
                 # holding registers 1–16. Keep the fallback synchronized with
                 # this real feedback so manual/external changes show in HA.
-                if (
-                    ent.get(CONF_ENTITY_TYPE) == "switch"
-                    and is_r413e16_switch_config(ent)
+                if ent.get(CONF_ENTITY_TYPE) == "switch" and is_r413e16_switch_config(
+                    ent
                 ):
-                    self._command_states[ent_id] = value in (1, 0x0100)
-            except Exception as err:  # noqa: BLE001
+                    self._command_states[ent_id] = value in R413E16_STATE_ON_VALUES
+            except Exception as err:
                 _LOGGER.warning("Failed reading %s: %s", ent.get("name", ent_id), err)
                 data[ent_id] = None
         return data
 
-    def _read_r4d6f20_blocks(
-        self, entities: list[dict], slave: int
-    ) -> tuple[dict[str, Any], set[str]]:
-        """Read the standard R4D6F20 Command 1 ranges in three RTU requests.
-
-        Returns the decoded values plus the entity IDs covered by a block, so
-        the caller only skips per-entity polling for entities that were read.
-        """
-        data: dict[str, Any] = {}
-        handled: set[str] = set()
-        for start, count in ((0, 20), (128, 2), (160, 2)):
-            members = [item for item in entities if item.get(CONF_REGISTER_TYPE) == REGISTER_TYPE_HOLDING and item.get(CONF_DATA_TYPE, DATA_TYPE_UINT16) == DATA_TYPE_UINT16 and start <= int(item.get(CONF_ADDRESS, -1)) < start + count]
-            if not members:
-                continue
-            handled.update(item["id"] for item in members)
-            started = datetime.now()
-            try:
-                with self._serial_lock:
-                    self._ensure_connected()
-                    result = self._call_modbus("read_holding_registers", start, count=count, slave=slave)
-                    if result.isError():
-                        raise UpdateFailed(str(result))
-                for item in members:
-                    value = result.registers[int(item[CONF_ADDRESS]) - start]
-                    scale = as_float(item.get(CONF_SCALE), 1)
-                    data[item["id"]] = value if scale == 1 else value * scale
-                self._record_transaction("read_holding", slave=slave, address=start, count=count, result="block", duration_ms=(datetime.now() - started).total_seconds() * 1000)
-            except Exception as err:  # noqa: BLE001
-                for item in members:
-                    data[item["id"]] = None
-                self._record_transaction("read_holding", slave=slave, address=start, count=count, error=err, duration_ms=(datetime.now() - started).total_seconds() * 1000)
-        return data, handled
-
-    def _read_r4d6f20_command2_blocks(
-        self, entities: list[dict], slave: int
-    ) -> tuple[dict[str, Any], set[str]]:
-        """Read documented R4D6F20 Command 2 ranges in three RTU requests.
-
-        Returns the decoded values plus the entity IDs covered by a block so
-        entities outside the Command 2 maps keep their individual polling.
-        """
-        data: dict[str, Any] = {}
-        handled: set[str] = set()
-        ranges = (
-            (REGISTER_TYPE_COIL, "read_coils", 0, 20),
-            (REGISTER_TYPE_DISCRETE, "read_discrete_inputs", 0, 2),
-            (REGISTER_TYPE_INPUT, "read_input_registers", 0, 2),
-        )
-        for register_type, method, start, count in ranges:
-            members = [
-                item for item in entities
-                if item.get(CONF_REGISTER_TYPE) == register_type
-                and start <= int(item.get(CONF_ADDRESS, -1)) < start + count
-            ]
-            if not members:
-                continue
-            handled.update(item["id"] for item in members)
-            started = datetime.now()
-            try:
-                with self._serial_lock:
-                    self._ensure_connected()
-                    result = self._call_modbus(method, start, count=count, slave=slave)
-                    if result.isError():
-                        raise UpdateFailed(str(result))
-                for item in members:
-                    index = int(item[CONF_ADDRESS]) - start
-                    value = bool(result.bits[index]) if register_type in (REGISTER_TYPE_COIL, REGISTER_TYPE_DISCRETE) else result.registers[index]
-                    scale = as_float(item.get(CONF_SCALE), 1)
-                    data[item["id"]] = value if scale == 1 else value * scale
-                self._record_transaction(f"read_{register_type}", slave=slave, address=start, count=count, result="block", duration_ms=(datetime.now() - started).total_seconds() * 1000)
-            except Exception as err:  # noqa: BLE001
-                for item in members:
-                    data[item["id"]] = None
-                self._record_transaction(f"read_{register_type}", slave=slave, address=start, count=count, error=err, duration_ms=(datetime.now() - started).total_seconds() * 1000)
-        return data, handled
-
-    def _read_one(self, ent: dict, device_slave_map: dict[str, int] | None = None) -> Any:
+    def _read_one(
+        self, ent: dict, device_slave_map: dict[str, int] | None = None
+    ) -> Any:
         register_type = ent[CONF_REGISTER_TYPE]
         address = ent[CONF_ADDRESS]
 
@@ -983,28 +860,42 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                     count = DATA_TYPE_WORD_COUNT.get(data_type, 1)
                     if register_type == REGISTER_TYPE_HOLDING:
                         result = self._call_modbus(
-                            "read_holding_registers", address, count=count, slave=target_slave
+                            "read_holding_registers",
+                            address,
+                            count=count,
+                            slave=target_slave,
                         )
                     elif register_type == REGISTER_TYPE_INPUT:
                         result = self._call_modbus(
-                            "read_input_registers", address, count=count, slave=target_slave
+                            "read_input_registers",
+                            address,
+                            count=count,
+                            slave=target_slave,
                         )
                     else:
                         raise UpdateFailed(f"Unknown register type: {register_type}")
                     if result.isError():
                         raise UpdateFailed(str(result))
-                    value = _decode_words(result.registers, data_type)
+                    value = decode_words(result.registers, data_type)
                     scale = as_float(ent.get(CONF_SCALE), 1)
                     if scale != 1:
                         value = value * scale
             self._record_transaction(
-                operation, slave=target_slave, address=address, count=count, result=value,
+                operation,
+                slave=target_slave,
+                address=address,
+                count=count,
+                result=value,
                 duration_ms=(datetime.now() - started).total_seconds() * 1000,
             )
             return value
         except Exception as err:
             self._record_transaction(
-                operation, slave=target_slave, address=address, count=count, error=err,
+                operation,
+                slave=target_slave,
+                address=address,
+                count=count,
+                error=err,
                 duration_ms=(datetime.now() - started).total_seconds() * 1000,
             )
             raise
@@ -1022,17 +913,33 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         try:
             with self._serial_lock:
                 self._ensure_connected()
-                result = self._call_modbus("write_coil", address, value, slave=target_slave)
+                result = self._call_modbus(
+                    "write_coil", address, value, slave=target_slave
+                )
                 if result.isError():
                     raise UpdateFailed(str(result))
-            self._record_transaction("write_coil", slave=target_slave, address=address, value=value,
-                                     result="accepted", duration_ms=(datetime.now() - started).total_seconds() * 1000)
+            self._record_transaction(
+                "write_coil",
+                slave=target_slave,
+                address=address,
+                value=value,
+                result="accepted",
+                duration_ms=(datetime.now() - started).total_seconds() * 1000,
+            )
         except Exception as err:
-            self._record_transaction("write_coil", slave=target_slave, address=address, value=value, error=err,
-                                     duration_ms=(datetime.now() - started).total_seconds() * 1000)
+            self._record_transaction(
+                "write_coil",
+                slave=target_slave,
+                address=address,
+                value=value,
+                error=err,
+                duration_ms=(datetime.now() - started).total_seconds() * 1000,
+            )
             raise
 
-    def write_register(self, address: int, value: int, slave: int | None = None) -> None:
+    def write_register(
+        self, address: int, value: int, slave: int | None = None
+    ) -> None:
         """Write a single holding register (used by switches modeled as registers)."""
         target_slave = int(slave if slave is not None else self.slave_id)
         started = datetime.now()
@@ -1044,11 +951,23 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 )
                 if result.isError():
                     raise UpdateFailed(str(result))
-            self._record_transaction("write_holding", slave=target_slave, address=address, value=value,
-                                     result="accepted", duration_ms=(datetime.now() - started).total_seconds() * 1000)
+            self._record_transaction(
+                "write_holding",
+                slave=target_slave,
+                address=address,
+                value=value,
+                result="accepted",
+                duration_ms=(datetime.now() - started).total_seconds() * 1000,
+            )
         except Exception as err:
-            self._record_transaction("write_holding", slave=target_slave, address=address, value=value, error=err,
-                                     duration_ms=(datetime.now() - started).total_seconds() * 1000)
+            self._record_transaction(
+                "write_holding",
+                slave=target_slave,
+                address=address,
+                value=value,
+                error=err,
+                duration_ms=(datetime.now() - started).total_seconds() * 1000,
+            )
             raise
 
     def write_registers_32bit(
@@ -1072,28 +991,41 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 )
                 if result.isError():
                     raise UpdateFailed(str(result))
-            self._record_transaction("write_holding_32bit", slave=target_slave, address=address,
-                                     count=2, value=value, result="accepted",
-                                     duration_ms=(datetime.now() - started).total_seconds() * 1000)
+            self._record_transaction(
+                "write_holding_32bit",
+                slave=target_slave,
+                address=address,
+                count=2,
+                value=value,
+                result="accepted",
+                duration_ms=(datetime.now() - started).total_seconds() * 1000,
+            )
         except Exception as err:
-            self._record_transaction("write_holding_32bit", slave=target_slave, address=address,
-                                     count=2, value=value, error=err,
-                                     duration_ms=(datetime.now() - started).total_seconds() * 1000)
+            self._record_transaction(
+                "write_holding_32bit",
+                slave=target_slave,
+                address=address,
+                count=2,
+                value=value,
+                error=err,
+                duration_ms=(datetime.now() - started).total_seconds() * 1000,
+            )
             raise
 
     def read_register_raw(
         self, address: int, register_type: str, data_type: str, slave: int | None = None
     ) -> Any:
         """Perform a one-shot read of a register for the diagnostics/service call."""
-        return self._read_one({
-            CONF_REGISTER_TYPE: register_type,
-            CONF_ADDRESS: address,
-            CONF_DATA_TYPE: data_type,
-            CONF_SLAVE_ID: slave if slave is not None else self.slave_id,
-        })
+        return self._read_one(
+            {
+                CONF_REGISTER_TYPE: register_type,
+                CONF_ADDRESS: address,
+                CONF_DATA_TYPE: data_type,
+                CONF_SLAVE_ID: slave if slave is not None else self.slave_id,
+            }
+        )
 
 
 # Changelog:
 # 2026-09-08 — Support both Pymodbus device_id and legacy slave keywords.
 # Date modified: 2026-09-08
-

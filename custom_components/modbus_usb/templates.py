@@ -3,6 +3,7 @@
 Loads, saves, and parses per-device YAML template files.
 Templates are stored in `<config_dir>/modbus_usb_templates/*.yaml`.
 """
+
 from __future__ import annotations
 
 import logging
@@ -32,7 +33,9 @@ def ensure_templates_dir(hass: HomeAssistant) -> str:
             os.makedirs(user_dir, exist_ok=True)
             _LOGGER.info("Created Modbus USB templates directory at %s", user_dir)
         except Exception as err:
-            _LOGGER.warning("Could not create templates directory %s: %s", user_dir, err)
+            _LOGGER.warning(
+                "Could not create templates directory %s: %s", user_dir, err
+            )
             return user_dir
 
     return user_dir
@@ -43,7 +46,7 @@ def _parse_template_file(
 ) -> dict[str, Any] | None:
     """Parse a single YAML template file."""
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, encoding="utf-8") as f:
             raw_content = f.read()
         data = yaml.safe_load(raw_content) or {}
         if not isinstance(data, dict):
@@ -58,7 +61,9 @@ def _parse_template_file(
             "manufacturer": data.get("manufacturer", "Generic"),
             "model": data.get("model", "Modbus Device"),
             "tested": bool(data.get("tested", False)),
-            "status": data.get("status", "tested" if data.get("tested", False) else "untested"),
+            "status": data.get(
+                "status", "tested" if data.get("tested", False) else "untested"
+            ),
             "default_slave_id": int(data.get("default_slave_id", 1)),
             "m0_short": bool(data.get("m0_short", False)),
             "description": data.get("description", ""),
@@ -129,7 +134,9 @@ async def async_load_templates(hass: HomeAssistant) -> list[dict[str, Any]]:
     return await hass.async_add_executor_job(load_templates_sync, hass)
 
 
-def save_template_sync(hass: HomeAssistant, filename: str, content: str) -> dict[str, Any]:
+def save_template_sync(
+    hass: HomeAssistant, filename: str, content: str
+) -> dict[str, Any]:
     """Synchronously validate and save a template file."""
     # Ensure filename ends with .yaml
     if not filename.endswith((".yaml", ".yml")):
@@ -143,7 +150,9 @@ def save_template_sync(hass: HomeAssistant, filename: str, content: str) -> dict
     # Validate YAML parsing
     data = yaml.safe_load(content)
     if not isinstance(data, dict):
-        raise ValueError("Template YAML must define a mapping/dictionary at the root level")
+        raise ValueError(
+            "Template YAML must define a mapping/dictionary at the root level"
+        )
     if "name" not in data and "id" not in data:
         raise ValueError("Template must contain at least 'name' or 'id'")
 
@@ -159,9 +168,13 @@ def save_template_sync(hass: HomeAssistant, filename: str, content: str) -> dict
     return tpl
 
 
-async def async_save_template(hass: HomeAssistant, filename: str, content: str) -> dict[str, Any]:
+async def async_save_template(
+    hass: HomeAssistant, filename: str, content: str
+) -> dict[str, Any]:
     """Asynchronously validate and save a template file."""
-    return await hass.async_add_executor_job(save_template_sync, hass, filename, content)
+    return await hass.async_add_executor_job(
+        save_template_sync, hass, filename, content
+    )
 
 
 def delete_template_sync(hass: HomeAssistant, filename: str) -> bool:
@@ -178,6 +191,7 @@ def delete_template_sync(hass: HomeAssistant, filename: str) -> bool:
 async def async_delete_template(hass: HomeAssistant, filename: str) -> bool:
     """Asynchronously delete a template file."""
     return await hass.async_add_executor_job(delete_template_sync, hass, filename)
+
 
 # Changelog:
 # 2026-09-06 — Parse optional template image/picture URL for sidebar device photos.

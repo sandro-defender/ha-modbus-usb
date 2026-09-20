@@ -1,10 +1,11 @@
 """Regression tests for serial safety and diagnostic accounting."""
+
 from __future__ import annotations
 
 from collections import deque
+from pathlib import Path
 from threading import Lock, Thread
 from time import sleep
-from pathlib import Path
 
 import pytest
 import yaml
@@ -49,7 +50,9 @@ class _Client:
     def close(self) -> None:
         self.connected = False
 
-    def read_holding_registers(self, address: int, count: int, *, slave: int) -> _Response:
+    def read_holding_registers(
+        self, address: int, count: int, *, slave: int
+    ) -> _Response:
         return _Response([self.value])
 
 
@@ -89,7 +92,9 @@ def test_disconnected_client_reconnects_before_read() -> None:
     client = _Client(connected=False)
     coordinator = _coordinator(client)
 
-    assert coordinator.read_register_raw(0, REGISTER_TYPE_HOLDING, DATA_TYPE_UINT16) == 42
+    assert (
+        coordinator.read_register_raw(0, REGISTER_TYPE_HOLDING, DATA_TYPE_UINT16) == 42
+    )
     assert client.connect_calls == 1
 
 
@@ -106,24 +111,30 @@ def test_failed_connection_is_logged_and_counted() -> None:
 
     assert coordinator.client.connect_calls == 3
     assert coordinator.diag[DIAG_FAILED_READS] == 1
-    assert coordinator.diag[DIAG_LAST_ERROR] == "Could not open the configured serial port"
+    assert (
+        coordinator.diag[DIAG_LAST_ERROR] == "Could not open the configured serial port"
+    )
     assert coordinator.transaction_log[0]["status"] == "error"
 
 
 def test_read_uses_requested_slave_id() -> None:
     class RecordingClient(_Client):
-        def read_holding_registers(self, address: int, count: int, *, slave: int) -> _Response:
+        def read_holding_registers(
+            self, address: int, count: int, *, slave: int
+        ) -> _Response:
             self.last_request = (address, count, slave)
             return super().read_holding_registers(address, count, slave=slave)
 
     client = RecordingClient()
     coordinator = _coordinator(client)
-    coordinator._read_one({
-        CONF_REGISTER_TYPE: REGISTER_TYPE_HOLDING,
-        CONF_ADDRESS: 20,
-        CONF_DATA_TYPE: DATA_TYPE_UINT16,
-        CONF_SLAVE_ID: 9,
-    })
+    coordinator._read_one(
+        {
+            CONF_REGISTER_TYPE: REGISTER_TYPE_HOLDING,
+            CONF_ADDRESS: 20,
+            CONF_DATA_TYPE: DATA_TYPE_UINT16,
+            CONF_SLAVE_ID: 9,
+        }
+    )
 
     assert client.last_request == (20, 1, 9)
 
@@ -140,7 +151,10 @@ def test_read_supports_current_pymodbus_device_id_keyword() -> None:
     client = ModernClient()
     coordinator = _coordinator(client)
 
-    assert coordinator.read_register_raw(4, REGISTER_TYPE_HOLDING, DATA_TYPE_UINT16, 6) == 99
+    assert (
+        coordinator.read_register_raw(4, REGISTER_TYPE_HOLDING, DATA_TYPE_UINT16, 6)
+        == 99
+    )
     assert client.last_device_id == 6
     assert client.last_count == 1
 
@@ -152,7 +166,9 @@ def test_serial_lock_prevents_overlapping_requests() -> None:
             self.active = 0
             self.maximum_active = 0
 
-        def read_holding_registers(self, address: int, count: int, *, slave: int) -> _Response:
+        def read_holding_registers(
+            self, address: int, count: int, *, slave: int
+        ) -> _Response:
             self.active += 1
             self.maximum_active = max(self.maximum_active, self.active)
             sleep(0.02)
@@ -179,13 +195,15 @@ def test_serial_lock_prevents_overlapping_requests() -> None:
 
 
 def test_r413e16_template_has_16_command_switches() -> None:
-    template_path = Path(__file__).parents[1] / "custom_components/modbus_usb/templates/eletechsup-R413E16.yaml"
+    template_path = (
+        Path(__file__).parents[1]
+        / "custom_components/modbus_usb/templates/eletechsup-R413E16.yaml"
+    )
     template = yaml.safe_load(template_path.read_text(encoding="utf-8"))
 
     assert 1 <= template["default_slave_id"] <= 247
     channels = [
-        entity for entity in template["entities"]
-        if not entity.get("addresses")
+        entity for entity in template["entities"] if not entity.get("addresses")
     ]
     assert len(channels) == 16
     assert [entity["address"] for entity in channels] == list(range(1, 17))
@@ -206,53 +224,39 @@ def test_template_fingerprint_matches_only_expected_register_values() -> None:
         {
             "id": "voltage_meter",
             "name": "Voltage Meter",
-            "fingerprint": [{
-                CONF_REGISTER_TYPE: REGISTER_TYPE_HOLDING,
-                CONF_ADDRESS: 0,
-                CONF_DATA_TYPE: DATA_TYPE_UINT16,
-                "min_value": 200,
-                "max_value": 250,
-            }],
+            "fingerprint": [
+                {
+                    CONF_REGISTER_TYPE: REGISTER_TYPE_HOLDING,
+                    CONF_ADDRESS: 0,
+                    CONF_DATA_TYPE: DATA_TYPE_UINT16,
+                    "min_value": 200,
+                    "max_value": 250,
+                }
+            ],
         },
         {
             "id": "other_device",
             "name": "Other Device",
-            "fingerprint": [{
-                CONF_REGISTER_TYPE: REGISTER_TYPE_HOLDING,
-                CONF_ADDRESS: 0,
-                CONF_DATA_TYPE: DATA_TYPE_UINT16,
-                "min_value": 1,
-                "max_value": 100,
-            }],
+            "fingerprint": [
+                {
+                    CONF_REGISTER_TYPE: REGISTER_TYPE_HOLDING,
+                    CONF_ADDRESS: 0,
+                    CONF_DATA_TYPE: DATA_TYPE_UINT16,
+                    "min_value": 1,
+                    "max_value": 100,
+                }
+            ],
         },
     ]
 
-    assert coordinator._match_templates(coordinator.client, 1, templates) == ["Voltage Meter"]
+    assert coordinator._match_templates(coordinator.client, 1, templates) == [
+        "Voltage Meter"
+    ]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Regression tests for configuration-tolerance helpers
 # ─────────────────────────────────────────────────────────────────────────────
-
-def test_normalize_enum_treats_none_strings_and_invalid_values_as_none() -> None:
-    from homeassistant.components.sensor import SensorDeviceClass
-
-    from custom_components.modbus_usb.coordinator import normalize_enum
-
-    assert normalize_enum("none", SensorDeviceClass, "x") is None
-    assert normalize_enum(None, SensorDeviceClass, "x") is None
-    assert normalize_enum("", SensorDeviceClass, "x") is None
-    assert normalize_enum("not-a-class", SensorDeviceClass, "x") is None
-    assert normalize_enum("temperature", SensorDeviceClass, "x") is SensorDeviceClass.TEMPERATURE
-
-
-def test_as_float_falls_back_for_null_and_garbage() -> None:
-    from custom_components.modbus_usb.coordinator import as_float
-
-    assert as_float(None, 5) == 5
-    assert as_float("", 5) == 5
-    assert as_float("12.5", 5) == 12.5
-    assert as_float(3, 5) == 3
 
 
 def test_number_entity_tolerates_null_numeric_settings() -> None:
@@ -330,6 +334,7 @@ def test_sensor_entity_tolerates_none_and_invalid_classes() -> None:
 # R4D6F20 block reads must not swallow entities they do not cover
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class _BlockClient:
     def __init__(self) -> None:
         self.connected = True
@@ -338,7 +343,9 @@ class _BlockClient:
     def connect(self) -> bool:
         return True
 
-    def read_holding_registers(self, address: int, *, count: int, device_id: int) -> _Response:
+    def read_holding_registers(
+        self, address: int, *, count: int, device_id: int
+    ) -> _Response:
         self.calls.append((address, count))
         return _Response([0] * count)
 

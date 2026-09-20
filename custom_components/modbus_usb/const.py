@@ -1,6 +1,27 @@
 """Constants for the Modbus USB Controller integration."""
 
+from __future__ import annotations
+
+import json
+import os
+
 DOMAIN = "modbus_usb"
+
+
+def integration_version() -> str:
+    """Return the packaged version from manifest.json.
+
+    This is the single source of truth for the integration version at
+    runtime (panel cache-busting, update checks). It never raises: when the
+    manifest cannot be read, callers get "0.0.0" instead of a crash.
+    """
+    manifest_path = os.path.join(os.path.dirname(__file__), "manifest.json")
+    try:
+        with open(manifest_path, encoding="utf-8") as manifest_file:
+            return str(json.load(manifest_file).get("version", "0.0.0"))
+    except (OSError, ValueError):
+        return "0.0.0"
+
 
 # Platform names
 PLATFORM_SENSOR = "sensor"
@@ -55,7 +76,7 @@ TEMPLATES_DIR_NAME = "modbus_usb_templates"
 
 # --- Per-entity config keys (stored in options["entities"]) ---
 CONF_ENTITIES = "entities"
-CONF_ENTITY_ID = "id"            # internal unique id (uuid-ish)
+CONF_ENTITY_ID = "id"  # internal unique id (uuid-ish)
 CONF_ENTITY_TYPE = "entity_type"  # "sensor" or "switch"
 CONF_NAME = "name"
 CONF_REGISTER_TYPE = "register_type"
@@ -78,10 +99,10 @@ CONF_MODE = "mode"  # "slider" | "box"
 ENTITY_TYPES = ["sensor", "switch", "binary_sensor", "number"]
 
 # Modbus register types we read from / write to
-REGISTER_TYPE_HOLDING = "holding"     # read/write 16-bit registers
-REGISTER_TYPE_INPUT = "input"         # read-only 16-bit registers
-REGISTER_TYPE_COIL = "coil"           # read/write 1-bit
-REGISTER_TYPE_DISCRETE = "discrete"   # read-only 1-bit
+REGISTER_TYPE_HOLDING = "holding"  # read/write 16-bit registers
+REGISTER_TYPE_INPUT = "input"  # read-only 16-bit registers
+REGISTER_TYPE_COIL = "coil"  # read/write 1-bit
+REGISTER_TYPE_DISCRETE = "discrete"  # read-only 1-bit
 
 REGISTER_TYPES_SENSOR = [REGISTER_TYPE_HOLDING, REGISTER_TYPE_INPUT]
 REGISTER_TYPES_SWITCH = [REGISTER_TYPE_COIL, REGISTER_TYPE_HOLDING]

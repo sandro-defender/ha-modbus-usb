@@ -1,4 +1,5 @@
 """The Modbus USB Controller integration."""
+
 from __future__ import annotations
 
 import logging
@@ -9,13 +10,10 @@ from homeassistant.core import HomeAssistant
 
 from .api import async_register_api
 from .const import (
-    DATA_SKIP_DEVICE_RELOAD,
-    DATA_PRESERVE_SERIAL_RELOAD,
-    DATA_SKIP_SERIAL_RELOAD,
     CONF_BAUDRATE,
     CONF_BYTESIZE,
-    CONF_DEVICES,
     CONF_DEVICE_ID,
+    CONF_DEVICES,
     CONF_ENTITIES,
     CONF_MANUFACTURER,
     CONF_MODEL,
@@ -25,8 +23,12 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_SLAVE_ID,
     CONF_STOPBITS,
+    DATA_PRESERVE_SERIAL_RELOAD,
+    DATA_SKIP_DEVICE_RELOAD,
+    DATA_SKIP_SERIAL_RELOAD,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    integration_version,
 )
 from .coordinator import ModbusUsbCoordinator
 from .services import async_register_services, async_unregister_services
@@ -39,7 +41,7 @@ PLATFORMS = ["sensor", "switch", "binary_sensor", "number"]
 _PANEL_REGISTERED = False  # module-level guard so we only register once
 
 
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:  # noqa: ARG001
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Global (YAML) setup hook — register panel, API, and templates once."""
     await _async_register_panel(hass)
     await async_register_api(hass)
@@ -49,7 +51,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:  # noqa: ARG00
 
 async def _async_register_panel(hass: HomeAssistant) -> None:
     """Register the Modbus USB custom panel and serve the www/ directory."""
-    global _PANEL_REGISTERED  # noqa: PLW0603
+    global _PANEL_REGISTERED
     if _PANEL_REGISTERED:
         return
     _PANEL_REGISTERED = True
@@ -64,9 +66,10 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     www_path = os.path.join(os.path.dirname(__file__), "www")
     if hasattr(hass.http, "async_register_static_paths"):
         from homeassistant.components.http import StaticPathConfig
-        await hass.http.async_register_static_paths([
-            StaticPathConfig("/modbus_usb_panel", www_path, cache_headers=False)
-        ])
+
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig("/modbus_usb_panel", www_path, cache_headers=False)]
+        )
     else:
         hass.http.register_static_path(
             "/modbus_usb_panel",
@@ -77,15 +80,18 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     # Register the sidebar panel
     try:
         from homeassistant.components import frontend
+
         frontend.async_register_built_in_panel(
             hass,
             component_name="iframe",
             sidebar_title="Modbus USB",
             sidebar_icon="mdi:serial-port",
             frontend_url_path="modbus-usb",
-            # Change this asset version when the standalone sidebar HTML changes.
-            # It prevents an already-open browser from retaining an old panel.
-            config={"url": "/modbus_usb_panel/modbus-panel.html?v=2.2.0"},
+            # The manifest version cache-busts the panel: releasing a new
+            # version prevents an already-open browser from retaining old HTML.
+            config={
+                "url": f"/modbus_usb_panel/modbus-panel.html?v={integration_version()}"
+            },
             require_admin=False,
         )
         _LOGGER.debug("Modbus USB sidebar panel registered")
@@ -205,7 +211,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        preserve_reloads = hass.data.get(DOMAIN, {}).get(DATA_PRESERVE_SERIAL_RELOAD, set())
+        preserve_reloads = hass.data.get(DOMAIN, {}).get(
+            DATA_PRESERVE_SERIAL_RELOAD, set()
+        )
         if entry.entry_id in preserve_reloads:
             # Board create/delete reloads platform entities only. Reusing this
             # coordinator avoids a close/open race on USB serial adapters.
@@ -218,7 +226,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # dict also holds reload-guard helper sets, so its truthiness alone can
     # never be used to detect "last entry removed".
     remaining = [
-        item for item in hass.config_entries.async_entries(DOMAIN)
+        item
+        for item in hass.config_entries.async_entries(DOMAIN)
         if item.entry_id != entry.entry_id
     ]
     if not remaining:
@@ -257,14 +266,16 @@ async def async_remove_config_entry_device(
     if child_identifier is None:
         return False
 
-    child_id = child_identifier[1][len(prefix):]
+    child_id = child_identifier[1][len(prefix) :]
     new_options = dict(config_entry.options or {})
     new_options[CONF_DEVICES] = [
-        device for device in new_options.get(CONF_DEVICES, [])
+        device
+        for device in new_options.get(CONF_DEVICES, [])
         if str(device.get("id")) != child_id
     ]
     new_options[CONF_ENTITIES] = [
-        entity for entity in new_options.get(CONF_ENTITIES, [])
+        entity
+        for entity in new_options.get(CONF_ENTITIES, [])
         if str(entity.get(CONF_DEVICE_ID)) != child_id
     ]
 

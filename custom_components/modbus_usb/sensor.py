@@ -1,4 +1,5 @@
 """Sensor platform for Modbus USB Controller."""
+
 from __future__ import annotations
 
 from homeassistant.components.sensor import (
@@ -23,12 +24,9 @@ from .const import (
     CONF_UNIT_OF_MEASUREMENT,
     DOMAIN,
 )
-from .coordinator import (
-    ModbusUsbCoordinator,
-    get_device_info,
-    get_entity_picture,
-    normalize_enum,
-)
+from .coordinator import ModbusUsbCoordinator
+from .decoding import normalize_enum
+from .device_info import get_device_info, get_entity_picture
 
 
 async def async_setup_entry(
@@ -47,13 +45,17 @@ async def async_setup_entry(
 class ModbusUsbSensor(CoordinatorEntity[ModbusUsbCoordinator], SensorEntity):
     """A sensor backed by a Modbus holding/input register."""
 
-    def __init__(self, coordinator: ModbusUsbCoordinator, entry: ConfigEntry, ent: dict) -> None:
+    def __init__(
+        self, coordinator: ModbusUsbCoordinator, entry: ConfigEntry, ent: dict
+    ) -> None:
         super().__init__(coordinator)
         self._ent = ent
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{ent[CONF_ENTITY_ID]}"
         self._attr_name = ent[CONF_NAME]
-        self._attr_native_unit_of_measurement = ent.get(CONF_UNIT_OF_MEASUREMENT) or None
+        self._attr_native_unit_of_measurement = (
+            ent.get(CONF_UNIT_OF_MEASUREMENT) or None
+        )
         self._attr_device_class = normalize_enum(
             ent.get(CONF_DEVICE_CLASS), SensorDeviceClass, ent.get(CONF_NAME, "")
         )
@@ -69,8 +71,11 @@ class ModbusUsbSensor(CoordinatorEntity[ModbusUsbCoordinator], SensorEntity):
     def available(self) -> bool:
         device_id = self._ent.get(CONF_DEVICE_ID)
         device = next(
-            (item for item in self._entry.options.get(CONF_DEVICES, [])
-             if str(item.get("id")) == str(device_id)),
+            (
+                item
+                for item in self._entry.options.get(CONF_DEVICES, [])
+                if str(item.get("id")) == str(device_id)
+            ),
             None,
         )
         return (device is None or device.get("enabled", True)) and super().available
@@ -85,4 +90,3 @@ class ModbusUsbSensor(CoordinatorEntity[ModbusUsbCoordinator], SensorEntity):
 # Changelog:
 # 2026-09-06 — Entity picture from device/template image URL.
 # Date modified: 2026-09-06
-

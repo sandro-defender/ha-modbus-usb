@@ -6,6 +6,8 @@ import pytest
 
 from custom_components.modbus_usb.bus import call_modbus_on_client
 
+pytestmark = pytest.mark.fast
+
 
 class _ModernClient:
     """Pymodbus 3.8+ style: accepts device_id."""

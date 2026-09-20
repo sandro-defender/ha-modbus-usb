@@ -14,6 +14,9 @@ from typing import Any
 import pytest
 import yaml
 
+pytestmark = pytest.mark.fast
+
+
 INTEGRATION_DIR = os.path.join(
     os.path.dirname(__file__), "..", "custom_components", "modbus_usb"
 )

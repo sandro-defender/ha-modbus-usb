@@ -10,6 +10,11 @@ from __future__ import annotations
 import os
 import re
 
+import pytest
+
+pytestmark = pytest.mark.fast
+
+
 WWW_DIR = os.path.join(
     os.path.dirname(__file__), "..", "custom_components", "modbus_usb", "www"
 )

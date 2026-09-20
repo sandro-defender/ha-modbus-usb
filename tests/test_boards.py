@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from custom_components.modbus_usb.boards import PROTOCOL_R4D6F20, select_block_reader
 from custom_components.modbus_usb.boards.r4d6f20 import (
     read_command1_blocks,
@@ -12,6 +14,8 @@ from custom_components.modbus_usb.boards.r413e16 import (
     R413E16_ON_VALUE,
     is_r413e16_switch_config,
 )
+
+pytestmark = pytest.mark.fast
 
 
 def test_r413e16_command_values_match_verified_map() -> None:

@@ -1,5 +1,53 @@
 # Changelog
 
+## 2.2.0
+
+### Brand refresh
+
+- Redesigned the integration icon and logo: a flat vector mark of a microchip
+  carrying a USB trident, fed by an orange RS-485 differential pair, on an
+  indigo tile. The old brand files were a vendor product photo.
+- The sidebar panel header now shows the same chip-and-bus mark, and
+  `icons.json` gained dedicated service icons for register reads and writes.
+- Both generated mark variants are kept in `brand/` (`icon.png` primary,
+  `icon-alternate.png` alternate).
+
+### Reliability fixes
+
+- Sensors and binary sensors: `"none"`, empty, or unsupported device/state
+  class values no longer crash platform setup; they fall back to no class
+  with a logged warning.
+- Numbers: null/empty min, max, step, or scale values (possible after sidebar
+  edits) no longer remove the number platform; swapped min/max are corrected
+  and a non-positive step falls back to 1.
+- Switch writes coerce stored ON/OFF values to integers, so string values
+  from older saves or hand-edited templates can no longer fail silently.
+- Polling: malformed entities (missing register type or address) are skipped
+  with a warning instead of failing the whole update cycle, and R4D6F20 block
+  reads no longer mark entities they did not actually read as handled.
+- RS-485 bus scan defaults to parity N when the stored serial profile has no
+  parity key instead of raising.
+- Unloading the last config entry now really unregisters the integration
+  services and cleans its reload-guard helper sets.
+
+### Security
+
+- WebSocket commands that change configuration or write to hardware
+  (device/entity/template saves, hub edits, board tools, bus scans, manual
+  hex writes, relay cycling tests) now require an administrator session.
+  Read-only commands and ordinary runtime switch control stay available to
+  the panel as before.
+- `save_entity` now validates the entity type, register address range, and
+  the register types allowed per entity type.
+
+### Services & tests
+
+- `modbus_usb.read_register` and `modbus_usb.write_register` expose their
+  optional `slave_id` field in the service UI.
+- Refreshed the stale R413E16 template test (the template intentionally ships
+  a Combined Switch plus 16 channels) and added regression tests for the
+  fixes above.
+
 ## 2.1.90
 
 ### Local reload-button artwork

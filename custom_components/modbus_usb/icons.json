@@ -1,3 +1,11 @@
 {
-  "integration": "mdi:serial-port"
+  "integration": "mdi:serial-port",
+  "services": {
+    "read_register": {
+      "service": "mdi:arrow-left-bold-box-outline"
+    },
+    "write_register": {
+      "service": "mdi:arrow-right-bold-box-outline"
+    }
+  }
 }

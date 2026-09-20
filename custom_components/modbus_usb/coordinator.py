@@ -18,6 +18,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .boards import select_block_reader
 from .boards.r413e16 import R413E16_STATE_ON_VALUES, is_r413e16_switch_config
 from .bus import call_modbus_on_client
+from .circuit_breaker import SlaveCircuitBreaker
 from .const import (
     CONF_ADDRESS,
     CONF_ASSUMED_STATE,
@@ -52,6 +53,7 @@ from .const import (
 )
 from .decoding import as_float, decode_words
 from .diagnostics import diagnostic_request_frame, modbus_crc16
+from .optimizer import group_entities_into_blocks
 
 _LOGGER = logging.getLogger(__name__)
 # Compatibility alias for callers of the former coordinator-local helper.
@@ -113,6 +115,8 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         # channel read fails. R413E16 holding-register feedback is otherwise
         # authoritative and refreshes this cache on every successful poll.
         self._command_states: dict[str, bool] = {}
+        self.circuit_breaker = SlaveCircuitBreaker()
+        self._entity_last_poll: dict[str, float] = {}
         # Loaded switch entities register after Home Assistant has attached
         # them. This lets a successful Combined Switch command immediately
         # publish only its affected real channel entities to HA.
@@ -352,10 +356,24 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             self.serial_config = config
             return self._connect_with_retries()
 
+    def _apply_inter_frame_delay(self) -> None:
+        delay_ms = 0
+        if getattr(self, "hass", None) and hasattr(self.hass, "config_entries"):
+            entry = self.hass.config_entries.async_get_entry(self.entry_id)
+            if entry:
+                delay_ms = (
+                    entry.options.get("inter_frame_delay_ms")
+                    or entry.data.get("inter_frame_delay_ms")
+                    or 0
+                )
+        if delay_ms > 0:
+            sleep(delay_ms / 1000.0)
+
     def _call_modbus(
         self, method_name: str, *args: Any, slave: int, **kwargs: Any
     ) -> Any:
         """Call a method on this hub's configured serial client."""
+        self._apply_inter_frame_delay()
         return call_modbus_on_client(
             self.client, method_name, *args, slave=slave, **kwargs
         )
@@ -554,7 +572,11 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             "status": "error" if error else "ok",
             "function_code": function_code or detected_function,
             "request_hex": request_hex or detected_request,
-            "retries_configured": int(getattr(self.client, "retries", 0) or 0),
+            "retries_configured": (
+                int(getattr(self.client, "retries", 0))
+                if isinstance(getattr(self.client, "retries", None), (int, float, str))
+                else 0
+            ),
         }
         if duration_ms is not None:
             item["duration_ms"] = round(duration_ms, 1)
@@ -751,6 +773,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             "health": dict(self.diag),
             "transactions": list(self.transaction_log),
             "scan": dict(self.scan_progress),
+            "circuit_breaker": self.circuit_breaker.get_summary()
+            if hasattr(self, "circuit_breaker")
+            else {},
             "serial": {
                 "port": self.serial_config.get(CONF_PORT),
                 "baudrate": self.serial_config.get(CONF_BAUDRATE),
@@ -817,29 +842,228 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
     def _read_all(
         self, entities: list[dict], device_slave_map: dict[str, int] | None = None
     ) -> dict[str, Any]:
+        import time
+
+        from .const import (
+            CONF_GAP_TOLERANCE,
+            CONF_MAX_READ_REGISTERS,
+            CONF_OPTIMIZE_BLOCKS,
+            CONF_SCAN_INTERVAL,
+            REGISTER_TYPE_COIL,
+            REGISTER_TYPE_DISCRETE,
+            REGISTER_TYPE_HOLDING,
+            REGISTER_TYPE_INPUT,
+        )
+        from .decoding import decode_words
+
         device_slave_map = device_slave_map or {}
         data: dict[str, Any] = {}
-        entry = self.hass.config_entries.async_get_entry(self.entry_id)
+        entry = (
+            self.hass.config_entries.async_get_entry(self.entry_id)
+            if (self.hass and hasattr(self.hass, "config_entries"))
+            else None
+        )
         devices = {
             str(item.get("id")): item
             for item in (entry.options.get(CONF_DEVICES, []) if entry else [])
         }
         handled: set[str] = set()
+        now_ts = time.time()
+        if not hasattr(self, "_entity_last_poll"):
+            self._entity_last_poll = {}
+
+        # Filter entities by entity-level scan_interval (adaptive cycle optimization)
+        active_entities: list[dict] = []
+        for ent in entities:
+            ent_id = ent.get(CONF_ENTITY_ID)
+            if not ent_id:
+                continue
+            scan_int = ent.get(CONF_SCAN_INTERVAL)
+            if scan_int is not None:
+                try:
+                    interval_sec = float(scan_int)
+                    if not hasattr(self, "_entity_last_poll"):
+                        self._entity_last_poll = {}
+                    last_poll = self._entity_last_poll.get(ent_id, 0.0)
+                    if now_ts - last_poll < interval_sec:
+                        # Keep previous coordinator value if available
+                        if (
+                            hasattr(self, "data")
+                            and isinstance(self.data, dict)
+                            and ent_id in self.data
+                        ):
+                            data[ent_id] = self.data[ent_id]
+                        handled.add(ent_id)
+                        continue
+                except (ValueError, TypeError):
+                    pass
+            active_entities.append(ent)
+
+        # 1. Device-specific block readers (e.g. R4D6F20 Command 1 / Command 2)
         for device_id, device in devices.items():
+            dev_slave = int(device.get(CONF_SLAVE_ID, self.slave_id))
+            if hasattr(
+                self, "circuit_breaker"
+            ) and not self.circuit_breaker.should_poll(dev_slave):
+                # Slave circuit breaker is tripped; skip polling this slave
+                continue
+
             reader = select_block_reader(device)
             members = [
-                item for item in entities if str(item.get(CONF_DEVICE_ID)) == device_id
+                item
+                for item in active_entities
+                if str(item.get(CONF_DEVICE_ID)) == device_id
             ]
             if reader is None or not members:
                 continue
-            block_data, block_handled = reader(
-                self, members, int(device.get(CONF_SLAVE_ID, self.slave_id))
-            )
-            data.update(block_data)
-            # Only entities actually covered by a block read may skip the
-            # per-entity poll; anything else (other data types or ranges)
-            # still needs its own request.
-            handled.update(block_handled)
+            try:
+                block_data, block_handled = reader(self, members, dev_slave)
+                data.update(block_data)
+                handled.update(block_handled)
+                for eid in block_handled:
+                    self._entity_last_poll[eid] = now_ts
+                if hasattr(self, "circuit_breaker"):
+                    if any(v is not None for v in block_data.values()):
+                        self.circuit_breaker.record_success(dev_slave)
+                    elif block_data:
+                        self.circuit_breaker.record_failure(
+                            dev_slave, "Device block read returned all None"
+                        )
+            except Exception as err:
+                if hasattr(self, "circuit_breaker"):
+                    self.circuit_breaker.record_failure(dev_slave, err)
+
+        # 2. Multi-Register Block Read Optimizer (Section 2.2)
+        optimize_blocks = True
+        max_read_regs = 64
+        gap_tol = 2
+        if entry:
+            opts = {**entry.data, **entry.options}
+            optimize_blocks = opts.get(CONF_OPTIMIZE_BLOCKS, True)
+            max_read_regs = int(opts.get(CONF_MAX_READ_REGISTERS, 64))
+            gap_tol = int(opts.get(CONF_GAP_TOLERANCE, 2))
+
+        remaining_entities = [
+            ent
+            for ent in active_entities
+            if ent.get(CONF_ENTITY_ID)
+            and ent.get(CONF_ENTITY_ID) not in handled
+            and not ent.get(CONF_ASSUMED_STATE)
+        ]
+
+        if optimize_blocks and remaining_entities:
+            # Group remaining entities by target slave ID
+            by_slave: dict[int, list[dict]] = {}
+            for ent in remaining_entities:
+                slave = ent.get(CONF_SLAVE_ID)
+                if slave is None and device_slave_map and ent.get(CONF_DEVICE_ID):
+                    slave = device_slave_map.get(str(ent.get(CONF_DEVICE_ID)))
+                if slave is None:
+                    slave = self.slave_id
+                target_slave = int(slave)
+                by_slave.setdefault(target_slave, []).append(ent)
+
+            for target_slave, slave_ents in by_slave.items():
+                if hasattr(
+                    self, "circuit_breaker"
+                ) and not self.circuit_breaker.should_poll(target_slave):
+                    continue
+
+                blocks, singletons = group_entities_into_blocks(
+                    slave_ents,
+                    max_read_registers=max_read_regs,
+                    max_gap_tolerance=gap_tol,
+                )
+
+                for block in blocks:
+                    # If block only contains 1 span of length 1, fall back to individual read
+                    if len(block.spans) == 1 and block.count <= 2:
+                        continue
+
+                    # Execute packed multi-register block read
+                    started = datetime.now()
+                    try:
+                        with self._serial_lock:
+                            self._ensure_connected()
+                            if block.register_type == REGISTER_TYPE_HOLDING:
+                                result = self._call_modbus(
+                                    "read_holding_registers",
+                                    block.start_address,
+                                    count=block.count,
+                                    slave=target_slave,
+                                )
+                            elif block.register_type == REGISTER_TYPE_INPUT:
+                                result = self._call_modbus(
+                                    "read_input_registers",
+                                    block.start_address,
+                                    count=block.count,
+                                    slave=target_slave,
+                                )
+                            elif block.register_type == REGISTER_TYPE_COIL:
+                                result = self._call_modbus(
+                                    "read_coils",
+                                    block.start_address,
+                                    count=block.count,
+                                    slave=target_slave,
+                                )
+                            elif block.register_type == REGISTER_TYPE_DISCRETE:
+                                result = self._call_modbus(
+                                    "read_discrete_inputs",
+                                    block.start_address,
+                                    count=block.count,
+                                    slave=target_slave,
+                                )
+                            else:
+                                continue
+
+                            if result.isError():
+                                raise UpdateFailed(str(result))
+
+                        # Decode registers for each span in this block
+                        for span in block.spans:
+                            offset = span.start_address - block.start_address
+                            if block.register_type in (
+                                REGISTER_TYPE_COIL,
+                                REGISTER_TYPE_DISCRETE,
+                            ):
+                                val = bool(result.bits[offset])
+                            else:
+                                words = result.registers[offset : offset + span.count]
+                                val = decode_words(words, span.data_type)
+                                if span.scale != 1.0:
+                                    val = val * span.scale
+                            data[span.entity_id] = val
+                            self._entity_last_poll[span.entity_id] = now_ts
+                            handled.add(span.entity_id)
+
+                        dur = (datetime.now() - started).total_seconds() * 1000
+                        self._record_transaction(
+                            f"read_{block.register_type}",
+                            slave=target_slave,
+                            address=block.start_address,
+                            count=block.count,
+                            result="packed_block",
+                            duration_ms=dur,
+                        )
+                        if hasattr(self, "circuit_breaker"):
+                            self.circuit_breaker.record_success(target_slave)
+                    except Exception as err:
+                        for span in block.spans:
+                            data[span.entity_id] = None
+                            handled.add(span.entity_id)
+                        dur = (datetime.now() - started).total_seconds() * 1000
+                        self._record_transaction(
+                            f"read_{block.register_type}",
+                            slave=target_slave,
+                            address=block.start_address,
+                            count=block.count,
+                            error=err,
+                            duration_ms=dur,
+                        )
+                        if hasattr(self, "circuit_breaker"):
+                            self.circuit_breaker.record_failure(target_slave, err)
+
+        # 3. Remaining individual entity reads
         for ent in entities:
             ent_id = ent.get(CONF_ENTITY_ID)
             if not ent_id or ent_id in handled:
@@ -847,25 +1071,40 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             if ent.get(CONF_ASSUMED_STATE):
                 continue
             if CONF_REGISTER_TYPE not in ent or CONF_ADDRESS not in ent:
-                # A malformed entity must not take down the whole poll cycle.
                 _LOGGER.warning(
                     "Skipping entity %s: missing register type or address",
                     ent.get(CONF_NAME, ent_id),
                 )
                 continue
+
+            slave = ent.get(CONF_SLAVE_ID)
+            if slave is None and device_slave_map and ent.get(CONF_DEVICE_ID):
+                slave = device_slave_map.get(str(ent.get(CONF_DEVICE_ID)))
+            if slave is None:
+                slave = self.slave_id
+            target_slave = int(slave)
+
+            if hasattr(
+                self, "circuit_breaker"
+            ) and not self.circuit_breaker.should_poll(target_slave):
+                # Skip polling offline/degraded slave
+                continue
+
             try:
                 value = self._read_one(ent, device_slave_map)
                 data[ent_id] = value
-                # Tested R413E16 boards report 1 for ON and 0 for OFF from
-                # holding registers 1–16. Keep the fallback synchronized with
-                # this real feedback so manual/external changes show in HA.
+                self._entity_last_poll[ent_id] = now_ts
                 if ent.get(CONF_ENTITY_TYPE) == "switch" and is_r413e16_switch_config(
                     ent
                 ):
                     self._command_states[ent_id] = value in R413E16_STATE_ON_VALUES
+                if hasattr(self, "circuit_breaker"):
+                    self.circuit_breaker.record_success(target_slave)
             except Exception as err:
                 _LOGGER.warning("Failed reading %s: %s", ent.get("name", ent_id), err)
                 data[ent_id] = None
+                if hasattr(self, "circuit_breaker"):
+                    self.circuit_breaker.record_failure(target_slave, err)
         return data
 
     def _read_one(

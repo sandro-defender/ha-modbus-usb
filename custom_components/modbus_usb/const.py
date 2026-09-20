@@ -37,6 +37,11 @@ CONF_PARITY = "parity"
 CONF_STOPBITS = "stopbits"
 CONF_SLAVE_ID = "slave_id"
 CONF_SCAN_INTERVAL = "scan_interval"
+CONF_INTER_FRAME_DELAY_MS = "inter_frame_delay_ms"
+CONF_OPTIMIZE_BLOCKS = "optimize_blocks"
+CONF_MAX_READ_REGISTERS = "max_read_registers"
+CONF_GAP_TOLERANCE = "gap_tolerance"
+CONF_CIRCUIT_BREAKER = "circuit_breaker"
 
 DEFAULT_PORT = "/dev/ttyUSB0"
 DEFAULT_BAUDRATE = 9600

@@ -83,7 +83,7 @@ def validate_entity(entity: dict[str, Any]) -> dict[str, Any]:
         )
     else:
         entity.pop("addresses", None)
-    for key in ("scale", "min_value", "max_value", "step"):
+    for key in ("scale", "min_value", "max_value", "step", "scan_interval"):
         if entity.get(key) in (None, ""):
             entity.pop(key, None)
             continue
@@ -93,6 +93,8 @@ def validate_entity(entity: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"{key} must be a finite number") from err
         if not math.isfinite(entity[key]):
             raise ValueError(f"{key} must be a finite number")
+    if "scan_interval" in entity and entity["scan_interval"] <= 0:
+        raise ValueError("scan_interval must be greater than zero")
     if entity_type == "number":
         if entity.get("scale", 1) == 0:
             raise ValueError("Number scale must not be zero")

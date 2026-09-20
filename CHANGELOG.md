@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## 2.5.0
+
+### Live Interactive Bus Traffic Inspector & Frame Analyzer
+- New **Traffic Inspector** sidebar tab: every recorded RS-485 transaction is decoded byte by byte — Slave ID, Function Code, Address, Byte Count, Data payload, and the CRC16 low/high bytes with pass/fail validation (reconstructed request frames, FC01–FC06/FC0F/FC10 and exception responses).
+- **Latency waterfall** per transaction: bus lock wait, port connect, inter-frame delay, and serial request stages, plus avg/p95/max duration indicators per hub and per slave.
+- New read-only `modbus_usb/traffic_inspector` WebSocket command backed by the pure, unit-tested `inspector.py` frame parser.
+
+### Modbus Automation Helpers & Custom Services
+- `modbus_usb.batch_write`: write multiple coils and holding registers (uint16/int16/uint32/int32/float32) while holding the coordinator bus lock for the whole batch; aborts on the first failed write and reports the applied writes.
+- `modbus_usb.boost_polling`: temporary scan-interval boost (5 s – 1 h) for high-frequency monitoring; the previous interval is restored automatically when the window expires, and stacked boosts keep the original interval.
+- `modbus_usb.reset_circuit_breaker`: manually restore a degraded/offline slave ID (or all slaves) to healthy state so it is polled again immediately.
+- `services.yaml` and `icons.json` entries for all three new services; boost state is surfaced in hub diagnostics.
+- Coordinator internals: serial transactions now record stage-level latency (`_serial_transaction` context manager) and expose `read_raw_words` for live register probing.
+
+### Interactive Template Designer & Live Validator
+- New **Template Designer** sidebar tab: draft a custom YAML template, test-read every register against the connected board, and compare each response decoded as all supported data types before saving.
+- New `modbus_usb/designer_validate` WebSocket command backed by `designer.py`: structural validation (`validate_template`) plus per-entity live reads with scale application, failure isolation, and a 64-entity test cap.
+
+### Development
+- Comprehensive pytest coverage for the frame analyzer, inspector view builder, template designer, new services (schemas, handlers, registration), circuit breaker reset, batch write single-lock semantics, and polling boost lifecycle (197 tests total).
+- `ruff check` and `ruff format` pass cleanly across the repository.
+
 ## 2.4.0
 
 ### Multi-Device Polling & Bus Optimization

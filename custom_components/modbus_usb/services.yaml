@@ -99,3 +99,87 @@ write_register:
           min: 1
           max: 247
           mode: box
+
+batch_write:
+  name: Batch Write Modbus Registers
+  description: >
+    Write multiple coils and/or holding registers while holding the bus lock
+    for the whole batch, so no polling interleaves between the write frames.
+    The batch aborts on the first failed write.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: The config entry ID of the Modbus USB hub.
+      required: true
+      selector:
+        text:
+    writes:
+      name: Writes
+      description: >
+        List of write items. Each item needs an address and value; the
+        register type defaults to holding and the data type to uint16.
+      required: true
+      selector:
+        object:
+    slave_id:
+      name: Slave ID
+      description: "Modbus slave ID to write. Defaults to the hub's configured slave ID."
+      selector:
+        number:
+          min: 1
+          max: 247
+          mode: box
+
+boost_polling:
+  name: Boost Polling
+  description: >
+    Temporarily shorten the hub poll interval for high-frequency monitoring.
+    The original interval is restored automatically when the boost expires.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: The config entry ID of the Modbus USB hub.
+      required: true
+      selector:
+        text:
+    duration:
+      name: Duration
+      description: "How long the boost lasts, in seconds (5-3600)."
+      required: true
+      selector:
+        number:
+          min: 5
+          max: 3600
+          unit_of_measurement: s
+          mode: box
+    scan_interval:
+      name: Boost Interval
+      description: "Temporary poll interval in seconds while the boost is active."
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 3600
+          unit_of_measurement: s
+          mode: box
+
+reset_circuit_breaker:
+  name: Reset Slave Circuit Breaker
+  description: >
+    Manually restore a degraded or offline slave ID to healthy state so it is
+    polled again immediately. Without a slave ID, all slaves are reset.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: The config entry ID of the Modbus USB hub.
+      required: true
+      selector:
+        text:
+    slave_id:
+      name: Slave ID
+      description: "Slave ID to reset. Leave empty to reset every tracked slave."
+      selector:
+        number:
+          min: 1
+          max: 247
+          mode: box

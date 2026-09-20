@@ -124,6 +124,31 @@ class SlaveCircuitBreaker:
                 error,
             )
 
+    def _clear_state(self, state: SlaveBreakerState) -> None:
+        state.state = STATE_HEALTHY
+        state.consecutive_failures = 0
+        state.last_error = None
+        state.backoff_seconds = 0.0
+        state.next_probe_time = None
+
+    def reset(self, slave_id: int | None = None) -> list[int]:
+        """Manually restore healthy state for one slave (or all slaves).
+
+        Returns the slave IDs that were reset. A slave that was never tracked
+        is silently ignored so automations can reset defensively.
+        """
+        if slave_id is None:
+            reset_ids = sorted(self._states)
+            for tracked in self._states.values():
+                self._clear_state(tracked)
+            return reset_ids
+        state = self._states.get(int(slave_id))
+        if state is None:
+            return []
+        self._clear_state(state)
+        _LOGGER.info("Slave ID %d circuit breaker manually reset", int(slave_id))
+        return [int(slave_id)]
+
     def get_summary(self) -> dict[int, dict[str, Any]]:
         """Return a UI-friendly status dictionary for all monitored slaves."""
         return {

@@ -160,6 +160,18 @@ DIAG_LAST_SUCCESS = "last_success"
 # Service names
 SERVICE_READ_REGISTER = "read_register"
 SERVICE_WRITE_REGISTER = "write_register"
+SERVICE_BATCH_WRITE = "batch_write"
+SERVICE_BOOST_POLLING = "boost_polling"
+SERVICE_RESET_CIRCUIT_BREAKER = "reset_circuit_breaker"
+
+# Polling boost boundaries (seconds)
+BOOST_MIN_DURATION = 5
+BOOST_MAX_DURATION = 3600
+BOOST_MIN_INTERVAL = 1
+BOOST_MAX_INTERVAL = 3600
+
+# Batch write limits
+BATCH_WRITE_MAX_ITEMS = 123  # Modbus FC10 maximum register count
 
 # Event raised after a service read completes
 EVENT_REGISTER_READ = f"{DOMAIN}_register_read"

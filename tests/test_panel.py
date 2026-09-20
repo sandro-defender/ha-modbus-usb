@@ -58,3 +58,16 @@ def test_panel_script_load_order() -> None:
 def test_panel_has_no_hardcoded_version() -> None:
     html = _html()
     assert "?v=" not in html, "Panel assets are served no-cache; no ?v= needed"
+
+
+def test_panel_wires_inspector_and_designer_tabs() -> None:
+    html = _html()
+    for tab in ("inspector", "designer"):
+        assert f'id="tab-btn-{tab}"' in html, f"missing {tab} tab button"
+        assert f'id="pane-{tab}"' in html, f"missing {tab} pane"
+        assert f"switchTab('{tab}')" in html, f"{tab} tab is not wired"
+        assert f'aria-controls="pane-{tab}"' in html
+    scripts = re.findall(r'<script src="([^"]+)"></script>', _html())
+    assert "panel/inspector.js" in scripts
+    assert "panel/designer.js" in scripts
+    assert scripts.index("panel/inspector.js") < scripts.index("panel/designer.js")

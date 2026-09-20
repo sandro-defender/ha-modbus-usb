@@ -6,6 +6,15 @@
     },
     "write_register": {
       "service": "mdi:arrow-right-bold-box-outline"
+    },
+    "batch_write": {
+      "service": "mdi:order-bool-ascending-variant"
+    },
+    "boost_polling": {
+      "service": "mdi:speedometer"
+    },
+    "reset_circuit_breaker": {
+      "service": "mdi:circuit-switch-closed"
     }
   }
 }

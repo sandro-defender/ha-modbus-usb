@@ -25,6 +25,7 @@ from .diagnostics import (
     ws_scan_bus,
     ws_stop_probe_registers,
     ws_test_device_entities,
+    ws_traffic_inspector,
     ws_verify_device_reads,
 )
 from .entities import ws_delete_entity, ws_save_entity
@@ -32,6 +33,7 @@ from .hub import ws_get_data, ws_get_serial_status, ws_save_hub, ws_scan_usb_por
 from .templates import (
     ws_apply_template,
     ws_delete_template,
+    ws_designer_validate,
     ws_get_templates,
     ws_save_template,
 )
@@ -68,6 +70,8 @@ async def async_register_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_clear_diagnostic_log)
     websocket_api.async_register_command(hass, ws_export_activity_log)
     websocket_api.async_register_command(hass, ws_scan_bus)
+    websocket_api.async_register_command(hass, ws_traffic_inspector)
+    websocket_api.async_register_command(hass, ws_designer_validate)
     websocket_api.async_register_command(hass, ws_scan_usb_ports)
     websocket_api.async_register_command(hass, ws_get_serial_status)
     websocket_api.async_register_command(hass, ws_restore_device_template_controls)

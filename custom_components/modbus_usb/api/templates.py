@@ -26,6 +26,7 @@ from ..const import (
     DATA_PRESERVE_SERIAL_RELOAD,
     DOMAIN,
 )
+from ..designer import async_validate_template_design
 from ..templates import (
     async_delete_template,
     async_load_templates,
@@ -52,6 +53,45 @@ async def ws_get_templates(
     except Exception as err:
         _LOGGER.error("ws_get_templates failed: %s", err, exc_info=True)
         connection.send_error(msg["id"], "error", str(err))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "modbus_usb/designer_validate",
+        vol.Required("entry_id"): cv.string,
+        vol.Required("content"): cv.string,
+        vol.Optional("slave_id"): vol.All(vol.Coerce(int), vol.Range(min=1, max=247)),
+        vol.Optional("test_reads", default=True): bool,
+    }
+)
+@websocket_api.async_response
+async def ws_designer_validate(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Validate a draft template and test-read it against the live bus."""
+    try:
+        coordinator = hass.data[DOMAIN][msg["entry_id"]]
+        result = await async_validate_template_design(
+            hass,
+            coordinator,
+            msg["content"],
+            slave_id=msg.get("slave_id"),
+            test_reads=msg.get("test_reads", True),
+        )
+        connection.send_result(msg["id"], result)
+    except KeyError:
+        connection.send_error(
+            msg["id"], "not_found", f"Unknown config entry '{msg['entry_id']}'"
+        )
+    except ValueError as err:
+        # Structural validation failures are expected user input errors; the
+        # designer renders them inline rather than treating them as crashes.
+        connection.send_result(
+            msg["id"], {"valid": False, "error": str(err), "entities": []}
+        )
+    except Exception as err:
+        _LOGGER.error("ws_designer_validate failed: %s", err, exc_info=True)
+        connection.send_error(msg["id"], "designer_failed", str(err))
 
 
 @websocket_api.require_admin

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import logging
 import struct
+import threading
+import time
 from collections import deque
-from datetime import datetime, timedelta
+from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from threading import Lock
 from time import sleep
 from typing import Any
@@ -38,6 +41,7 @@ from .const import (
     CONF_SCALE,
     CONF_SLAVE_ID,
     CONF_STOPBITS,
+    DATA_TYPE_INT16,
     DATA_TYPE_UINT16,
     DATA_TYPE_WORD_COUNT,
     DIAG_CONSECUTIVE_FAILURES,
@@ -126,6 +130,14 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         # adapter can pair a response with the wrong request. Every I/O operation
         # must therefore own this lock for its entire transaction.
         self._serial_lock = Lock()
+        # Per-thread latency waterfall stages for the Traffic Inspector. The
+        # active serial transaction fills this in; the next _record_transaction
+        # call consumes it so failed I/O keeps its timing as well.
+        self._tx_stages = threading.local()
+        # Temporary scan-interval boost state (modbus_usb.boost_polling).
+        self._boost_original_interval: timedelta | None = None
+        self._boost_interval: timedelta | None = None
+        self._boost_until: datetime | None = None
 
     def get_command_state(self, entity_id: str) -> bool | None:
         """Return the last known state when a board read is temporarily unavailable."""
@@ -269,6 +281,17 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 str(device_id),
             )
 
+    def _get_tx_stages(self) -> threading.local:
+        """Return this thread's latency-stage store, creating it when needed.
+
+        Test helpers build coordinators with ``object.__new__`` and skip
+        ``__init__``; lazy creation keeps those minimal instances working.
+        """
+        stages = getattr(self, "_tx_stages", None)
+        if stages is None:
+            stages = self._tx_stages = threading.local()
+        return stages
+
     def _resolve_port_path(self, port: str) -> str:
         """Detect when /dev/ttyUSB* dynamically switches index or has a persistent /dev/serial/by-id link."""
         import os
@@ -369,14 +392,43 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         if delay_ms > 0:
             sleep(delay_ms / 1000.0)
 
+    @contextmanager
+    def _serial_transaction(self):
+        """Own the bus for one transaction and record its latency waterfall.
+
+        Stages are measured around lock acquisition, port (re)connection, the
+        optional inter-frame delay, and the serial request itself. They are
+        stored on a thread-local so the matching _record_transaction call can
+        attach them even when the transaction raised.
+        """
+        stages: dict[str, float] = {}
+        wait_started = time.monotonic()
+        with self._serial_lock:
+            stages["lock_wait_ms"] = round((time.monotonic() - wait_started) * 1000, 2)
+            connect_started = time.monotonic()
+            self._ensure_connected()
+            stages["connect_ms"] = round((time.monotonic() - connect_started) * 1000, 2)
+            self._get_tx_stages().stages = stages
+            yield stages
+
     def _call_modbus(
         self, method_name: str, *args: Any, slave: int, **kwargs: Any
     ) -> Any:
         """Call a method on this hub's configured serial client."""
+        stages = getattr(self._get_tx_stages(), "stages", None)
+        delay_started = time.monotonic()
         self._apply_inter_frame_delay()
-        return call_modbus_on_client(
+        if stages is not None:
+            stages["frame_delay_ms"] = round(
+                (time.monotonic() - delay_started) * 1000, 2
+            )
+        request_started = time.monotonic()
+        result = call_modbus_on_client(
             self.client, method_name, *args, slave=slave, **kwargs
         )
+        if stages is not None:
+            stages["request_ms"] = round((time.monotonic() - request_started) * 1000, 2)
+        return result
 
     def scan_bus(
         self,
@@ -580,6 +632,11 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         }
         if duration_ms is not None:
             item["duration_ms"] = round(duration_ms, 1)
+        tx_stages = self._get_tx_stages()
+        stages = getattr(tx_stages, "stages", None)
+        if stages:
+            item["latency"] = dict(stages)
+        tx_stages.stages = None
         if error:
             item["error"] = str(error)
         self.transaction_log.appendleft(item)
@@ -664,8 +721,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         value: Any = None
         started = datetime.now()
         try:
-            with self._serial_lock:
-                self._ensure_connected()
+            with self._serial_transaction():
                 if function_code == 0x05:
                     if len(payload) != 6 or payload[4:] not in (
                         b"\x00\x00",
@@ -773,6 +829,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             "health": dict(self.diag),
             "transactions": list(self.transaction_log),
             "scan": dict(self.scan_progress),
+            "boost": self.boost_state(),
             "circuit_breaker": self.circuit_breaker.get_summary()
             if hasattr(self, "circuit_breaker")
             else {},
@@ -983,8 +1040,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                     # Execute packed multi-register block read
                     started = datetime.now()
                     try:
-                        with self._serial_lock:
-                            self._ensure_connected()
+                        with self._serial_transaction():
                             if block.register_type == REGISTER_TYPE_HOLDING:
                                 result = self._call_modbus(
                                     "read_holding_registers",
@@ -1125,8 +1181,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         operation = f"read_{register_type}"
         count = 1
         try:
-            with self._serial_lock:
-                self._ensure_connected()
+            with self._serial_transaction():
                 if register_type == REGISTER_TYPE_COIL:
                     result = self._call_modbus(
                         "read_coils", address, count=count, slave=target_slave
@@ -1197,8 +1252,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         target_slave = int(slave if slave is not None else self.slave_id)
         started = datetime.now()
         try:
-            with self._serial_lock:
-                self._ensure_connected()
+            with self._serial_transaction():
                 result = self._call_modbus(
                     "write_coil", address, value, slave=target_slave
                 )
@@ -1230,8 +1284,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         target_slave = int(slave if slave is not None else self.slave_id)
         started = datetime.now()
         try:
-            with self._serial_lock:
-                self._ensure_connected()
+            with self._serial_transaction():
                 result = self._call_modbus(
                     "write_register", address, value, slave=target_slave
                 )
@@ -1272,8 +1325,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         high, low = struct.unpack(">HH", raw)
         started = datetime.now()
         try:
-            with self._serial_lock:
-                self._ensure_connected()
+            with self._serial_transaction():
                 result = self._call_modbus(
                     "write_registers", address, [high, low], slave=target_slave
                 )
@@ -1299,6 +1351,205 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 duration_ms=(datetime.now() - started).total_seconds() * 1000,
             )
             raise
+
+    def read_raw_words(
+        self, address: int, register_type: str, count: int, slave: int
+    ) -> list[int]:
+        """Read raw register words / coil bits without decoding.
+
+        Used by the interactive Template Designer, which decodes one response
+        into several candidate data types so users can verify their mapping.
+        """
+        target_slave = int(slave)
+        started = datetime.now()
+        operation = f"read_{register_type}"
+        try:
+            with self._serial_transaction():
+                if register_type == REGISTER_TYPE_COIL:
+                    result = self._call_modbus(
+                        "read_coils", address, count=count, slave=target_slave
+                    )
+                elif register_type == REGISTER_TYPE_DISCRETE:
+                    result = self._call_modbus(
+                        "read_discrete_inputs",
+                        address,
+                        count=count,
+                        slave=target_slave,
+                    )
+                elif register_type == REGISTER_TYPE_HOLDING:
+                    result = self._call_modbus(
+                        "read_holding_registers",
+                        address,
+                        count=count,
+                        slave=target_slave,
+                    )
+                elif register_type == REGISTER_TYPE_INPUT:
+                    result = self._call_modbus(
+                        "read_input_registers",
+                        address,
+                        count=count,
+                        slave=target_slave,
+                    )
+                else:
+                    raise ValueError(f"Unknown register type: {register_type}")
+                if result.isError():
+                    raise UpdateFailed(str(result))
+                if register_type in (REGISTER_TYPE_COIL, REGISTER_TYPE_DISCRETE):
+                    words = [int(bit) for bit in result.bits[:count]]
+                else:
+                    words = list(result.registers[:count])
+            self._record_transaction(
+                operation,
+                slave=target_slave,
+                address=address,
+                count=count,
+                result="raw_words",
+                duration_ms=(datetime.now() - started).total_seconds() * 1000,
+            )
+            return words
+        except Exception as err:
+            self._record_transaction(
+                operation,
+                slave=target_slave,
+                address=address,
+                count=count,
+                error=err,
+                duration_ms=(datetime.now() - started).total_seconds() * 1000,
+            )
+            raise
+
+    @staticmethod
+    def _encode_write_words(value: Any, data_type: str) -> list[int] | None:
+        """Encode one value into register words for a batch write item."""
+        if data_type in (DATA_TYPE_UINT16, DATA_TYPE_INT16):
+            return None
+        if data_type == "uint32":
+            raw = struct.pack(">I", int(value))
+        elif data_type == "int32":
+            raw = struct.pack(">i", int(value))
+        elif data_type == "float32":
+            raw = struct.pack(">f", float(value))
+        else:
+            raise ValueError(f"Unsupported batch write data type: {data_type}")
+        high, low = struct.unpack(">HH", raw)
+        return [high, low]
+
+    def batch_write(
+        self, writes: list[dict[str, Any]], slave: int | None = None
+    ) -> dict[str, Any]:
+        """Write several coils/holding registers under one coordinator lock.
+
+        Keeping the bus for the whole batch guarantees that no other poll or
+        service interleaves between the individual write frames. The batch
+        aborts on the first failed write and reports what was applied.
+        """
+        if not writes:
+            raise ValueError("Batch write requires at least one write item")
+        target_slave = int(slave if slave is not None else self.slave_id)
+        results: list[dict[str, Any]] = []
+        started = datetime.now()
+        try:
+            with self._serial_transaction():
+                for write in writes:
+                    address = int(write["address"])
+                    register_type = write.get(CONF_REGISTER_TYPE, REGISTER_TYPE_HOLDING)
+                    value = write["value"]
+                    if register_type == REGISTER_TYPE_COIL:
+                        result = self._call_modbus(
+                            "write_coil", address, bool(value), slave=target_slave
+                        )
+                        written = bool(value)
+                    elif register_type == REGISTER_TYPE_HOLDING:
+                        data_type = write.get(CONF_DATA_TYPE, DATA_TYPE_UINT16)
+                        words = self._encode_write_words(value, data_type)
+                        if words is None:
+                            written = int(value) & 0xFFFF
+                            result = self._call_modbus(
+                                "write_register", address, written, slave=target_slave
+                            )
+                        else:
+                            written = value
+                            result = self._call_modbus(
+                                "write_registers",
+                                address,
+                                words,
+                                slave=target_slave,
+                            )
+                    else:
+                        raise ValueError(
+                            "Batch writes support holding registers and coils, "
+                            f"got {register_type!r}"
+                        )
+                    if result.isError():
+                        raise UpdateFailed(str(result))
+                    results.append(
+                        {
+                            "address": address,
+                            "register_type": register_type,
+                            "value": written,
+                            "success": True,
+                        }
+                    )
+            self._record_transaction(
+                "batch_write",
+                slave=target_slave,
+                address=int(writes[0]["address"]),
+                count=len(writes),
+                result=f"{len(results)} writes accepted",
+                duration_ms=(datetime.now() - started).total_seconds() * 1000,
+            )
+            return {
+                "slave_id": target_slave,
+                "written": len(results),
+                "results": results,
+            }
+        except Exception as err:
+            self._record_transaction(
+                "batch_write",
+                slave=target_slave,
+                address=int(writes[0]["address"]),
+                count=len(writes),
+                error=err,
+                duration_ms=(datetime.now() - started).total_seconds() * 1000,
+            )
+            raise
+
+    def boost_state(self) -> dict[str, Any]:
+        """Describe an active polling boost for diagnostics and the panel."""
+        boost_until = getattr(self, "_boost_until", None)
+        if boost_until is None or datetime.now(UTC) >= boost_until:
+            return {"active": False}
+        boost_interval = getattr(self, "_boost_interval", None)
+        remaining = (boost_until - datetime.now(UTC)).total_seconds()
+        return {
+            "active": True,
+            "scan_interval": boost_interval.total_seconds() if boost_interval else None,
+            "until": boost_until.isoformat(),
+            "remaining_seconds": round(remaining, 1),
+        }
+
+    def apply_polling_boost(self, scan_interval: float, duration: float) -> dict:
+        """Temporarily shorten the coordinator poll interval."""
+        now = datetime.now(UTC)
+        if getattr(self, "_boost_original_interval", None) is None:
+            self._boost_original_interval = self.update_interval
+        self._boost_interval = timedelta(seconds=scan_interval)
+        self.update_interval = self._boost_interval
+        self._boost_until = now + timedelta(seconds=duration)
+        _LOGGER.info(
+            "Polling boost active: %ss interval for %ss", scan_interval, duration
+        )
+        return self.boost_state()
+
+    def restore_polling_boost(self) -> None:
+        """Restore the poll interval that was active before the boost."""
+        original = getattr(self, "_boost_original_interval", None)
+        if original is not None:
+            self.update_interval = original
+        self._boost_original_interval = None
+        self._boost_interval = None
+        self._boost_until = None
+        _LOGGER.info("Polling boost finished; interval restored")
 
     def read_register_raw(
         self, address: int, register_type: str, data_type: str, slave: int | None = None

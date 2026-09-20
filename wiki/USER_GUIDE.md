@@ -82,6 +82,8 @@ update**, and **Add device** actions.
 | **All Entities** | Flat list of every Home Assistant entity with quick edit/delete. |
 | **Hub & Serial** | View and edit the hub's serial settings and poll interval; scan USB ports. |
 | **Diagnostics & Debug** | Health, scanner, direct tools, verification, board tools, discovery, activity log. |
+| **Traffic Inspector** | Live RS-485 traffic: decoded RTU frames (with CRC16 pass/fail) and per-transaction latency waterfalls. |
+| **Template Designer** | Draft a custom YAML template and live-test every register against the board before saving. |
 
 Device cards and diagnostics cards start **collapsed** — click a card header
 to expand it. The panel remembers what you expanded, and switches update
@@ -234,6 +236,27 @@ Validation rules (enforced by `pytest tests/test_templates.py` and CI):
 - `default_slave_id` within 1–247; `status`, if present, is one of
   `tested` / `testing` / `untested`.
 
+### Interactive Template Designer (live validation)
+
+Instead of hand-testing with Developer Tools, use the panel's **Template
+Designer** tab (since v2.5.0):
+
+1. Paste (or type) your draft YAML — **📄 Load sample** provides a starter.
+2. Optionally override the **test slave ID** if the board on your bench uses
+   a different address than the template's `default_slave_id`.
+3. Click **▶ Validate & test reads**. The integration:
+   - structurally validates the YAML (same rules as saving),
+   - reads **every** entity's registers from the live bus,
+   - decodes each response as *all* compatible data types, so you can spot a
+     wrong `data_type` (e.g. a float32 field declared as uint16) at a glance.
+4. Fix any ❌ rows (bad address, wrong register type, unreachable slave),
+   re-run, and once everything shows **pass**, enter a filename and
+   **💾 Save template**. Saving warns you if the draft hasn't passed live
+   validation.
+
+> Test reads are real bus traffic. Leave **Live test reads** enabled for the
+> certification workflow; disable it only for an offline structure check.
+
 ### Fingerprints (scan suggestions)
 
 Add read-only checks so **Find RS-485 Devices** can suggest your template for
@@ -309,13 +332,36 @@ collapsed with a one-line live summary; expand any card for details.
 | **Watch inputs and sensors** | Repeatedly reads a function/address and highlights values that change — flip a physical input to find its register. |
 | **Dangerous manual write** | Guarded hex-frame writer for experts (admin only, double confirmation, CRC-checked, FC05/FC06/FC0F/FC10 only). |
 
+### Traffic Inspector (frame analyzer)
+
+For wire-level analysis, open the **Traffic Inspector** tab (since v2.5.0).
+It lists the hub's recent RS-485 transactions; clicking one decodes its RTU
+frame byte by byte:
+
+- **Slave ID** and **Function Code** with the plain-language name
+  (FC01–FC06, FC0F, FC10, and exception responses).
+- **Address**, **Count**, **Byte Count**, and the **Data payload** in hex.
+- **CRC16 low/high bytes** with a computed checksum and **PASS/FAIL** badge —
+  a failing CRC usually means wiring noise, a baud mismatch, or a bus
+  collision.
+- A **latency waterfall** splitting each transaction into bus lock wait, port
+  connect, inter-frame delay, and the serial request itself, with
+  avg/p95/max duration indicators per hub and per slave. Slow `request`
+  stages point at the board; slow `lock wait` stages point at very aggressive
+  polling or long batch scans.
+
+> The inspector decodes the integration's *reconstructed request frames* —
+  response bytes are never invented.
+
 ### Recommended debugging workflow
 
 1. Check **Connection Health** — are requests failing or just slow?
 2. Open the **Activity Log** — the exact failing operation, slave, and error.
-3. Run **Find RS-485 Devices** on a narrow range to confirm ID/baud/parity.
-4. Use **Live Read** with the detected settings to prove the register map.
-5. For unknown boards, use **Safe discovery** + **Watch inputs** — never guess
+3. For timing or CRC questions, open the **Traffic Inspector** and inspect
+   the failing frame's checksum and latency waterfall.
+4. Run **Find RS-485 Devices** on a narrow range to confirm ID/baud/parity.
+5. Use **Live Read** with the detected settings to prove the register map.
+6. For unknown boards, use **Safe discovery** + **Watch inputs** — never guess
    writes; use the guarded writer only with a documented frame.
 
 ---
@@ -349,8 +395,8 @@ Notable board specifics:
 
 ## 9. Automations & services
 
-Two services cover one-shot access from automations, scripts, and Developer
-Tools. Both need the hub's `entry_id` (find it under
+Five services cover one-shot access from automations, scripts, and Developer
+Tools. All need the hub's `entry_id` (find it under
 **Settings → Devices & services → Modbus USB Controller → ⋮ → Device info**,
 or pick it in the service UI) and accept an optional `slave_id` override.
 
@@ -358,6 +404,9 @@ or pick it in the service UI) and accept an optional `slave_id` override.
 |---|---|
 | `modbus_usb.read_register` | One-shot read; the result arrives as a `modbus_usb_register_read` event. |
 | `modbus_usb.write_register` | Write a coil (`0`/`1`) or holding register (integer). Failures raise, so automations can catch them. |
+| `modbus_usb.batch_write` | Write several coils/holding registers while holding the bus lock for the whole batch — no polling interleaves between writes. Aborts on the first failed write. |
+| `modbus_usb.boost_polling` | Temporarily shorten the poll interval (`scan_interval`, default 1 s) for `duration` seconds (5–3600). The original interval restores itself; stacking boosts extends the window. |
+| `modbus_usb.reset_circuit_breaker` | Manually restore a degraded/offline slave to `healthy` so it is polled immediately again. Omit `slave_id` to reset every tracked slave. |
 
 **Poll a register every minute and alert on its value:**
 
@@ -414,6 +463,55 @@ script:
 
 > Prefer entities over services for anything polled regularly — entities get
 > polling, retries, state history, and Energy-dashboard support for free.
+
+**Set several registers atomically (single bus lock):**
+
+```yaml
+script:
+  apply_setpoints:
+    sequence:
+      - service: modbus_usb.batch_write
+        data:
+          entry_id: "YOUR_ENTRY_ID"
+          slave_id: 2
+          writes:
+            - address: 10
+              value: 65            # uint16 holding register
+            - address: 12
+              value: 21.5
+              data_type: float32   # written as two registers
+            - address: 0
+              register_type: coil
+              value: 1
+```
+
+**High-frequency monitoring for two minutes (e.g. while commissioning):**
+
+```yaml
+script:
+  commissioning_boost:
+    sequence:
+      - service: modbus_usb.boost_polling
+        data:
+          entry_id: "YOUR_ENTRY_ID"
+          scan_interval: 1    # poll every second…
+          duration: 120       # …for two minutes, then restore automatically
+```
+
+**Recover an unresponsive slave without restarting HA:**
+
+```yaml
+automation:
+  - alias: "Reset Modbus slave 3 when the user asks"
+    trigger:
+      - platform: state
+        entity_id: input_button.reset_modbus
+    action:
+      - service: modbus_usb.reset_circuit_breaker
+        data:
+          entry_id: "YOUR_ENTRY_ID"
+          slave_id: 3
+```
 
 ---
 

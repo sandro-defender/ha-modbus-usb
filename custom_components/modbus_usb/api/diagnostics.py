@@ -24,6 +24,7 @@ from ..const import (
     DOMAIN,
     REGISTER_TYPE_COIL,
 )
+from ..inspector import build_inspector_view
 from ..templates import (
     async_load_templates,
 )
@@ -670,3 +671,32 @@ async def ws_scan_bus(
     except Exception as err:
         _LOGGER.warning("RS-485 bus scan failed: %s", err)
         connection.send_error(msg["id"], "scan_failed", str(err))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "modbus_usb/traffic_inspector",
+        vol.Required("entry_id"): cv.string,
+        vol.Optional("limit", default=100): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=200)
+        ),
+    }
+)
+@websocket_api.async_response
+async def ws_traffic_inspector(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Return decoded RTU frames and latency waterfalls for recent traffic."""
+    try:
+        coordinator = hass.data[DOMAIN][msg["entry_id"]]
+        view = await hass.async_add_executor_job(
+            build_inspector_view, coordinator, msg["limit"]
+        )
+        connection.send_result(msg["id"], view)
+    except KeyError:
+        connection.send_error(
+            msg["id"], "not_found", f"Unknown config entry '{msg['entry_id']}'"
+        )
+    except Exception as err:
+        _LOGGER.warning("Traffic inspector view failed: %s", err)
+        connection.send_error(msg["id"], "inspector_failed", str(err))

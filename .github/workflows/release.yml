@@ -5,6 +5,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      fast_release:
+        description: "Fast release (skip full test matrix; run fast tests and lint/compile check)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -12,7 +18,7 @@ permissions:
 jobs:
   validate-and-release:
     name: Validate integration and publish a new version
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
@@ -27,10 +33,16 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install -r requirements_test.txt
 
-      - name: Lint and test before publishing
-        run: |
-          ruff check custom_components tests
-          python -m pytest -q
+      - name: Lint before publishing
+        run: ruff check custom_components tests
+
+      - name: Run tests (fast mode)
+        if: "${{ inputs.fast_release == true }}"
+        run: python -m pytest -m fast -q
+
+      - name: Run tests (standard mode)
+        if: "${{ inputs.fast_release != true }}"
+        run: python -m pytest -q
 
       - name: Check Python source syntax
         run: python -m compileall -q custom_components/modbus_usb

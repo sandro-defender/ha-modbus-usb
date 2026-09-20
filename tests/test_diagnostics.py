@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
+
 from custom_components.modbus_usb.diagnostics import (
     diagnostic_request_frame,
     modbus_crc16,
 )
+
+pytestmark = pytest.mark.fast
 
 
 def test_modbus_crc16_known_vectors() -> None:

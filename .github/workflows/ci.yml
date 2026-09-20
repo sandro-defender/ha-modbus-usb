@@ -5,7 +5,17 @@ on:
     branches:
       - main
       - "arena/**"
+    paths-ignore:
+      - "docs/**"
+      - "wiki/**"
+      - "*.md"
+      - "LICENSE"
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "wiki/**"
+      - "*.md"
+      - "LICENSE"
   workflow_dispatch:
 
 jobs:

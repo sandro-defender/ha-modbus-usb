@@ -1,6 +1,10 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+asyncio_mode = "auto"
+markers = [
+  "fast: fast standalone tests (no full Home Assistant runtime required)",
+]
 
 [tool.coverage.run]
 source = ["custom_components/modbus_usb"]
@@ -18,4 +22,3 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B017"]  # assertRaises(Exception) is fine in regression tests
-

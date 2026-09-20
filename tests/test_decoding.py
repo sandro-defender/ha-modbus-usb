@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import struct
 
+import pytest
+
 from custom_components.modbus_usb.decoding import (
     as_float,
     decode_words,
     normalize_enum,
 )
+
+pytestmark = pytest.mark.fast
 
 
 def test_normalize_enum_treats_none_strings_and_invalid_values_as_none() -> None:

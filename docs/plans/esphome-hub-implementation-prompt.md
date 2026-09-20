@@ -80,17 +80,17 @@ working for the API client shim — give the shim methods a `slave` parameter.
 ## Data model (config entry `data`)
 
 ```python
-CONF_TRANSPORT = "transport"            # "serial" | "esphome_tcp" | "esphome_api"
+CONF_TRANSPORT = "transport"  # "serial" | "esphome_tcp" | "esphome_api"
 TRANSPORT_SERIAL = "serial"
 TRANSPORT_ESPHOME_TCP = "esphome_tcp"
 TRANSPORT_ESPHOME_API = "esphome_api"
-CONF_HOST = "host"                      # hostname / IP / mDNS name
-CONF_TCP_PORT = "tcp_port"              # default 8899 (stream server)
-CONF_API_PORT = "api_port"              # default 6053
-CONF_API_ENCRYPTION_KEY = "api_encryption_key"   # ESPHome noise PSK, optional
-CONF_API_PASSWORD = "api_password"      # legacy, optional
+CONF_HOST = "host"  # hostname / IP / mDNS name
+CONF_TCP_PORT = "tcp_port"  # default 8899 (stream server)
+CONF_API_PORT = "api_port"  # default 6053
+CONF_API_ENCRYPTION_KEY = "api_encryption_key"  # ESPHome noise PSK, optional
+CONF_API_PASSWORD = "api_password"  # legacy, optional
 CONF_ESPHOME_SERVICE = "esphome_service"  # default "modbus_send"
-CONF_ESPHOME_EVENT = "esphome_event"      # default "esphome.modbus_rx"
+CONF_ESPHOME_EVENT = "esphome_event"  # default "esphome.modbus_rx"
 CONF_RESPONSE_TIMEOUT = "response_timeout"  # seconds, default 1.5 (api), 3 (tcp)
 ```
 

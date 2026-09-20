@@ -16,8 +16,9 @@ Modbus USB Controller integration. For the short overview, see the
 8. [Board tools](#8-board-tools)
 9. [Automations & services](#9-automations--services)
 10. [Multiple devices & hubs](#10-multiple-devices--hubs)
-11. [Maintenance](#11-maintenance)
-12. [Troubleshooting & FAQ](#12-troubleshooting--faq)
+11. [Using an ESPHome device as the hub](#11-using-an-esphome-device-as-the-hub)
+12. [Maintenance](#12-maintenance)
+13. [Troubleshooting & FAQ](#13-troubleshooting--faq)
 
 ---
 
@@ -26,7 +27,8 @@ Modbus USB Controller integration. For the short overview, see the
 ### What you need
 
 - Home Assistant 2024.1 or newer.
-- A USB-to-RS-485 adapter connected to the machine running Home Assistant.
+- A USB-to-RS-485 adapter connected to the machine running Home Assistant —
+  **or** an ESP32 with an RS-485 module running ESPHome (chapter 11).
 - A Modbus RTU device, powered and wired (A→A, B→B).
 - Every device on one RS-485 bus must use a **unique slave ID** (1–247).
 
@@ -50,7 +52,9 @@ slave ID, and poll interval.
 
 1. Go to **Settings → Devices & services → Add integration**.
 2. Search for **Modbus USB Controller**.
-3. Fill in the form:
+3. Choose the **connection type**: *Local USB / serial adapter* (this
+   section), or one of the two *ESPHome* options (chapter 11).
+4. Fill in the form:
    - **Integration name** — e.g. `Workshop RS-485`.
    - **Serial port** — e.g. `/dev/ttyUSB0` (Linux/HA OS) or `COM3` (Windows).
      Prefer a `/dev/serial/by-id/...` path: it survives reboots and re-plugged
@@ -60,7 +64,7 @@ slave ID, and poll interval.
    - **Slave / Unit ID** — your device's Modbus address (usually `1`).
      If you don't know it, leave `1` for now and scan later (chapter 7).
    - **Poll interval** — how often registers are read (default 10 s).
-4. Save. A **Modbus USB** entry appears in the sidebar — that panel is where
+5. Save. A **Modbus USB** entry appears in the sidebar — that panel is where
    everything else happens.
 
 > You need a second hub only if you have a **second USB adapter**. All boards
@@ -625,7 +629,103 @@ automation:
 
 ---
 
-## 11. Maintenance
+## 11. Using an ESPHome device as the hub
+
+Since v2.8.0 the hub can live on the network: an **ESP32 + RS-485 module**
+running ESPHome carries the bus, and Home Assistant reaches it over Wi-Fi.
+This is useful when the RS-485 devices are far from the HA machine, when HA
+runs in a VM/container without USB pass-through, or when you already have
+ESPHome nodes near the equipment.
+
+### Two transports
+
+| | ESPHome · RTU over TCP (`esphome_tcp`) | ESPHome · native API (`esphome_api`) |
+|---|---|---|
+| Firmware | `esphome/modbus_bridge_esp32.yaml` | `esphome/modbus_api_bridge_esp32.yaml` |
+| Extra ESPHome component | `oxan/esphome-stream-server` (external) | none |
+| How it works | ESP32 forwards raw UART bytes on TCP `8899`; HA speaks Modbus RTU over the socket | HA calls the ESPHome service `modbus_send`; the ESP32 fires `esphome.modbus_rx` events with the reply |
+| Latency per request | ≈ wire speed | +20–60 ms |
+| Feature coverage | Everything (polling, scans, hex console, board tools, inspector) | Everything; capture uses the client's own tracing hook |
+| Pick it when | You can use external components (recommended) | Your ESPHome setup forbids external components, or you want the API's encryption without a second open port |
+
+Both YAML files live in `custom_components/modbus_usb/esphome/` (also in the
+repository). The README there has the wiring table.
+
+### Wiring the ESP32
+
+Generic ESP32 dev board, **UART2** (UART0 stays free for flashing/logs):
+
+- `GPIO17` → RS-485 module **DI** (TX) · `GPIO16` ← module **RO** (RX)
+- `3V3`/`5V` and `GND` → module VCC/GND (check the module's logic level)
+- Module **A/B** → bus A/B; add a common GND on long runs and 120 Ω
+  termination at both bus ends.
+- Auto-direction modules need nothing more. Classic MAX485 boards: tie
+  **DE+RE** to one GPIO (e.g. `GPIO4`) and uncomment `flow_control_pin`.
+
+### Flashing
+
+1. Copy the YAML into your ESPHome dashboard as a new device.
+2. Edit the `substitutions:` block — device `name`, and **`uart_baud` /
+   `uart_parity` / `uart_stop_bits` to match your Modbus devices** (the
+   line settings are compiled into the firmware; HA cannot change them
+   later — the API variant offers an optional `set_serial` service).
+3. Make sure `secrets.yaml` has `wifi_ssid`, `wifi_password`,
+   `api_encryption_key` and `ota_password`.
+4. Install (USB the first time, OTA afterwards). Note the device's
+   hostname (`<name>.local`) or give it a static IP.
+
+### Adding the hub in Home Assistant
+
+1. **Settings → Devices & services → Add integration → Modbus USB
+   Controller**, pick the ESPHome connection type.
+2. Enter the **host** (`modbus-bridge.local` or the IP). For RTU over TCP
+   keep **port 8899** unless you changed `tcp_port`. For the native API
+   enter the **API encryption key** (the same value as
+   `api_encryption_key` in `secrets.yaml`); the legacy API password is
+   only needed on very old firmware.
+3. Enter the same **baud / data bits / parity / stop bits** as in the YAML,
+   the default slave ID and the poll interval.
+4. **Submit** — the flow contacts the device first. Errors:
+   - *Cannot connect* — wrong host/port, device offline, or (TCP) another
+     client is already attached to the stream server (it accepts one).
+   - *Authentication failed* — encryption key mismatch.
+   - *Service missing* — the device runs a firmware without the
+     `modbus_send` service; flash `modbus_api_bridge_esp32.yaml`.
+
+Existing USB hubs are untouched: their entries are migrated to store
+`transport: serial` and behave exactly as before. You can switch a hub from
+USB to ESPHome (or back) later in the panel.
+
+### In the panel
+
+The **🔗 Modbus Hub Connection** tab shows a transport badge and the
+endpoint. **Edit hub** has a **Connection type** selector that swaps the
+serial fields for host/port/credentials. The key/password boxes are
+write-only: leave them blank to keep the stored value, tick *clear* to
+remove it. **Test connection** probes the values in the form *before* you
+save them (it never sends Modbus traffic on serial/TCP; on the API it does
+the handshake and shows the ESPHome device name and version).
+
+Because line settings are fixed on the bridge, the baud/parity inputs are
+marked as such, and the **RS-485 bus scan** (chapter 7) probes slave IDs at
+the bridge's settings only — a note in the scanner says so.
+
+### Limits and tips
+
+- **One ESPHome device = one hub.** RS-485 is request/response; the stream
+  server also accepts a single TCP client. Don't open a second tool against
+  port 8899 while HA is connected.
+- Wi-Fi adds jitter. If you see sporadic *No response received*, raise the
+  hub's **response timeout** (default 3 s for TCP, 1.5 s for the API) or the
+  device's retry count before blaming the wiring.
+- Keep the ESP32's Wi-Fi power save off (the YAMLs already do) — power save
+  is the most common cause of 100–300 ms stalls.
+- The ESP32 shows up in the ESPHome integration too; that's normal and
+  harmless — the Modbus hub does not use its entities.
+
+---
+
+## 12. Maintenance
 
 ### Updating
 
@@ -652,7 +752,7 @@ your regular HA backup — no other files carry your setup.
 
 ---
 
-## 12. Troubleshooting & FAQ
+## 13. Troubleshooting & FAQ
 
 ### Quick symptom table
 

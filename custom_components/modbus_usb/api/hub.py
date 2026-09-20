@@ -10,17 +10,33 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 
 from ..const import (
+    CONF_API_ENCRYPTION_KEY,
+    CONF_API_PASSWORD,
+    CONF_API_PORT,
     CONF_BAUDRATE,
     CONF_BYTESIZE,
+    CONF_ESPHOME_EVENT,
+    CONF_ESPHOME_SERVICE,
+    CONF_HOST,
     CONF_PARITY,
     CONF_PORT,
+    CONF_RESPONSE_TIMEOUT,
     CONF_SCAN_INTERVAL,
     CONF_SLAVE_ID,
     CONF_STOPBITS,
+    CONF_TCP_PORT,
+    CONF_TRANSPORT,
     DOMAIN,
+    TRANSPORTS,
 )
 from ..templates import (
     async_load_templates,
+)
+from ..transport import (
+    connection_config,
+    describe_transport,
+    is_serial,
+    probe_connection,
 )
 from .helpers import _format_entry_data, _get_entry, _list_serial_ports
 
@@ -91,6 +107,13 @@ async def ws_get_serial_status(
     try:
         coordinator = hass.data[DOMAIN][msg["entry_id"]]
         serial = coordinator.get_diagnostics().get("serial", {})
+        if not is_serial(getattr(coordinator, "serial_config", None)):
+            # ESPHome bridges: no local adapter to match; the transport
+            # summary (device info, bridge stats) is already in ``serial``.
+            connection.send_result(
+                msg["id"], {"serial": serial, "adapter": None, "esphome": True}
+            )
+            return
         configured_port = str(serial.get("port") or "")
         ports = await hass.async_add_executor_job(_list_serial_ports)
         # Match either exact port or persistent symlink path
@@ -132,6 +155,36 @@ async def ws_save_hub(
         hub_data = msg["hub"]
 
         new_data = dict(entry.data)
+        if CONF_TRANSPORT in hub_data:
+            transport = str(hub_data[CONF_TRANSPORT])
+            if transport not in TRANSPORTS:
+                raise ValueError(f"Unknown hub transport '{transport}'")
+            new_data[CONF_TRANSPORT] = transport
+        if CONF_HOST in hub_data:
+            host = str(hub_data[CONF_HOST]).strip()
+            if not host and new_data.get(CONF_TRANSPORT, "serial") != "serial":
+                raise ValueError("Host is required for ESPHome transports")
+            new_data[CONF_HOST] = host
+        if CONF_TCP_PORT in hub_data:
+            new_data[CONF_TCP_PORT] = _port_number(hub_data[CONF_TCP_PORT])
+        if CONF_API_PORT in hub_data:
+            new_data[CONF_API_PORT] = _port_number(hub_data[CONF_API_PORT])
+        if CONF_RESPONSE_TIMEOUT in hub_data:
+            new_data[CONF_RESPONSE_TIMEOUT] = max(
+                0.1, min(float(hub_data[CONF_RESPONSE_TIMEOUT]), 30.0)
+            )
+        for text_key in (CONF_ESPHOME_SERVICE, CONF_ESPHOME_EVENT):
+            if text_key in hub_data and str(hub_data[text_key]).strip():
+                new_data[text_key] = str(hub_data[text_key]).strip()
+        # Secrets: a blank value means "keep the stored one"; the panel never
+        # receives the current value, so it can only replace or clear it.
+        for secret in (CONF_API_ENCRYPTION_KEY, CONF_API_PASSWORD):
+            if secret in hub_data:
+                value = str(hub_data[secret] or "").strip()
+                if value:
+                    new_data[secret] = value
+                elif hub_data.get(f"clear_{secret}"):
+                    new_data.pop(secret, None)
         if CONF_PORT in hub_data:
             new_data[CONF_PORT] = hub_data[CONF_PORT]
         if CONF_BAUDRATE in hub_data:
@@ -156,3 +209,65 @@ async def ws_save_hub(
     except Exception as err:
         _LOGGER.error("ws_save_hub failed: %s", err, exc_info=True)
         connection.send_error(msg["id"], "error", str(err))
+
+
+def _port_number(value) -> int:
+    port = int(value)
+    if not 1 <= port <= 65535:
+        raise ValueError(f"Port must be 1–65535, got {port}")
+    return port
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "modbus_usb/test_hub_connection",
+        vol.Required("entry_id"): cv.string,
+        vol.Optional("hub"): dict,
+    }
+)
+@websocket_api.async_response
+async def ws_test_hub_connection(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Read-only reachability probe of the hub endpoint (v2.8.0).
+
+    Probes the stored connection, or — when ``hub`` overrides are given —
+    the settings the user is about to save, without touching the entry.
+    For serial and ESPHome-TCP hubs the probe never sends Modbus traffic;
+    for the ESPHome API it performs the handshake and returns device info.
+    Secrets in ``hub`` are used for the probe only and never echoed back.
+    """
+    try:
+        entry = _get_entry(hass, msg["entry_id"])
+        overrides = dict(msg.get("hub") or {})
+        data = {**entry.data}
+        for key, value in overrides.items():
+            if key in (CONF_API_ENCRYPTION_KEY, CONF_API_PASSWORD) and not value:
+                continue  # blank secret → keep the stored one
+            data[key] = value
+        config = connection_config(data)
+        coordinator = hass.data.get(DOMAIN, {}).get(msg["entry_id"])
+        # The live client owns a serial adapter / the single TCP stream slot:
+        # probing the same endpoint while it is open would fail spuriously.
+        same_endpoint = (
+            coordinator is not None
+            and connection_config(getattr(coordinator, "serial_config", {})) == config
+        )
+        if same_endpoint and getattr(coordinator.client, "connected", False):
+            result = {
+                "reachable": True,
+                "latency_ms": None,
+                "error": None,
+                "error_key": None,
+                "esphome": dict(getattr(coordinator.client, "device_info", {}) or {})
+                or None,
+                "live": True,
+            }
+        else:
+            result = await hass.async_add_executor_job(probe_connection, config, hass)
+            result["live"] = False
+        result["summary"] = describe_transport(config)
+        connection.send_result(msg["id"], result)
+    except Exception as err:
+        _LOGGER.warning("Hub connection test failed: %s", err)
+        connection.send_error(msg["id"], "test_failed", str(err))

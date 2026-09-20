@@ -2,6 +2,13 @@
   "config": {
     "step": {
       "user": {
+        "title": "Choose how Home Assistant reaches the RS-485 bus",
+        "description": "A **serial** hub uses a USB/RS-485 adapter plugged into the Home Assistant host. An **ESPHome** hub uses an ESP32 with an RS-485 module anywhere on your network: *RTU over TCP* (recommended — the device runs a small UART-to-TCP stream server) or *native API* (no extra component; frames travel through an ESPHome service and event). Example ESPHome YAML files ship with the integration under `esphome/`.",
+        "data": {
+          "transport": "Hub transport"
+        }
+      },
+      "serial": {
         "title": "Connect Modbus USB Controller",
         "description": "Configure the serial port settings and Modbus slave address for your USB-connected device.",
         "data": {
@@ -18,10 +25,63 @@
           "scan_interval": "How often the integration reads values from the Modbus device. Lower values mean faster updates but more serial bus traffic.",
           "slave_id": "The Modbus RTU slave address of your device. Check your device manual."
         }
+      },
+      "esphome_tcp": {
+        "title": "ESPHome bridge — RTU over TCP",
+        "description": "Flash `esphome/modbus_bridge_esp32.yaml` to the ESP32 first. Baud rate, parity and stop bits below must match the `uart:` block of that YAML — the bridge forwards raw bytes and cannot change them. {detail}",
+        "data": {
+          "name": "Integration name",
+          "host": "ESPHome host name or IP",
+          "tcp_port": "Stream server TCP port",
+          "baudrate": "Baud rate (as configured in ESPHome)",
+          "bytesize": "Data bits",
+          "parity": "Parity",
+          "stopbits": "Stop bits",
+          "response_timeout": "Response timeout (seconds)",
+          "slave_id": "Default slave / Unit ID (1–247)",
+          "scan_interval": "Poll interval (seconds)"
+        },
+        "data_description": {
+          "host": "Use the device's mDNS name (e.g. modbus-bridge.local) or a fixed IP / DHCP reservation.",
+          "tcp_port": "The `stream_server: port:` value — 8899 in the shipped example.",
+          "response_timeout": "How long to wait for a reply over Wi‑Fi before retrying. 3 s is safe; lower it on a fast LAN."
+        }
+      },
+      "esphome_api": {
+        "title": "ESPHome bridge — native API",
+        "description": "Flash `esphome/modbus_api_bridge_esp32.yaml` to the ESP32 first. The integration calls the device's `modbus_send` API service and receives replies from its `esphome.modbus_rx` events. {detail}",
+        "data": {
+          "name": "Integration name",
+          "host": "ESPHome host name or IP",
+          "api_port": "Native API port",
+          "api_encryption_key": "API encryption key (base64, from the ESPHome `api:` block)",
+          "api_password": "API password (legacy installs only)",
+          "esphome_service": "ESPHome service name",
+          "esphome_event": "ESPHome RX event name",
+          "baudrate": "Baud rate (as configured in ESPHome)",
+          "bytesize": "Data bits",
+          "parity": "Parity",
+          "stopbits": "Stop bits",
+          "response_timeout": "Response timeout (seconds)",
+          "slave_id": "Default slave / Unit ID (1–247)",
+          "scan_interval": "Poll interval (seconds)"
+        },
+        "data_description": {
+          "api_encryption_key": "Leave empty only if the device's `api:` block has no `encryption:` key.",
+          "esphome_service": "Must match `api: services: - service:` in the YAML (default `modbus_send`).",
+          "esphome_event": "Must match the event fired by the YAML (default `esphome.modbus_rx`).",
+          "response_timeout": "Native API adds ~20–60 ms per round trip; 1.5 s is a good default."
+        }
       }
     },
+    "error": {
+      "cannot_connect": "Could not reach the ESPHome device. Check host, port, Wi‑Fi and that the bridge YAML is flashed.",
+      "invalid_auth": "The ESPHome API rejected the encryption key / password.",
+      "service_missing": "Connected, but the device has no `modbus_send` API service — flash the bridge YAML.",
+      "invalid_host": "Enter a host name or IP address."
+    },
     "abort": {
-      "already_configured": "This port/slave ID combination is already configured."
+      "already_configured": "This port/slave ID combination — or this ESPHome bridge — is already configured."
     }
   },
   "options": {

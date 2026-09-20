@@ -211,8 +211,8 @@
       <div class="card">
         <div class="card-header">
           <div>
-            <div class="card-title">🔗 Modbus USB Serial Connection</div>
-            <div class="card-subtitle">Hardware port and bus settings for this integration entry</div>
+            <div class="card-title">🔗 Modbus Hub Connection</div>
+            <div class="card-subtitle">USB serial adapter or ESPHome RS-485 bridge, plus bus settings for this integration entry</div>
           </div>
           <button class="btn btn-secondary btn-sm" onclick="openEditHubModal()">
             ✏ Edit Hub Settings
@@ -269,6 +269,7 @@
             <label class="form-label">Parity profiles</label>
             <input class="form-input mono" id="scan-parities" value="N" placeholder="N,E,O" aria-describedby="scan-parity-help" />
             <p class="form-hint" id="scan-parity-help">Only the listed settings are tested; start with N.</p>
+            <p class="form-hint" id="scan-fixed-baud-note" hidden>This hub is an ESPHome bridge: baud rate and parity are fixed in its <code>uart:</code> block, so only slave IDs are swept.</p>
           </div>
           <div class="form-group">
             <label class="form-label">Start slave ID</label>
@@ -1261,13 +1262,63 @@
       </div>
       <div class="modal-body">
         <div class="form-group">
-          <label class="form-label">Serial Port (USB Adapter)</label>
-          <div style="display:flex; gap:0.5rem; align-items:center;">
-            <input class="form-input mono" type="text" id="hub-form-port" placeholder="/dev/ttyUSB0 or COM3" style="min-width:0;" />
-            <button class="btn btn-secondary btn-sm" type="button" id="btn-scan-usb-ports" onclick="scanUsbPorts()">🔎 Find USB</button>
+          <label class="form-label">Hub transport</label>
+          <select class="form-select" id="hub-form-transport" onchange="renderTransportFields(this.value)" aria-describedby="hub-transport-help">
+            <option value="serial">Serial (USB adapter on the Home Assistant host)</option>
+            <option value="esphome_tcp">ESPHome · RTU over TCP (stream server, recommended)</option>
+            <option value="esphome_api">ESPHome · native API (modbus_send service + events)</option>
+          </select>
+          <p class="form-hint" id="hub-transport-help">ESPHome transports need the bridge firmware from <code>custom_components/modbus_usb/esphome/</code> flashed to an ESP32 with an RS-485 module.</p>
+        </div>
+        <div id="hub-serial-fields">
+          <div class="form-group">
+            <label class="form-label">Serial Port (USB Adapter)</label>
+            <div style="display:flex; gap:0.5rem; align-items:center;">
+              <input class="form-input mono" type="text" id="hub-form-port" placeholder="/dev/ttyUSB0 or COM3" style="min-width:0;" />
+              <button class="btn btn-secondary btn-sm" type="button" id="btn-scan-usb-ports" onclick="scanUsbPorts()">🔎 Find USB</button>
+            </div>
+            <select class="form-select mono" id="hub-usb-port-list" onchange="selectUsbPort(this.value)" style="display:none; margin-top:0.5rem;"></select>
+            <div id="hub-usb-port-message" class="text-sm" style="margin-top:0.4rem; color:var(--text-dim);">Select Find USB to list adapters visible to Home Assistant.</div>
           </div>
-          <select class="form-select mono" id="hub-usb-port-list" onchange="selectUsbPort(this.value)" style="display:none; margin-top:0.5rem;"></select>
-          <div id="hub-usb-port-message" class="text-sm" style="margin-top:0.4rem; color:var(--text-dim);">Select Find USB to list adapters visible to Home Assistant.</div>
+        </div>
+        <div id="hub-esphome-fields" hidden>
+          <div class="form-grid-2">
+            <div class="form-group">
+              <label class="form-label">ESPHome host name or IP</label>
+              <input class="form-input mono" type="text" id="hub-form-host" placeholder="modbus-bridge.local or 192.168.1.50" autocomplete="off" />
+            </div>
+            <div class="form-group" id="hub-esphome-tcp-fields">
+              <label class="form-label">Stream server TCP port</label>
+              <input class="form-input mono" type="number" id="hub-form-tcp-port" min="1" max="65535" value="8899" />
+            </div>
+          </div>
+          <div id="hub-esphome-api-fields" hidden>
+            <div class="form-grid-2">
+              <div class="form-group">
+                <label class="form-label">Native API port</label>
+                <input class="form-input mono" type="number" id="hub-form-api-port" min="1" max="65535" value="6053" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">API encryption key</label>
+                <input class="form-input mono" type="password" id="hub-form-api-key" autocomplete="new-password" placeholder="base64 key from the ESPHome api: block" />
+              </div>
+            </div>
+            <div class="form-grid-2">
+              <div class="form-group">
+                <label class="form-label">ESPHome service name</label>
+                <input class="form-input mono" type="text" id="hub-form-service" value="modbus_send" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">ESPHome RX event name</label>
+                <input class="form-input mono" type="text" id="hub-form-event" value="esphome.modbus_rx" />
+              </div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Response timeout (seconds)</label>
+            <input class="form-input mono" type="number" id="hub-form-timeout" min="0.1" max="30" step="0.1" value="3" oninput="this.dataset.touched = '1'" />
+          </div>
+          <p class="form-hint" id="hub-line-settings-hint"></p>
         </div>
         <div class="form-grid-2">
           <div class="form-group">
@@ -1319,7 +1370,9 @@
           </div>
         </div>
       </div>
-      <div class="modal-footer">
+      <div class="modal-footer" style="flex-wrap:wrap; gap:0.5rem;">
+        <span class="text-sm" id="hub-form-test-result" style="flex:1 1 100%; color:var(--text-dim);"></span>
+        <button class="btn btn-secondary" type="button" id="btn-hub-form-test" onclick="testHubFormConnection()">📶 Test connection</button>
         <button class="btn btn-ghost" onclick="closeModal('modal-edit-hub')">Cancel</button>
         <button class="btn btn-primary" onclick="submitSaveHub()">💾 Save &amp; Reconnect</button>
       </div>

@@ -101,6 +101,10 @@
           entry_id: 'mock_hub_1',
           title: 'Modbus USB Hub (ttyUSB0)',
           hub: {
+            transport: 'serial',
+            transport_label: 'Serial (USB adapter)',
+            endpoint: '/dev/ttyUSB0',
+            baudrate_fixed: false,
             port: '/dev/ttyUSB0',
             baudrate: 9600,
             bytesize: 8,
@@ -146,6 +150,35 @@
             { id: 'e8', device_id: 'dev_relays_pool', name: 'Underwater Light Relay', entity_type: 'switch', register_type: 'coil', address: 1 },
             { id: 'e9', device_id: 'dev_relays_pool', name: 'Flow Switch Status', entity_type: 'binary_sensor', register_type: 'discrete', address: 0 },
             { id: 'e10', device_id: 'dev_relays_pool', name: 'Pump Speed Setpoint', entity_type: 'number', register_type: 'holding', address: 10, data_type: 'uint16', scale: 1, min_value: 0, max_value: 100, step: 5, unit_of_measurement: '%' }
+          ]
+        },
+        {
+          // v2.8.0: an ESPHome ESP32 + RS-485 module acting as the hub
+          // (RTU over TCP through the stream_server component).
+          entry_id: 'mock_hub_esphome',
+          title: 'Garage Modbus via ESPHome (modbus-bridge)',
+          hub: {
+            transport: 'esphome_tcp',
+            transport_label: 'ESPHome · RTU over TCP',
+            endpoint: 'modbus-bridge.local:8899',
+            baudrate_fixed: true,
+            host: 'modbus-bridge.local',
+            tcp_port: 8899,
+            response_timeout: 3,
+            port: null,
+            baudrate: 9600,
+            bytesize: 8,
+            parity: 'N',
+            stopbits: 1,
+            slave_id: 1,
+            scan_interval: 10,
+          },
+          devices: [
+            { id: 'dev_garage_relays', name: 'Garage Relay Board', slave_id: 1, model: 'R4D3B16', manufacturer: 'Generic', description: 'Door and light relays behind the ESPHome bridge' },
+          ],
+          entities: [
+            { id: 'g1', device_id: 'dev_garage_relays', name: 'Garage Door Relay', entity_type: 'switch', register_type: 'coil', address: 0 },
+            { id: 'g2', device_id: 'dev_garage_relays', name: 'Garage Light', entity_type: 'switch', register_type: 'coil', address: 1 },
           ]
         }
       ],

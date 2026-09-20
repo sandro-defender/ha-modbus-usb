@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 2.8.0
+
+### ESPHome device as the Modbus hub
+- A hub no longer has to be a USB adapter plugged into the Home Assistant machine. The **Add integration** flow now starts with a **connection type** picker: **Local USB / serial adapter** (unchanged), **ESPHome · RTU over TCP** or **ESPHome · native API**. Ready-to-flash firmware for a generic **ESP32 + RS-485 module** (UART2, `GPIO17` TX / `GPIO16` RX, optional DE/RE pin) ships in `custom_components/modbus_usb/esphome/` with a README.
+- **RTU over TCP** (`esphome_tcp`, recommended): the ESP32 runs the `oxan/esphome-stream-server` component and forwards raw UART bytes on TCP port `8899`; the integration talks pymodbus **RTU framing over a TCP socket**, so polling, board tools, bus scans, the hex console and the Traffic Inspector work unchanged.
+- **Native API** (`esphome_api`, fallback): no external components needed. The integration connects with `aioesphomeapi`, sends each request through the user-defined ESPHome service `modbus_send` and receives replies as `esphome.modbus_rx` events (`frame` hex payload). A pure-Python RTU layer (`esphome_bridge.py`: CRC, request encoding for FC01–06/0F/10, response decoding, thread-safe request/reply pairing) plus a sync pymodbus-shaped client (`esphome_api_client.py`) make it a drop-in for the coordinator; timeouts raise `ModbusIOException("No response received …")`, exception replies come back as error results, an unexpected disconnect reconnects lazily on the next request.
+- New hub data keys: `transport`, `host`, `tcp_port` (8899), `api_port` (6053), `api_encryption_key`, `api_password`, `esphome_service`, `esphome_event`, `response_timeout`. Config entries migrate **v1 → v2** automatically (`transport: serial` is added to every existing entry; nothing else changes).
+- The config flow **probes the endpoint before creating the entry** (TCP connect / API handshake with service check) and reports `cannot_connect`, `invalid_auth`, `service_missing` or `invalid_host` with the low-level detail. One ESPHome host can back only one hub (RS-485 is request/response and the stream server accepts a single client).
+
+### Panel: transport-aware hub tab
+- The **Modbus Hub Connection** tab shows a transport badge and the endpoint (`host:port` or serial path), and the **Edit hub** modal grew a **Connection type** selector that swaps between serial fields and ESPHome host/port/credential fields. Secrets are write-only: the key/password fields are never prefilled, blank keeps the stored value, and a checkbox clears it.
+- New **Test connection** button (tab and modal) backed by the read-only WS command `modbus_usb/test_hub_connection` — it probes the *unsaved* form values, short-circuits to "live" when the coordinator's client is already connected to that endpoint, and returns latency / ESPHome device info / error key. `get_serial_status` is transport-aware (no more "port not found" for network hubs).
+- Because baud rate, parity and stop bits live in the ESPHome `uart:` block, the hub form marks them as **fixed on the bridge** and the RS-485 **bus scan** probes slave IDs at the bridge's line settings only (a note in the scanner explains why).
+
+### Development
+- `manifest.json` → **2.8.0**, new requirement `aioesphomeapi>=24.0.0` (also in `requirements_test.txt`). `transport.py` centralises transport selection, endpoint/unique-id derivation, client construction and the probe; `coordinator.py` skips serial-only port resolution for network transports.
+- 102 new tests (459 total): RTU framing/pairing incl. thread safety, the API client against a fake `APIClient` on a real background event loop, transport helpers and probe classification, config-flow steps and v1→v2 migration, `ws_save_hub` / `ws_test_hub_connection` (secret semantics, validation, no-save guarantee), panel wiring, translations and both ESPHome YAML examples.
+- `ruff check` / `ruff format` pass; `node --check` passes on every `www/panel/*.js` script.
+
 ## 2.7.1
 
 ### Traffic Inspector: function-code filter & saved views

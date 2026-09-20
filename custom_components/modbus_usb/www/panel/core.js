@@ -209,12 +209,21 @@
       if (type === 'scan_bus') {
         return { found: [{ slave_id: 1, baudrate: 9600, response: 'register response' }], probed: 20 };
       }
+      if (type === 'test_hub_connection') {
+        const hub = entry.hub || {};
+        return hub.transport === 'esphome_tcp' || hub.transport === 'esphome_api'
+          ? { reachable: true, latency_ms: 18.4, error: null, error_key: null, live: false, esphome: { name: 'modbus-bridge', esphome_version: '2025.9.0', mac_address: 'A4:CF:12:34:56:78' }, summary: { transport: hub.transport, label: hub.transport_label, endpoint: hub.endpoint } }
+          : { reachable: true, latency_ms: 2.1, error: null, error_key: null, live: true, esphome: null, summary: { transport: 'serial', label: 'Serial (USB adapter)', endpoint: hub.port } };
+      }
       if (type === 'scan_usb_ports') {
         return { ports: [{ port: '/dev/ttyUSB0', description: 'USB-RS485 Adapter', details: 'CH340 USB-Serial' }] };
       }
       if (type === 'manual_hex_write') return { slave_id: 1, function_code: '0x06', address: 128, count: 1 };
       if (type === 'get_serial_status') {
-        return { serial: { port: '/dev/ttyUSB0', baudrate: 9600, bytesize: 8, parity: 'N', stopbits: 1, connection_owner: 'Home Assistant Modbus USB', operation_active: false }, adapter: { port: '/dev/ttyUSB0', description: 'USB-RS485 Adapter', details: 'CH340 USB-Serial' } };
+        if ((entry.hub || {}).transport === 'esphome_tcp') {
+          return { serial: { port: null, baudrate: 9600, bytesize: 8, parity: 'N', stopbits: 1, connection_owner: 'Home Assistant Modbus USB', operation_active: false, transport: 'esphome_tcp', label: 'ESPHome · RTU over TCP', endpoint: 'modbus-bridge.local:8899', baudrate_fixed: true, capture_support: 'trace_packet' }, adapter: null, esphome: true };
+        }
+        return { serial: { port: '/dev/ttyUSB0', baudrate: 9600, bytesize: 8, parity: 'N', stopbits: 1, connection_owner: 'Home Assistant Modbus USB', operation_active: false, transport: 'serial', label: 'Serial (USB adapter)', endpoint: '/dev/ttyUSB0', baudrate_fixed: false }, adapter: { port: '/dev/ttyUSB0', description: 'USB-RS485 Adapter', details: 'CH340 USB-Serial' } };
       }
       if (type === 'test_device_entities') {
         const device = entry.devices.find(d => d.id === payload.device_id);

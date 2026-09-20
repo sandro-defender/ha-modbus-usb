@@ -84,6 +84,7 @@
       renderBoardTools();
       renderTemplateVerifyDevices();
       renderScanProgress(diag.scan || {});
+      updateScanTransportNote();
       const health = diag.health || {};
       const connected = Boolean(diag.connected);
       const latestTransaction = Array.isArray(diag.transactions) ? diag.transactions[0] : null;
@@ -745,12 +746,33 @@
       }
     }
 
+    function updateScanTransportNote() {
+      // v2.8.0: ESPHome bridges fix baud/parity in their uart: block — the
+      // scanner sweeps slave IDs only, so the line-setting inputs are disabled.
+      const entry = getCurrentEntry();
+      const fixed = Boolean(entry && entry.hub && entry.hub.baudrate_fixed);
+      const note = document.getElementById('scan-fixed-baud-note');
+      const rates = document.getElementById('scan-baudrates');
+      const parities = document.getElementById('scan-parities');
+      if (note) note.hidden = !fixed;
+      if (rates) rates.disabled = fixed;
+      if (parities) parities.disabled = fixed;
+      if (fixed && rates && entry.hub.baudrate) rates.value = String(entry.hub.baudrate);
+      if (fixed && parities && entry.hub.parity) parities.value = String(entry.hub.parity);
+      return fixed;
+    }
+
     async function scanRs485Bus() {
       const entry = getCurrentEntry();
-      const baudrates = document.getElementById('scan-baudrates').value.split(',')
-        .map(value => parseInt(value.trim(), 10)).filter(Number.isFinite);
-      const parities = document.getElementById('scan-parities').value.split(',')
-        .map(value => value.trim().toUpperCase()).filter(Boolean);
+      const fixedBaud = updateScanTransportNote();
+      const baudrates = fixedBaud
+        ? [parseInt(entry?.hub?.baudrate, 10) || 9600]
+        : document.getElementById('scan-baudrates').value.split(',')
+          .map(value => parseInt(value.trim(), 10)).filter(Number.isFinite);
+      const parities = fixedBaud
+        ? [String(entry?.hub?.parity || 'N').toUpperCase()]
+        : document.getElementById('scan-parities').value.split(',')
+          .map(value => value.trim().toUpperCase()).filter(Boolean);
       const startSlave = parseInt(document.getElementById('scan-start-slave').value, 10);
       const endSlave = parseInt(document.getElementById('scan-end-slave').value, 10);
       const button = document.getElementById('btn-scan-bus');
@@ -763,7 +785,9 @@
       button.textContent = '⌛ Scanning…';
       box.style.display = 'block';
       box.style.color = '#93c5fd';
-      box.textContent = `Scanning slave IDs ${startSlave}–${endSlave} at ${baudrates.join(', ')} baud with ${parities.join(', ')} parity…`;
+      box.textContent = fixedBaud
+        ? `Scanning slave IDs ${startSlave}–${endSlave} through the ESPHome bridge (line settings fixed in ESPHome)…`
+        : `Scanning slave IDs ${startSlave}–${endSlave} at ${baudrates.join(', ')} baud with ${parities.join(', ')} parity…`;
       const progressTimer = setInterval(refreshScanProgress, 500);
       try {
         const result = await apiCall('scan_bus', {
@@ -776,7 +800,11 @@
               const suggestion = item.suggestions?.length
                 ? ` — suggested template: ${escapeHtml(item.suggestions.join(', '))}`
                 : '';
-              return `<div style="margin-bottom:0.55rem;">slave ${escapeHtml(item.slave_id)} at ${escapeHtml(item.baudrate)} baud, ${escapeHtml(item.parity || 'N')} parity (${escapeHtml(item.response)})${suggestion} <button class="btn btn-secondary btn-sm" onclick="useDiscoveredTarget(${Number(item.slave_id)}, ${Number(item.baudrate)})">Use this target</button></div>`;
+              const where = item.baudrate == null || result.baudrate_fixed
+                ? 'via ESPHome bridge'
+                : `at ${escapeHtml(item.baudrate)} baud, ${escapeHtml(item.parity || 'N')} parity`;
+              const baud = Number(item.baudrate) || Number(entry?.hub?.baudrate) || 9600;
+              return `<div style="margin-bottom:0.55rem;">slave ${escapeHtml(item.slave_id)} ${where} (${escapeHtml(item.response)})${suggestion} <button class="btn btn-secondary btn-sm" onclick="useDiscoveredTarget(${Number(item.slave_id)}, ${baud})">Use this target</button></div>`;
             }).join('')}`
           : `No responding devices found after ${result.probed || 0} probes. Check A/B wires, power, baud rate, and slave ID.`;
         await refreshData();

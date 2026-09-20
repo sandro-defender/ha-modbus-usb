@@ -80,7 +80,7 @@ Don't see your board? Open an [issue](https://github.com/sandro-defender/ha-modb
 ## Requirements
 
 - **Home Assistant 2024.1 or newer** (OS, Supervised, Container, or Core).
-- A **USB-to-RS-485 adapter** visible to Home Assistant (typically `/dev/ttyUSB0` on HA OS/Linux, `COM3` on Windows).
+- A **USB-to-RS-485 adapter** visible to Home Assistant (typically `/dev/ttyUSB0` on HA OS/Linux, `COM3` on Windows) — **or**, since v2.8.0, an **ESP32 + RS-485 module running ESPHome** anywhere on your network (ready-to-flash YAML in [`custom_components/modbus_usb/esphome/`](custom_components/modbus_usb/esphome/README.md); see the [user guide chapter](wiki/USER_GUIDE.md#11-using-an-esphome-device-as-the-hub)).
 - A **Modbus RTU device** with power and RS-485 wiring ready.
 - Every device on the same bus must use a **unique slave ID** (1–247).
 
@@ -303,6 +303,7 @@ Prefer entities over services for anything polled regularly — entities get pol
 
 - **One adapter → one hub.** Devices on the same bus share the serial port; each device just uses a different slave ID.
 - **Two adapters → two hubs.** Add the integration a second time with the second port.
+- **ESPHome hubs.** A hub can also be an ESP32 bridge: *RTU over TCP* (stream server, recommended) or the *native API* (`modbus_send` service / `esphome.modbus_rx` events). One ESP32 backs exactly one hub; line settings are fixed in the ESPHome `uart:` block, so bus scans probe slave IDs only.
 - The integration holds a **single-owner serial lock** per hub: polling, board tools, scans, and services queue through it so frames never interleave. External tools must never open the same port while HA is connected.
 - Polling is grouped where the template allows it (e.g. contiguous R4D6F20 blocks read in 3 requests instead of 24).
 - Reloads are surgical: adding/removing devices rebuilds entities **without** closing the shared serial port, and an offline board can't block HA startup.

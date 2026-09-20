@@ -1,5 +1,5 @@
 # Home Assistant's custom-component test fixtures also install pytest and HA.
 pytest-homeassistant-custom-component==0.13.109
-pymodbus>=3.8,<4
+# pymodbus>=3.8,<4
 pyserial>=3.5
 ruff==0.13.0

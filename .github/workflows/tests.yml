@@ -3,8 +3,18 @@ name: Tests
 on:
   pull_request:
     branches: [Dev, main]
+    paths-ignore:
+      - "docs/**"
+      - "wiki/**"
+      - "*.md"
+      - "LICENSE"
   push:
     branches: [Dev, main]
+    paths-ignore:
+      - "docs/**"
+      - "wiki/**"
+      - "*.md"
+      - "LICENSE"
   workflow_dispatch:
 
 permissions:

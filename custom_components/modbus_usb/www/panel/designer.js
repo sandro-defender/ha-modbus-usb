@@ -36,10 +36,126 @@ entities:
 
     function initDesignerTab() {
       const textarea = document.getElementById('designer-yaml');
-      if (!textarea || _designerInitialized) return;
-      _designerInitialized = true;
-      if (!textarea.value.trim()) textarea.value = DESIGNER_SAMPLE_YAML;
+      if (!textarea) return;
+      if (!_designerInitialized) {
+        _designerInitialized = true;
+        if (!textarea.value.trim()) textarea.value = DESIGNER_SAMPLE_YAML;
+        // v2.7.0: syntax-aware editing — line-number gutter, Tab/Shift+Tab
+        // indentation, and Ctrl+Enter (or Cmd+Enter) to validate.
+        textarea.addEventListener('input', () => updateDesignerLineNumbers());
+        textarea.addEventListener('scroll', () => syncDesignerGutterScroll(textarea));
+        textarea.addEventListener('keydown', handleDesignerEditorKeydown);
+      }
       renderDesignerApplyTargets();
+      renderDesignerImportOptions();
+      updateDesignerLineNumbers();
+    }
+
+    // ─── v2.7.0: line numbers, indentation & template import ────
+
+    function updateDesignerLineNumbers() {
+      const textarea = document.getElementById('designer-yaml');
+      const gutter = document.getElementById('designer-line-numbers');
+      if (!textarea || !gutter) return;
+      const lineCount = textarea.value.split('\n').length;
+      let numbers = '';
+      for (let line = 1; line <= lineCount; line += 1) numbers += `${line}\n`;
+      gutter.textContent = numbers;
+      syncDesignerGutterScroll(textarea);
+    }
+
+    function syncDesignerGutterScroll(textarea) {
+      const gutter = document.getElementById('designer-line-numbers');
+      if (gutter) gutter.scrollTop = textarea.scrollTop;
+    }
+
+    function insertDesignerIndent(textarea) {
+      // Two-space indent; a multi-line selection indents every line.
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const value = textarea.value;
+      if (start === end) {
+        textarea.setRangeText('  ', start, end, 'end');
+      } else {
+        const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+        const indented = value.slice(lineStart, end).split('\n')
+          .map((line) => (line ? '  ' + line : line))
+          .join('\n');
+        textarea.setRangeText(indented, lineStart, end, 'select');
+      }
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    function outdentDesignerLines(textarea) {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const value = textarea.value;
+      const lineStart = value.lastIndexOf('\n', start - 1) + 1;
+      const block = value.slice(lineStart, end);
+      const outdented = block.split('\n')
+        .map((line) => line.replace(/^ {1,2}/, ''))
+        .join('\n');
+      if (outdented !== block) {
+        textarea.setRangeText(outdented, lineStart, end, 'select');
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
+
+    function handleDesignerEditorKeydown(event) {
+      const textarea = event.target;
+      // Ctrl+Enter (or Cmd+Enter) validates the draft from the editor.
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        event.preventDefault();
+        runDesignerValidation();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      // A plain textarea would move focus out of the editor; keep Tab as an
+      // indent key and Shift+Tab as an outdent key instead.
+      event.preventDefault();
+      if (event.shiftKey) outdentDesignerLines(textarea);
+      else insertDesignerIndent(textarea);
+    }
+
+    function renderDesignerImportOptions() {
+      const select = document.getElementById('designer-import-template');
+      if (!select) return;
+      const previous = select.value;
+      const seen = new Set();
+      const templates = (typeof _templates !== 'undefined' ? _templates : []).filter((tpl) => {
+        if (!tpl || tpl.error || !tpl.raw_yaml) return false;
+        const key = tpl.filename || tpl.id;
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      select.innerHTML = '<option value="">Select a bundled or saved template…</option>' + templates.map((tpl) =>
+        `<option value="${escapeHtml(tpl.filename || tpl.id)}">${escapeHtml(tpl.name || tpl.filename)}${tpl.source ? ` (${escapeHtml(tpl.source)})` : ''}</option>`).join('');
+      if (previous && [...select.options].some((option) => option.value === previous)) {
+        select.value = previous;
+      }
+    }
+
+    function importDesignerTemplate() {
+      const textarea = document.getElementById('designer-yaml');
+      const select = document.getElementById('designer-import-template');
+      const filenameInput = document.getElementById('designer-filename');
+      if (!textarea || !select) return;
+      const template = (typeof _templates !== 'undefined' ? _templates : [])
+        .find((tpl) => (tpl.filename || tpl.id) === select.value && !tpl.error && tpl.raw_yaml);
+      if (!template) {
+        toast('Pick a template to import first', 'err');
+        return;
+      }
+      textarea.value = template.raw_yaml;
+      if (filenameInput && !filenameInput.value.trim()) {
+        filenameInput.value = template.filename || '';
+      }
+      _designerResult = null;
+      renderDesignerResults();
+      updateDesignerLineNumbers();
+      textarea.focus();
+      toast(`Imported ${template.name || template.filename} into the editor`, 'ok');
     }
 
     function renderDesignerApplyTargets() {
@@ -61,6 +177,7 @@ entities:
       textarea.value = DESIGNER_SAMPLE_YAML;
       _designerResult = null;
       renderDesignerResults();
+      updateDesignerLineNumbers();
       toast('Sample template loaded — run a validation to test it', 'ok');
     }
 

@@ -20,6 +20,13 @@
     let _inspectorPaused = false;          // UI pause switch
     let _inspectorBuffered = 0;            // pushes skipped while paused
     let _inspectorLive = false;            // stream connected & rendering
+
+    // ─── TRAFFIC INSPECTOR FILTERS (v2.7.0) ─────────────────────
+    // Client-side filters over the live transaction list. Kept in shared
+    // state so they survive tab switches and hub switches: the filter
+    // controls are static DOM nodes (never re-rendered) and the values
+    // below persist in module scope.
+    let _inspectorFilters = { slave: 'all', status: 'all', hex: '' };
     let _dashboardFilter = 'all';
     const _deviceTestReports = {};
     const _r413e16StateReports = {};

@@ -568,6 +568,54 @@ def test_record_transaction_attaches_captured_rx_bytes() -> None:
     assert "request_captured" not in coordinator.transaction_log[0]
 
 
+def test_record_transaction_keeps_full_multi_frame_rx_stream() -> None:
+    """v2.7.0: batch-style transactions keep every response frame."""
+    from unittest.mock import Mock
+
+    from custom_components.modbus_usb.capture import ResponseCapture
+
+    client = _Client(value=0x2A)
+    client.write_register = Mock(return_value=_Response([]))
+    coordinator = _coordinator(client)
+    capture = ResponseCapture()
+    coordinator.response_capture = capture
+
+    tx_one = _capture_frame("010600010002")
+    tx_two = _capture_frame("010600020004")
+    # One coordinator batch: two serial exchanges before the single log entry.
+    capture.on_trace(True, tx_one)
+    capture.on_trace(False, tx_one)  # echo response
+    capture.on_trace(True, tx_two)
+    capture.on_trace(False, tx_two)  # echo response
+
+    coordinator.batch_write(
+        [{"address": 1, "value": 2}, {"address": 2, "value": 4}], slave=1
+    )
+    batch_entry = coordinator.transaction_log[0]
+    assert batch_entry["operation"] == "batch_write"
+    assert batch_entry["request_captured"] is True
+    assert batch_entry["response_hex"] == _capture_hex(tx_two)
+    assert batch_entry["response_frames"] == [
+        _capture_hex(tx_one),
+        _capture_hex(tx_two),
+    ]
+
+
+def test_record_transaction_single_frame_stream_has_matching_hex() -> None:
+    from custom_components.modbus_usb.capture import ResponseCapture
+
+    coordinator = _coordinator(_Client(value=0x2A))
+    capture = ResponseCapture()
+    coordinator.response_capture = capture
+    capture.on_trace(True, TX_READ)
+    capture.on_trace(False, RX_READ)
+
+    coordinator.read_register_raw(7, REGISTER_TYPE_HOLDING, DATA_TYPE_UINT16, 1)
+    entry = coordinator.transaction_log[0]
+    # A single-frame stream carries response_frames with exactly that frame.
+    assert entry["response_frames"] == [entry["response_hex"]]
+
+
 def test_record_transaction_captures_request_only_on_timeout() -> None:
     from custom_components.modbus_usb.capture import ResponseCapture
 

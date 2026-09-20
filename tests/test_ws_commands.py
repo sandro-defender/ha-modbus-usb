@@ -8,6 +8,7 @@ extracted from ws_apply_template.
 
 from __future__ import annotations
 
+from collections import deque
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -179,6 +180,111 @@ async def test_ws_subscribe_traffic_streams_analyzed_transactions() -> None:
     # HA removes the subscription when the WebSocket connection closes.
     connection.subscriptions[7]()
     assert captured["disconnected"] is True
+
+
+async def test_ws_subscribe_traffic_streams_multi_frame_responses() -> None:
+    """v2.7.0: the live stream decodes the full RX stream per transaction."""
+    coordinator = SimpleNamespace(entry_id="e1", capture_hook="trace_packet")
+    hass = SimpleNamespace(data={DOMAIN: {"e1": coordinator}})
+    connection = _connection()
+    captured: dict = {}
+
+    def fake_connect(hass_obj, signal, callback):
+        captured["callback"] = callback
+
+        def unsubscribe() -> None:
+            captured["disconnected"] = True
+
+        return unsubscribe
+
+    with patch.object(api_diagnostics, "async_dispatcher_connect", fake_connect):
+        await _unwrap(api_diagnostics.ws_subscribe_traffic)(
+            hass,
+            connection,
+            {"id": 11, "type": "modbus_usb/subscribe_traffic", "entry_id": "e1"},
+        )
+
+    first = _frame("02040400010002")
+    second = _frame("020302002A")
+    captured["callback"](
+        {
+            "timestamp": "2026-09-20T12:00:01+00:00",
+            "operation": "read_input",
+            "slave": 2,
+            "address": 0,
+            "count": 4,
+            "status": "ok",
+            "function_code": "0x04",
+            "request_hex": _frame("020400000004"),
+            "request_captured": True,
+            "response_hex": second,
+            "response_frames": [first, second],
+            "duration_ms": 41.0,
+        }
+    )
+    message = connection.send_message.call_args[0][0]
+    analyzed = message["event"]["transaction"]
+    # The last frame stays under the legacy key; the full stream is a list.
+    assert analyzed["response_frame"]["frame_kind"] == "read_response"
+    assert analyzed["transaction"]["response_frames"] == [first, second]
+    assert [frame["raw_hex"] for frame in analyzed["response_frames"]] == [
+        first,
+        second,
+    ]
+    assert analyzed["response_frames"][0]["values"] == [0x1, 0x2]
+
+
+async def test_ws_traffic_inspector_returns_multi_frame_responses() -> None:
+    """v2.7.0: the inspector view carries the decoded RX frame list."""
+    from custom_components.modbus_usb.coordinator import ModbusUsbCoordinator
+
+    async def run_in_executor(func, *args):
+        return func(*args)
+
+    coordinator = ModbusUsbCoordinator.__new__(ModbusUsbCoordinator)
+    coordinator.entry_id = "e1"
+    coordinator.slave_id = 1
+    coordinator.client = SimpleNamespace(connected=True)
+    first = _frame("02040400010002")
+    second = _frame("020302002A")
+    coordinator.transaction_log = deque(
+        [
+            {
+                "timestamp": "2026-09-20T12:00:01+00:00",
+                "operation": "read_input",
+                "slave": 2,
+                "address": 0,
+                "count": 4,
+                "status": "ok",
+                "request_hex": _frame("020400000004"),
+                "request_captured": True,
+                "response_hex": second,
+                "response_frames": [first, second],
+                "duration_ms": 41.0,
+            }
+        ]
+    )
+    coordinator.capture_hook = "trace_packet"
+    hass = SimpleNamespace(
+        data={DOMAIN: {"e1": coordinator}},
+        async_add_executor_job=run_in_executor,
+    )
+    connection = _connection()
+    await _unwrap(api_diagnostics.ws_traffic_inspector)(
+        hass,
+        connection,
+        {
+            "id": 12,
+            "type": "modbus_usb/traffic_inspector",
+            "entry_id": "e1",
+            "limit": 100,
+        },
+    )
+    view = connection.send_result.call_args[0][1]
+    analyzed = view["transactions"][0]
+    assert analyzed["transaction"]["response_frames"] == [first, second]
+    assert len(analyzed["response_frames"]) == 2
+    assert view["stats"]["responses"] == 1
 
 
 async def test_ws_subscribe_traffic_unknown_entry() -> None:

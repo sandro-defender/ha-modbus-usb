@@ -114,3 +114,111 @@ def test_panel_wires_designer_save_and_apply() -> None:
     assert "designerFingerprintSection" in designer_js
     # The one-step flow must render the fingerprint probe results.
     assert "fingerprint_all_matched" in designer_js
+
+
+# ───────────────── v2.7.0: inspector filters & multi-frame RX ─────────────────
+
+
+def test_panel_wires_inspector_filters() -> None:
+    html = _html()
+    inspector_js = _panel_script("inspector.js")
+    state_js = _panel_script("state.js")
+
+    # Filter controls exist in the HTML and are wired to the JS handlers.
+    assert 'id="inspector-filters"' in html, "missing inspector filter bar"
+    assert 'id="inspector-filter-slave"' in html, "missing slave filter select"
+    assert 'id="inspector-filter-status"' in html, "missing status filter select"
+    assert 'id="inspector-filter-hex"' in html, "missing hex search input"
+    assert 'id="btn-inspector-clear-filters"' in html, "missing clear-filters button"
+    assert 'id="inspector-filter-count"' in html, "missing filter match counter"
+    for status in ("all", "ok", "error", "exception"):
+        assert f'<option value="{status}">' in html, (
+            f"missing status filter option {status}"
+        )
+    assert "setInspectorFilter('slave', this.value)" in html
+    assert "setInspectorFilter('status', this.value)" in html
+    assert "setInspectorFilter('hex', this.value)" in html
+    assert "clearInspectorFilters()" in html
+
+    # Filter state lives in state.js so it survives tab switches.
+    assert "_inspectorFilters" in state_js
+
+    # The list is filtered client-side, live, over the full transaction list.
+    for function in (
+        "transactionMatchesInspectorFilters",
+        "getFilteredTransactionIndices",
+        "renderInspectorFilterBar",
+        "normalizeInspectorHexQuery",
+        "inspectorResponseFrameList",
+        "clearInspectorFilters",
+    ):
+        assert function in inspector_js, f"missing inspector filter function {function}"
+    assert "getFilteredTransactionIndices()" in inspector_js
+    # New live pushes still render through the filter.
+    assert "scheduleInspectorRender" in inspector_js
+    # Pause/live-stream behavior is preserved.
+    assert "toggleInspectorPause" in inspector_js
+    assert "handleTrafficStreamMessage" in inspector_js
+
+
+def test_panel_renders_multi_frame_responses() -> None:
+    inspector_js = _panel_script("inspector.js")
+    core_js = _panel_script("core.js")
+
+    # The detail pane renders a list of decoded frames for multi-frame RX.
+    assert "multiFrameResponseSection" in inspector_js
+    assert "Response frames (RX)" in inspector_js
+    # Row badge distinguishes multi-frame captures.
+    assert "RX ×" in inspector_js
+    # The standalone mock exercises the multi-frame shape end to end.
+    assert "response_frames" in core_js
+    assert 'id="inspector-detail"' in _html()
+
+
+# ───────────────── v2.7.0: designer editor UX & template import ─────────────────
+
+
+def test_panel_wires_designer_editor_ux() -> None:
+    html = _html()
+    designer_js = _panel_script("designer.js")
+
+    # Line-number gutter next to the YAML textarea.
+    assert 'id="designer-line-numbers"' in html, "missing line-number gutter"
+    assert 'class="designer-editor"' in html, "missing editor wrapper"
+    # Ctrl+Enter validation hint.
+    assert "Ctrl+Enter" in html
+    assert "Tab indents" in html
+
+    for function in (
+        "updateDesignerLineNumbers",
+        "syncDesignerGutterScroll",
+        "insertDesignerIndent",
+        "outdentDesignerLines",
+        "handleDesignerEditorKeydown",
+    ):
+        assert function in designer_js, f"missing designer editor function {function}"
+    # Ctrl+Enter triggers the validation flow; Tab is an indent key.
+    assert "event.key === 'Enter'" in designer_js
+    assert "runDesignerValidation" in designer_js
+    assert "event.key !== 'Tab'" in designer_js
+    # The gutter stays in sync with the textarea.
+    assert "textarea.addEventListener('input'" in designer_js
+    assert "textarea.addEventListener('scroll'" in designer_js
+    assert "textarea.addEventListener('keydown'" in designer_js
+
+
+def test_panel_wires_designer_template_import() -> None:
+    html = _html()
+    designer_js = _panel_script("designer.js")
+    core_js = _panel_script("core.js")
+
+    assert 'id="designer-import-template"' in html, "missing import template select"
+    assert "importDesignerTemplate()" in html, "import button is not wired"
+
+    assert "importDesignerTemplate" in designer_js
+    assert "renderDesignerImportOptions" in designer_js
+    # Imported content lands in the editor and pre-fills the filename.
+    assert "raw_yaml" in designer_js
+    assert "designer-filename" in designer_js
+    # The option list is refreshed whenever templates are reloaded.
+    assert "renderDesignerImportOptions()" in core_js

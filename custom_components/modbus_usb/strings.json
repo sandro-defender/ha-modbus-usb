@@ -29,6 +29,7 @@
       "init": {
         "menu_options": {
           "settings": "Change poll interval",
+          "capture_info": "Traffic capture status (read-only)",
           "add_entity": "Add a sensor, switch, binary sensor, or number",
           "manage_entities": "Edit or remove existing entities"
         }
@@ -42,6 +43,10 @@
         "data_description": {
           "scan_interval": "How often the integration reads values. Range: 1–3600 seconds."
         }
+      },
+      "capture_info": {
+        "title": "Traffic capture status",
+        "description": "{capture_details}"
       },
       "add_entity": {
         "title": "Add entity",

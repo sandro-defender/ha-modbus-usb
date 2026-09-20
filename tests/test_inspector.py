@@ -447,3 +447,134 @@ def test_build_inspector_view_without_capture_support() -> None:
     view = build_inspector_view(_coordinator_with_log([_transaction()]))
     assert view["capture"] == {"hook": None, "supported": False}
     assert view["stats"]["responses"] == 0
+
+
+# ───────────────── v2.7.0: multi-frame response lists ─────────────────
+
+
+def test_analyze_transaction_multi_frame_response_list() -> None:
+    first = _frame_with_crc("02040400010002")
+    second = _frame_with_crc("020302002A")
+    analyzed = analyze_transaction(
+        {
+            "operation": "read_input",
+            "slave": 2,
+            "address": 0,
+            "count": 4,
+            "status": "ok",
+            "request_hex": _frame_with_crc("020400000004"),
+            "request_captured": True,
+            "response_hex": second,  # last frame, backward compatibility
+            "response_frames": [first, second],
+            "duration_ms": 41.0,
+        }
+    )
+    # The last frame remains available under the legacy key.
+    assert analyzed["response_frame"]["values"] == [0x2A]
+    assert analyzed["transaction"]["response_hex"] == second
+    # The full RX stream is decoded frame by frame, in arrival order.
+    assert analyzed["transaction"]["response_frames"] == [first, second]
+    assert [frame["raw_hex"] for frame in analyzed["response_frames"]] == [
+        first,
+        second,
+    ]
+    assert analyzed["response_frames"][0]["frame_kind"] == "read_response"
+    assert analyzed["response_frames"][0]["values"] == [0x1, 0x2]
+    assert analyzed["response_frames"][1]["frame_kind"] == "read_response"
+    assert analyzed["response_frames"][1]["values"] == [0x2A]
+    assert all(
+        frame["direction"] == "response" for frame in analyzed["response_frames"]
+    )
+    assert all(frame["crc_valid"] for frame in analyzed["response_frames"])
+
+
+def test_analyze_transaction_legacy_single_response_synthesizes_list() -> None:
+    # Pre-v2.7.0 log entries carry only response_hex; the list then holds
+    # exactly that one decoded frame.
+    analyzed = analyze_transaction(
+        {
+            "operation": "read_holding",
+            "slave": 1,
+            "request_hex": _frame_with_crc("010300070001"),
+            "response_hex": _frame_with_crc("010302002A"),
+        }
+    )
+    assert analyzed["response_frames"] == [analyzed["response_frame"]]
+    assert analyzed["transaction"]["response_frames"] is None
+
+
+def test_analyze_transaction_multi_frame_with_exception_in_stream() -> None:
+    analyzed = analyze_transaction(
+        {
+            "operation": "read_input",
+            "slave": 2,
+            "status": "error",
+            "error": "ExceptionResponse: Illegal Data Address",
+            "request_hex": _frame_with_crc("0203000A0001"),
+            # The coordinator always sets response_hex to the last frame.
+            "response_hex": _frame_with_crc("020302002A"),
+            "response_frames": [
+                _frame_with_crc("028302"),
+                _frame_with_crc("020302002A"),
+            ],
+        }
+    )
+    kinds = [frame["frame_kind"] for frame in analyzed["response_frames"]]
+    assert kinds == ["exception_response", "read_response"]
+    assert analyzed["response_frames"][0]["exception_name"] == "Illegal Data Address"
+    # response_frame keeps pointing at the last frame of the stream.
+    assert analyzed["response_frame"]["frame_kind"] == "read_response"
+
+
+def test_analyze_transaction_without_any_response() -> None:
+    analyzed = analyze_transaction(
+        {
+            "operation": "read_holding",
+            "status": "error",
+            "error": "Modbus Timeout",
+            "request_hex": _frame_with_crc("010300070001"),
+        }
+    )
+    assert analyzed["response_frames"] is None
+    assert analyzed["response_frame"] is None
+    assert analyzed["transaction"]["response_frames"] is None
+
+
+def test_analyze_transaction_garbage_frame_in_multi_frame_stream() -> None:
+    # One broken frame must not break the list; it degrades to its own
+    # error entry like any single parse failure.
+    analyzed = analyze_transaction(
+        {
+            "operation": "batch_write",
+            "slave": 1,
+            "status": "ok",
+            "request_hex": _frame_with_crc("010600010002"),
+            "response_hex": _frame_with_crc("010600010002"),
+            "response_frames": ["zz", _frame_with_crc("010600010002")],
+        }
+    )
+    assert analyzed["response_frames"][0]["valid"] is False
+    assert analyzed["response_frames"][0]["errors"]
+    assert analyzed["response_frames"][1]["valid"] is True
+
+
+def test_build_inspector_view_propagates_multi_frame_responses() -> None:
+    first = _frame_with_crc("02040400010002")
+    second = _frame_with_crc("020302002A")
+    coordinator = _coordinator_with_log(
+        [
+            _transaction(
+                slave=2,
+                response_hex=second,
+                response_frames=[first, second],
+                duration_ms=41.0,
+            ),
+            _transaction(),
+        ]
+    )
+    view = build_inspector_view(coordinator)
+    assert view["stats"]["responses"] == 1  # counted by response_hex, as before
+    analyzed = view["transactions"][0]
+    assert analyzed["transaction"]["response_frames"] == [first, second]
+    assert len(analyzed["response_frames"]) == 2
+    assert analyzed["response_frames"][0]["slave_id"] == 2

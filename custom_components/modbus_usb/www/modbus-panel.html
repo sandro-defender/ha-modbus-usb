@@ -590,6 +590,29 @@
               <div class="card-subtitle" id="inspector-list-subtitle">Select a transaction to decode its RTU frame.</div>
             </div>
           </div>
+          <div class="inspector-filters" id="inspector-filters">
+            <label class="inspector-filter">
+              <span class="inspector-filter-label">Slave</span>
+              <select class="form-input inspector-filter-select" id="inspector-filter-slave" onchange="setInspectorFilter('slave', this.value)" aria-label="Filter transactions by slave ID">
+                <option value="all">all</option>
+              </select>
+            </label>
+            <label class="inspector-filter">
+              <span class="inspector-filter-label">Status</span>
+              <select class="form-input inspector-filter-select" id="inspector-filter-status" onchange="setInspectorFilter('status', this.value)" aria-label="Filter transactions by operation status">
+                <option value="all">all</option>
+                <option value="ok">ok</option>
+                <option value="error">error</option>
+                <option value="exception">exception</option>
+              </select>
+            </label>
+            <label class="inspector-filter inspector-filter-hex">
+              <span class="inspector-filter-label">Hex</span>
+              <input class="form-input mono inspector-filter-input" id="inspector-filter-hex" type="text" spellcheck="false" placeholder="e.g. 01 03 or 8302" oninput="setInspectorFilter('hex', this.value)" aria-label="Free-text hex search across request and response frames" />
+            </label>
+            <button class="btn btn-secondary btn-sm" id="btn-inspector-clear-filters" onclick="clearInspectorFilters()" hidden>✕ Clear</button>
+            <span class="inspector-filter-count mono" id="inspector-filter-count" aria-live="polite"></span>
+          </div>
           <div class="inspector-list" id="inspector-list"></div>
         </div>
         <div class="card inspector-detail-card">
@@ -642,8 +665,21 @@
               </label>
             </div>
           </div>
+          <div class="form-group designer-import-row">
+            <label class="form-label" for="designer-import-template" style="margin-bottom:0;">Import template</label>
+            <div class="flex gap-1" style="align-items:center; flex-wrap:wrap;">
+              <select class="form-input" id="designer-import-template" style="max-width:280px;" aria-label="Template to import into the editor">
+                <option value="">Select a bundled or saved template…</option>
+              </select>
+              <button class="btn btn-secondary" onclick="importDesignerTemplate()">📥 Import into editor</button>
+            </div>
+          </div>
           <div class="form-group">
-            <textarea class="form-input mono designer-yaml" id="designer-yaml" spellcheck="false" placeholder="name: My Custom Meter&#10;default_slave_id: 1&#10;entities:&#10;  - name: Voltage&#10;    entity_type: sensor&#10;    register_type: input&#10;    address: 0&#10;    data_type: float32"></textarea>
+            <div class="designer-editor">
+              <div class="designer-line-numbers mono" id="designer-line-numbers" aria-hidden="true"></div>
+              <textarea class="form-input mono designer-yaml" id="designer-yaml" spellcheck="false" placeholder="name: My Custom Meter&#10;default_slave_id: 1&#10;entities:&#10;  - name: Voltage&#10;    entity_type: sensor&#10;    register_type: input&#10;    address: 0&#10;    data_type: float32"></textarea>
+            </div>
+            <div class="form-hint designer-editor-hint">Tab indents · Shift+Tab outdents · <span class="mono">Ctrl+Enter</span> validates</div>
           </div>
           <div class="flex gap-1" style="flex-wrap:wrap; align-items:center;">
             <button class="btn btn-primary" id="btn-designer-validate" onclick="runDesignerValidation()">▶ Validate &amp; test reads</button>

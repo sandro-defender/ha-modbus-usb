@@ -241,7 +241,13 @@ Validation rules (enforced by `pytest tests/test_templates.py` and CI):
 Instead of hand-testing with Developer Tools, use the panel's **Template
 Designer** tab (since v2.5.0):
 
-1. Paste (or type) your draft YAML — **📄 Load sample** provides a starter.
+1. Start from scratch (**📄 Load sample**), paste your own YAML, or
+   (since v2.7.0) pick an existing **bundled or saved template** in the
+   **📥 Import into editor** dropdown and load it as a starting point —
+   the filename is pre-filled and the editor's line numbers stay in sync.
+   The editor is syntax-friendly: **Tab / Shift+Tab** indent and outdent
+   (2 spaces, multi-line selections work) and **Ctrl+Enter** (or
+   **Cmd+Enter**) runs the validation without leaving the keyboard.
 2. Optionally override the **test slave ID** if the board on your bench uses
    a different address than the template's `default_slave_id`.
 3. Click **▶ Validate & test reads**. The integration:
@@ -359,6 +365,27 @@ one decodes its RTU frames byte by byte:
   captured responses. Response bytes are captured from the wire, never
   invented; without a tracing hook the inspector says so and shows only the
   request side.
+- **Full multi-frame RX streams (since v2.7.0)**: one captured transaction
+  can contain *several* response frames (batch reads, board block readers,
+  an exception followed by a follow-up read). The detail pane renders the
+  whole stream as a **list of decoded frames** — each with its own chips and
+  CRC validation — and the row badge shows `RX ×N`.
+- **Live filters (since v2.7.0)**: the transaction list filters client-side
+  and instantly, without touching the live stream:
+  - **Slave** — dropdown of every slave ID seen recently;
+  - **Status** — `ok`, `error`, or `exception` (matches any transaction
+    whose captured RX stream contains an exception response);
+  - **Hex** — free-text search across request *and* response frames
+    (e.g. `01 03`, `0x0103`, or `8302` to find an Illegal Data Address
+    exception).
+  The counter shows `matching / total` rows, **✕ Clear** resets everything,
+  and the filters survive tab switches — new transactions streamed in while
+  a filter is active are hidden or shown by it automatically.
+- **Checking capture support**: the integration's options flow
+  (Settings → Devices & Services → Modbus USB Controller → gear icon →
+  **Traffic capture status**) shows the active pymodbus version and hook —
+  `trace_packet` (full native tracing), `logging` (debug-log fallback), or
+  `none` (no tracing hook available on this pymodbus release).
 - **Slave ID** and **Function Code** with the plain-language name
   (FC01–FC06, FC0F, FC10, and exception responses).
 - **Address**, **Count**, **Byte Count**, and the **Data payload** in hex.

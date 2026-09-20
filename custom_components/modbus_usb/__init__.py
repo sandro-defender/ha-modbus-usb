@@ -36,7 +36,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS = ["sensor", "switch", "binary_sensor", "number"]
 
-_PANEL_REGISTERED = False  # module-level guard so we only register once
+_PANEL_REGISTERED = f"{DOMAIN}_panel_registered"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:  # noqa: ARG001
@@ -49,10 +49,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:  # noqa: ARG00
 
 async def _async_register_panel(hass: HomeAssistant) -> None:
     """Register the Modbus USB custom panel and serve the www/ directory."""
-    global _PANEL_REGISTERED  # noqa: PLW0603
-    if _PANEL_REGISTERED:
+    if hass.data.get(_PANEL_REGISTERED):
         return
-    _PANEL_REGISTERED = True
 
     # Serve static files from the www/ sub-directory next to this file.
     # Prefer the modern async API; only fall back to the deprecated,
@@ -62,17 +60,20 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     # the deprecated method around for back-compat — would always take
     # the blocking path instead of the async one.
     www_path = os.path.join(os.path.dirname(__file__), "www")
-    if hasattr(hass.http, "async_register_static_paths"):
-        from homeassistant.components.http import StaticPathConfig
-        await hass.http.async_register_static_paths([
-            StaticPathConfig("/modbus_usb_panel", www_path, cache_headers=False)
-        ])
-    else:
-        hass.http.register_static_path(
-            "/modbus_usb_panel",
-            www_path,
-            cache_headers=False,
-        )
+    static_key = f"{DOMAIN}_static_registered"
+    if not hass.data.get(static_key):
+        if hasattr(hass.http, "async_register_static_paths"):
+            from homeassistant.components.http import StaticPathConfig
+            await hass.http.async_register_static_paths([
+                StaticPathConfig("/modbus_usb_panel", www_path, cache_headers=False)
+            ])
+        else:
+            hass.http.register_static_path(
+                "/modbus_usb_panel",
+                www_path,
+                cache_headers=False,
+            )
+        hass.data[static_key] = True
 
     # Register the sidebar panel
     try:
@@ -88,6 +89,7 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
             config={"url": "/modbus_usb_panel/modbus-panel.html?v=2.2.0"},
             require_admin=False,
         )
+        hass.data[_PANEL_REGISTERED] = True
         _LOGGER.debug("Modbus USB sidebar panel registered")
     except Exception:
         _LOGGER.warning("Failed to register sidebar panel", exc_info=True)
@@ -204,22 +206,24 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unload_ok:
-        preserve_reloads = hass.data.get(DOMAIN, {}).get(DATA_PRESERVE_SERIAL_RELOAD, set())
-        if entry.entry_id in preserve_reloads:
-            # Board create/delete reloads platform entities only. Reusing this
-            # coordinator avoids a close/open race on USB serial adapters.
-            preserve_reloads.discard(entry.entry_id)
-            return True
-        coordinator: ModbusUsbCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
-        await hass.async_add_executor_job(coordinator.close)
+    if not unload_ok:
+        # Platforms still use the coordinator and registered services.
+        return False
+    preserve_reloads = hass.data.get(DOMAIN, {}).get(DATA_PRESERVE_SERIAL_RELOAD, set())
+    if entry.entry_id in preserve_reloads:
+        # Board create/delete reloads platform entities only. Reusing this
+        # coordinator avoids a close/open race on USB serial adapters.
+        preserve_reloads.discard(entry.entry_id)
+        return True
+    coordinator: ModbusUsbCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
+    await hass.async_add_executor_job(coordinator.close)
 
     # Unregister services only when no Modbus USB entry remains. The DOMAIN
     # dict also holds reload-guard helper sets, so its truthiness alone can
     # never be used to detect "last entry removed".
     remaining = [
-        item for item in hass.config_entries.async_entries(DOMAIN)
-        if item.entry_id != entry.entry_id
+        item for item in hass.data.get(DOMAIN, {}).values()
+        if isinstance(item, ModbusUsbCoordinator)
     ]
     if not remaining:
         await async_unregister_services(hass)

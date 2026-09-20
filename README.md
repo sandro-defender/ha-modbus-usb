@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/hacs/integration"><img src="https://img.shields.io/badge/HACS-Custom-orange.svg" alt="HACS Custom"></a>
   <a href="https://github.com/sandro-defender/ha-modbus-usb/releases"><img src="https://img.shields.io/github/v/release/sandro-defender/ha-modbus-usb" alt="Latest release"></a>
-  <a href="https://github.com/sandro-defender/ha-modbus-usb/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="Apache 2.0 license"></a>
+  <a href="https://github.com/sandro-defender/ha-modbus-usb/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT license"></a>
   <a href="https://www.home-assistant.io/"><img src="https://img.shields.io/badge/Home%20Assistant-2024.1%2B-41BDF5.svg" alt="Home Assistant 2024.1+"></a>
 </p>
 
@@ -313,10 +313,27 @@ Prefer entities over services for anything polled regularly — entities get pol
 
 Pull requests are welcome — especially new verified templates, diagnostics improvements, and test coverage.
 
+Use Python 3.12 for the pinned Home Assistant 2025.1.4 test environment.
+Python 3.11 uses Home Assistant 2024.3.3 as an older compatibility check.
+
 ```bash
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 python -m pip install -r requirements_test.txt
-python -m pytest
+python -m pytest -q
+ruff check custom_components tests
 ```
+
+CI runs tests on both Python versions against Pymodbus 3.6.9 and 3.15.0,
+including template validation, API authorization, numeric encoding, and reload
+regressions. Tests mock serial I/O; they do not certify real board behavior.
+Run a hardware smoke test before relying on a release for relay automations.
+
+Template and entity saves reject invalid register spans, slave IDs, non-finite
+numbers, and incompatible register types before changing configuration. Template
+writes are atomic: validation or disk-write failures leave the previous file
+intact. REST template edits and direct panel switch writes require an admin;
+normal Home Assistant entity controls continue to use HA's permissions.
 
 Template contributions should cite the vendor manual (link + page/register table) and note whether the map was verified on hardware. Community-sourced maps stay marked **untested** until someone confirms them.
 
@@ -338,4 +355,4 @@ Register maps and inspiration from community sources: [modbus_connect](https://g
 
 ## License
 
-[Apache License 2.0](LICENSE).
+[MIT License](LICENSE).

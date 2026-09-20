@@ -12,6 +12,7 @@ permissions:
 jobs:
   validate-and-release:
     name: Validate integration and publish a new version
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     steps:
@@ -22,6 +23,14 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+
+      - name: Install test dependencies
+        run: python -m pip install -r requirements_test.txt
+
+      - name: Lint and test before publishing
+        run: |
+          ruff check custom_components tests
+          python -m pytest -q
 
       - name: Check Python source syntax
         run: python -m compileall -q custom_components/modbus_usb

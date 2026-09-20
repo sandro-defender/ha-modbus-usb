@@ -24,6 +24,7 @@ from .diagnostics import (
     ws_probe_registers,
     ws_scan_bus,
     ws_stop_probe_registers,
+    ws_subscribe_traffic,
     ws_test_device_entities,
     ws_traffic_inspector,
     ws_verify_device_reads,
@@ -35,6 +36,7 @@ from .templates import (
     ws_delete_template,
     ws_designer_validate,
     ws_get_templates,
+    ws_save_and_apply_template,
     ws_save_template,
 )
 from .updates import ws_check_update, ws_install_update, ws_restart_home_assistant
@@ -71,6 +73,7 @@ async def async_register_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_export_activity_log)
     websocket_api.async_register_command(hass, ws_scan_bus)
     websocket_api.async_register_command(hass, ws_traffic_inspector)
+    websocket_api.async_register_command(hass, ws_subscribe_traffic)
     websocket_api.async_register_command(hass, ws_designer_validate)
     websocket_api.async_register_command(hass, ws_scan_usb_ports)
     websocket_api.async_register_command(hass, ws_get_serial_status)
@@ -85,6 +88,7 @@ async def async_register_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_save_template)
     websocket_api.async_register_command(hass, ws_delete_template)
     websocket_api.async_register_command(hass, ws_apply_template)
+    websocket_api.async_register_command(hass, ws_save_and_apply_template)
 
     # Register HTTP views
     try:
@@ -99,5 +103,7 @@ async def async_register_api(hass: HomeAssistant) -> None:
 
 
 # Changelog:
+# 2026-09-20 — v2.6.0: live traffic subscription (modbus_usb/subscribe_traffic) and
+#              designer one-step save & apply (modbus_usb/save_and_apply_template).
 # 2026-09-06 — Copy template image onto devices when applying eletechsup and other photo templates.
-# Date modified: 2026-09-06
+# Date modified: 2026-09-20

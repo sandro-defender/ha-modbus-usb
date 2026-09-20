@@ -11,6 +11,7 @@ from custom_components.modbus_usb.designer import (
     MAX_DESIGNER_ENTITIES,
     async_validate_template_design,
     evaluate_template_design,
+    evaluate_template_fingerprint,
     load_template_draft,
 )
 from custom_components.modbus_usb.validation import validate_template
@@ -322,3 +323,227 @@ async def test_async_validate_template_design_rejects_invalid_yaml() -> None:
     hass = SimpleNamespace(async_add_executor_job=_run_in_executor)
     with pytest.raises(ValueError):
         await async_validate_template_design(hass, SimpleNamespace(), "name: [broken")
+
+
+# ───────────────── v2.6.0: fingerprint probes in designer_validate ─────────────────
+
+FINGERPRINT_YAML = """
+name: Fingerprint Meter
+id: fingerprint_meter
+default_slave_id: 1
+fingerprint:
+  - register_type: input
+    address: 0
+    data_type: float32
+    min_value: 80
+    max_value: 300
+  - register_type: holding
+    address: 4
+    data_type: uint16
+    min_value: 1
+    max_value: 10
+entities:
+  - name: Voltage
+    entity_type: sensor
+    register_type: input
+    address: 0
+    data_type: float32
+"""
+
+
+def _fingerprint_template(fingerprint=None):
+    template = validate_template(
+        {
+            "name": "M",
+            "entities": [
+                {
+                    "name": "V",
+                    "entity_type": "sensor",
+                    "register_type": "input",
+                    "address": 0,
+                    "data_type": "uint16",
+                },
+            ],
+        }
+    )
+    if fingerprint is not None:
+        template["fingerprint"] = fingerprint
+    return template
+
+
+def test_evaluate_fingerprint_all_match() -> None:
+    def reader(address, register_type, count, slave):
+        assert slave == 1
+        if register_type == "input":
+            return _float_words(230.4)
+        return [5]
+
+    template = _fingerprint_template(
+        [
+            {
+                "register_type": "input",
+                "address": 0,
+                "data_type": "float32",
+                "min_value": 80,
+                "max_value": 300,
+            },
+            {
+                "register_type": "holding",
+                "address": 4,
+                "data_type": "uint16",
+                "min_value": 1,
+                "max_value": 10,
+            },
+        ]
+    )
+    results = evaluate_template_fingerprint(reader, template, 1)
+    assert [item["status"] for item in results] == ["match", "match"]
+    assert results[0]["value"] == pytest.approx(230.4)
+    assert results[1]["value"] == 5
+    assert results[0]["index"] == 0
+    assert results[1]["address"] == 4
+
+
+def test_evaluate_fingerprint_mismatch_reports_range() -> None:
+    template = _fingerprint_template(
+        [
+            {
+                "register_type": "input",
+                "address": 0,
+                "data_type": "uint16",
+                "min_value": 80,
+                "max_value": 300,
+            },
+        ]
+    )
+    results = evaluate_template_fingerprint(lambda *args: [7], template, 1)
+    assert results[0]["status"] == "mismatch"
+    assert results[0]["value"] == 7
+    assert "outside the expected range" in results[0]["error"]
+
+
+def test_evaluate_fingerprint_read_errors_are_isolated() -> None:
+    def reader(address, register_type, count, slave):
+        if address == 0:
+            raise TimeoutError("no response received from slave")
+        return [3]
+
+    template = _fingerprint_template(
+        [
+            {
+                "register_type": "input",
+                "address": 0,
+                "data_type": "uint16",
+                "min_value": 1,
+                "max_value": 10,
+            },
+            {
+                "register_type": "holding",
+                "address": 4,
+                "data_type": "uint16",
+                "min_value": 1,
+                "max_value": 10,
+            },
+        ]
+    )
+    results = evaluate_template_fingerprint(reader, template, 1)
+    assert results[0]["status"] == "error"
+    assert "no response" in results[0]["error"]
+    assert results[1]["status"] == "match"
+
+
+def test_evaluate_fingerprint_rejects_malformed_probes() -> None:
+    template = _fingerprint_template(
+        [
+            "not-a-mapping",
+            {"register_type": "coil", "address": 0, "min_value": 0, "max_value": 1},
+            {"register_type": "holding", "address": 0, "data_type": "bogus"},
+            {"register_type": "holding", "address": 0},  # missing min/max
+            {
+                "register_type": "holding",
+                "address": "x",
+                "min_value": 0,
+                "max_value": 1,
+            },
+            {
+                "register_type": "holding",
+                "address": 70000,
+                "min_value": 0,
+                "max_value": 1,
+            },
+        ]
+    )
+    results = evaluate_template_fingerprint(lambda *args: [1], template, 1)
+    assert [item["status"] for item in results] == ["error"] * 6
+    assert "must be a mapping" in results[0]["error"]
+    assert "holding or input" in results[1]["error"]
+    assert "Unsupported fingerprint data type" in results[2]["error"]
+    assert results[3]["error"]  # missing min_value raises KeyError text
+    assert results[4]["error"]  # non-integer address
+    assert "between 0 and 65535" in results[5]["error"]
+
+
+def test_evaluate_design_includes_fingerprint_summary() -> None:
+    def reader(address, register_type, count, slave):
+        if register_type == "input":
+            return _float_words(230.4)  # entity read + fingerprint probe
+        return [5]  # holding fingerprint probe, inside 1-10
+
+    template = load_template_draft(FINGERPRINT_YAML)
+    result = evaluate_template_design(reader, template)
+    assert result["fingerprint_total"] == 2
+    assert result["fingerprint_matched"] == 2
+    assert result["fingerprint_all_matched"] is True
+    assert result["passed"] == 1
+    assert result["all_passed"] is True
+
+
+def test_evaluate_design_fingerprint_mismatch_keeps_entity_results() -> None:
+    def reader(address, register_type, count, slave):
+        if register_type == "holding":
+            return [9999]  # outside 1-10 fingerprint range
+        return _float_words(230.4)
+
+    result = evaluate_template_design(reader, load_template_draft(FINGERPRINT_YAML))
+    assert result["passed"] == 1
+    assert result["failed"] == 0
+    assert result["fingerprint_matched"] == 1
+    assert result["fingerprint_total"] == 2
+    assert result["fingerprint_all_matched"] is False
+    mismatch = result["fingerprint"][1]
+    assert mismatch["status"] == "mismatch"
+
+
+def test_evaluate_design_without_fingerprint_reports_empty() -> None:
+    result = evaluate_template_design(lambda *args: [1], _fingerprint_template())
+    assert result["fingerprint"] == []
+    assert result["fingerprint_total"] == 0
+    assert result["fingerprint_matched"] == 0
+    assert result["fingerprint_all_matched"] is False
+
+
+def test_evaluate_design_skips_fingerprint_without_test_reads() -> None:
+    def reader(*args):
+        raise AssertionError("must not read when test_reads is False")
+
+    result = evaluate_template_design(
+        reader, load_template_draft(FINGERPRINT_YAML), test_reads=False
+    )
+    assert result["fingerprint"] == []
+    assert result["fingerprint_total"] == 0
+
+
+async def test_async_validate_reports_fingerprint_results() -> None:
+    class FakeCoordinator:
+        def read_raw_words(self, address, register_type, count, slave):
+            if register_type == "input":
+                return _float_words(230.4)
+            return [5]
+
+    hass = SimpleNamespace(async_add_executor_job=_run_in_executor)
+    result = await async_validate_template_design(
+        hass, FakeCoordinator(), FINGERPRINT_YAML
+    )
+    assert result["valid"] is True
+    assert result["fingerprint_total"] == 2
+    assert result["fingerprint_all_matched"] is True

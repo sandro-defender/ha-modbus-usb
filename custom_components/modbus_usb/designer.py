@@ -3,7 +3,9 @@
 The designer takes a draft template YAML, validates its structure, and then
 test-reads every entity's registers from the real bus. Each response is
 decoded into all supported data types so users can confirm their mapping
-before saving a new custom template.
+before saving a new custom template. Declared template fingerprints are
+probed as well, so users see per-entry match/no-match results for the same
+read-only checks the RS-485 scanner uses for template suggestions.
 
 The synchronous core accepts a plain ``read_words`` callable so it stays
 trivially unit-testable without Home Assistant.
@@ -23,6 +25,8 @@ from .const import (
     DATA_TYPES,
     REGISTER_TYPE_COIL,
     REGISTER_TYPE_DISCRETE,
+    REGISTER_TYPE_HOLDING,
+    REGISTER_TYPE_INPUT,
 )
 from .decoding import as_float, decode_words
 from .validation import validate_template
@@ -62,6 +66,75 @@ def _decode_all_types(words: list[int], count: int) -> dict[str, Any]:
     return decodings
 
 
+def evaluate_template_fingerprint(
+    read_words: ReadWordsCallable,
+    template: dict[str, Any],
+    slave_id: int,
+) -> list[dict[str, Any]]:
+    """Probe every declared fingerprint entry and report match/no-match.
+
+    Mirrors the RS-485 scanner's template matching: each probe reads one
+    holding/input register span, decodes it with the declared data type, and
+    compares against the expected ``min_value``/``max_value`` range. Malformed
+    probes and failed reads are reported per entry instead of aborting the
+    whole validation run.
+    """
+    results: list[dict[str, Any]] = []
+    for index, probe in enumerate(template.get("fingerprint") or []):
+        item: dict[str, Any] = {"index": index}
+        if not isinstance(probe, dict):
+            item.update(
+                {"status": "error", "error": "Fingerprint entry must be a mapping"}
+            )
+            results.append(item)
+            continue
+        register_type = probe.get("register_type")
+        data_type = probe.get("data_type", "uint16")
+        item.update(
+            {
+                "register_type": register_type,
+                "address": probe.get("address"),
+                "data_type": data_type,
+                "min_value": probe.get("min_value"),
+                "max_value": probe.get("max_value"),
+            }
+        )
+        try:
+            if register_type not in (REGISTER_TYPE_HOLDING, REGISTER_TYPE_INPUT):
+                raise ValueError(
+                    "Fingerprint register type must be holding or input, got "
+                    f"{register_type!r}"
+                )
+            if data_type not in DATA_TYPES:
+                raise ValueError(f"Unsupported fingerprint data type: {data_type!r}")
+            address = int(probe.get("address"))
+            if not 0 <= address <= 65535:
+                raise ValueError("Fingerprint address must be between 0 and 65535")
+            min_value = float(probe["min_value"])
+            max_value = float(probe["max_value"])
+            count = DATA_TYPE_WORD_COUNT.get(data_type, 1)
+            words = [
+                int(word)
+                for word in read_words(address, register_type, count, slave_id)
+            ]
+            value = decode_words(words[:count], data_type)
+            item.update({"address": address, "value": value})
+            if min_value <= value <= max_value:
+                item["status"] = "match"
+            else:
+                item["status"] = "mismatch"
+                item["error"] = (
+                    f"Value {value} is outside the expected range "
+                    f"{min_value:g}–{max_value:g}"
+                )
+        except Exception as err:
+            item["status"] = "error"
+            item["error"] = str(err)
+            _LOGGER.debug("Designer fingerprint probe %s failed: %s", index, err)
+        results.append(item)
+    return results
+
+
 def evaluate_template_design(
     read_words: ReadWordsCallable,
     template: dict[str, Any],
@@ -72,7 +145,9 @@ def evaluate_template_design(
     """Test-read every template entity and report decoded values.
 
     ``read_words(address, register_type, count, slave_id)`` must return the
-    raw register words (or coil bits as 0/1) or raise on failure.
+    raw register words (or coil bits as 0/1) or raise on failure. Declared
+    ``fingerprint`` probes are read and range-checked too (when test reads
+    are enabled), reporting match/no-match per entry.
     """
     started = time.monotonic()
     effective_slave = int(slave_id or template.get("default_slave_id", 1))
@@ -138,6 +213,17 @@ def evaluate_template_design(
     failed = sum(1 for item in entity_results if item["status"] == "fail")
     skipped = sum(1 for item in entity_results if item["status"] == "skipped")
 
+    # Fingerprint probes are real bus reads as well, so they follow the
+    # test_reads switch together with the entity reads.
+    fingerprint_results: list[dict[str, Any]] = []
+    if test_reads:
+        fingerprint_results = evaluate_template_fingerprint(
+            read_words, template, effective_slave
+        )
+    fingerprint_matched = sum(
+        1 for item in fingerprint_results if item["status"] == "match"
+    )
+
     return {
         "valid": True,
         "template": {
@@ -155,6 +241,11 @@ def evaluate_template_design(
         "truncated": truncated,
         "all_passed": failed == 0 and passed > 0 if test_reads else skipped >= 0,
         "entities": entity_results,
+        "fingerprint": fingerprint_results,
+        "fingerprint_total": len(fingerprint_results),
+        "fingerprint_matched": fingerprint_matched,
+        "fingerprint_all_matched": bool(fingerprint_results)
+        and fingerprint_matched == len(fingerprint_results),
         "duration_ms": round((time.monotonic() - started) * 1000, 1),
     }
 

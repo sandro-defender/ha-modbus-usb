@@ -294,3 +294,156 @@ def test_build_inspector_view_respects_limit_and_empty_log() -> None:
     assert empty["stats"]["avg_ms"] is None
     assert empty["transactions"] == []
     assert empty["per_slave"] == {}
+
+
+# ───────────────── v2.6.0: response frames & request/response pairing ─────────────────
+
+
+def test_parse_as_response_resolves_eight_byte_ambiguity() -> None:
+    # Slave 1, FC01, byte count 3, three data bytes: an 8-byte frame that is
+    # a read request by default but a coil response with as_response=True.
+    frame = _frame_with_crc("010103D0D1D2")
+    as_request = parse_rtu_frame(frame)
+    assert as_request["frame_kind"] == "read_request"
+    assert as_request["direction"] == "request"
+
+    as_response = parse_rtu_frame(frame, as_response=True)
+    assert as_response["frame_kind"] == "read_response"
+    assert as_response["direction"] == "response"
+    assert as_response["byte_count"] == 3
+    # First data byte 0xD0 = 0b1101_0000: coils 4, 6, 7 set (LSB first).
+    assert as_response["values"][:8] == [
+        False,
+        False,
+        False,
+        False,
+        True,
+        False,
+        True,
+        True,
+    ]
+    assert as_response["valid"] is True
+
+
+def test_parse_as_response_byte_count_register_frame() -> None:
+    parsed = parse_rtu_frame(_frame_with_crc("01030443666666"), as_response=True)
+    assert parsed["frame_kind"] == "read_response"
+    assert parsed["direction"] == "response"
+    assert parsed["byte_count"] == 4
+    assert parsed["values"] == [0x4366, 0x6666]
+    assert parsed["data_hex"] == "43 66 66 66"
+    assert parsed["valid"] is True
+
+
+def test_parse_as_response_odd_register_byte_count_flags_error() -> None:
+    parsed = parse_rtu_frame(
+        _frame_with_crc("01030343 6666".replace(" ", "")), as_response=True
+    )
+    assert parsed["frame_kind"] == "read_response"
+    assert parsed["valid"] is False
+    assert any("must be even" in error for error in parsed["errors"])
+
+
+def test_parse_write_echo_response_direction() -> None:
+    parsed = parse_rtu_frame(_frame_with_crc("030600800001"), as_response=True)
+    assert parsed["frame_kind"] == "write_frame"
+    assert parsed["direction"] == "response"
+    assert parsed["address"] == 0x80
+    assert parsed["value"] == 1
+    assert parsed["valid"] is True
+
+
+def test_parse_exception_direction_is_always_response() -> None:
+    for as_response in (False, True):
+        parsed = parse_rtu_frame(_frame_with_crc("018302"), as_response=as_response)
+        assert parsed["frame_kind"] == "exception_response"
+        assert parsed["direction"] == "response"
+
+
+def test_analyze_transaction_pairs_request_and_response() -> None:
+    transaction = {
+        "timestamp": datetime.now().isoformat(),
+        "operation": "read_holding",
+        "slave": 1,
+        "address": 7,
+        "count": 1,
+        "status": "ok",
+        "function_code": "0x03",
+        "request_hex": _frame_with_crc("010300070001"),
+        "request_captured": True,
+        "response_hex": _frame_with_crc("010302002A"),
+        "duration_ms": 18.3,
+        "latency": {"request_ms": 18.0},
+    }
+    analyzed = analyze_transaction(transaction)
+    assert analyzed["frame"]["frame_kind"] == "read_request"
+    assert analyzed["frame"]["direction"] == "request"
+    assert analyzed["response_frame"]["frame_kind"] == "read_response"
+    assert analyzed["response_frame"]["direction"] == "response"
+    assert analyzed["response_frame"]["values"] == [0x2A]
+    assert analyzed["response_frame"]["crc_valid"] is True
+    assert analyzed["transaction"]["response_hex"] == transaction["response_hex"]
+    assert analyzed["transaction"]["request_captured"] is True
+
+
+def test_analyze_transaction_exception_response_pairing() -> None:
+    analyzed = analyze_transaction(
+        {
+            "operation": "read_holding",
+            "slave": 1,
+            "address": 10,
+            "status": "error",
+            "error": "ExceptionResponse: Illegal Data Address",
+            "request_hex": _frame_with_crc("0103000A0001"),
+            "response_hex": _frame_with_crc("018302"),
+        }
+    )
+    assert analyzed["frame"]["frame_kind"] == "read_request"
+    assert analyzed["response_frame"]["frame_kind"] == "exception_response"
+    assert analyzed["response_frame"]["exception_name"] == "Illegal Data Address"
+
+
+def test_analyze_transaction_without_response() -> None:
+    analyzed = analyze_transaction(
+        {
+            "operation": "read_holding",
+            "status": "error",
+            "error": "Modbus Timeout",
+            "request_hex": _frame_with_crc("010300070001"),
+        }
+    )
+    assert analyzed["response_frame"] is None
+    assert analyzed["transaction"]["response_hex"] is None
+    assert analyzed["transaction"]["request_captured"] is False
+
+    garbage = analyze_transaction(
+        {
+            "status": "ok",
+            "request_hex": _frame_with_crc("010300070001"),
+            "response_hex": "zz",
+        }
+    )
+    assert garbage["response_frame"]["valid"] is False
+    assert garbage["response_frame"]["direction"] == "response"
+    assert garbage["response_frame"]["errors"]
+
+
+def test_build_inspector_view_reports_capture_and_response_stats() -> None:
+    coordinator = _coordinator_with_log(
+        [
+            _transaction(response_hex=_frame_with_crc("010302002A")),
+            _transaction(),
+        ]
+    )
+    coordinator.capture_hook = "trace_packet"
+    view = build_inspector_view(coordinator)
+    assert view["capture"] == {"hook": "trace_packet", "supported": True}
+    assert view["stats"]["responses"] == 1
+    assert view["transactions"][0]["response_frame"]["crc_valid"] is True
+    assert view["transactions"][1]["response_frame"] is None
+
+
+def test_build_inspector_view_without_capture_support() -> None:
+    view = build_inspector_view(_coordinator_with_log([_transaction()]))
+    assert view["capture"] == {"hook": None, "supported": False}
+    assert view["stats"]["responses"] == 0

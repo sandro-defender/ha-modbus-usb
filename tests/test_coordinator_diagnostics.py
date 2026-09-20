@@ -522,3 +522,211 @@ def test_32bit_write_payload(value, data_type, expected):
     coordinator = _coordinator(client)
     coordinator.write_registers_32bit(10, value, data_type, 7)
     client.write_registers.assert_called_once_with(10, expected, device_id=7)
+
+
+# ─────────── v2.6.0: real response capture & live traffic signals ───────────
+
+
+def _capture_frame(payload_hex: str) -> bytes:
+    from custom_components.modbus_usb.diagnostics import modbus_crc16
+
+    payload = bytes.fromhex(payload_hex)
+    crc = modbus_crc16(payload)
+    return payload + bytes((crc & 0xFF, crc >> 8))
+
+
+def _capture_hex(data: bytes) -> str:
+    return " ".join(f"{byte:02X}" for byte in data)
+
+
+TX_READ = _capture_frame("010300070001")
+RX_READ = _capture_frame("010302002A")
+
+
+def test_record_transaction_attaches_captured_rx_bytes() -> None:
+    from custom_components.modbus_usb.capture import ResponseCapture
+
+    coordinator = _coordinator(_Client(value=0x2A))
+    capture = ResponseCapture()
+    coordinator.response_capture = capture
+    capture.on_trace(True, TX_READ)
+    capture.on_trace(False, RX_READ)
+
+    assert (
+        coordinator.read_register_raw(7, REGISTER_TYPE_HOLDING, DATA_TYPE_UINT16, 1)
+        == 0x2A
+    )
+    entry = coordinator.transaction_log[0]
+    assert entry["request_captured"] is True
+    assert entry["request_hex"] == _capture_hex(TX_READ)
+    assert entry["response_hex"] == _capture_hex(RX_READ)
+
+    # The capture window is consumed exactly once: the next untraced
+    # transaction must not adopt the previous response bytes.
+    coordinator.read_register_raw(7, REGISTER_TYPE_HOLDING, DATA_TYPE_UINT16, 1)
+    assert "response_hex" not in coordinator.transaction_log[0]
+    assert "request_captured" not in coordinator.transaction_log[0]
+
+
+def test_record_transaction_captures_request_only_on_timeout() -> None:
+    from custom_components.modbus_usb.capture import ResponseCapture
+
+    client = _Client(value=1)
+
+    def timeout(*args, **kwargs):
+        raise TimeoutError("no response received from slave")
+
+    client.read_holding_registers = timeout
+    coordinator = _coordinator(client)
+    capture = ResponseCapture()
+    coordinator.response_capture = capture
+    capture.on_trace(True, TX_READ)
+
+    with pytest.raises(TimeoutError):
+        coordinator.read_register_raw(7, REGISTER_TYPE_HOLDING, DATA_TYPE_UINT16, 1)
+    entry = coordinator.transaction_log[0]
+    assert entry["status"] == "error"
+    assert entry["request_hex"] == _capture_hex(TX_READ)
+    assert entry["request_captured"] is True
+    assert "response_hex" not in entry
+
+
+def test_record_transaction_notifies_traffic_subscribers() -> None:
+    from types import SimpleNamespace
+
+    coordinator = _coordinator(_Client(value=1))
+    scheduled: list[tuple] = []
+
+    class _FakeLoop:
+        def call_soon_threadsafe(self, func, *args):
+            scheduled.append((func, args))
+
+    coordinator.hass = SimpleNamespace(loop=_FakeLoop())
+    coordinator.read_register_raw(0, REGISTER_TYPE_HOLDING, DATA_TYPE_UINT16, 1)
+
+    assert len(scheduled) == 1
+    func, args = scheduled[0]
+    assert func.__name__ == "async_dispatcher_send"
+    assert args[0] is coordinator.hass
+    assert args[1] == coordinator.traffic_signal() == "modbus_usb_test-entry_traffic"
+    assert args[2]["operation"] == "read_holding"
+    assert args[2] == coordinator.transaction_log[0]
+    assert args[2] is not coordinator.transaction_log[0]  # dispatched as a copy
+
+
+def test_traffic_notification_survives_missing_or_closed_loop() -> None:
+    from types import SimpleNamespace
+
+    coordinator = _coordinator(_Client(value=1))
+    # No hass at all (minimal unit-test coordinator): must not raise.
+    coordinator.read_register_raw(0, REGISTER_TYPE_HOLDING, DATA_TYPE_UINT16, 1)
+    assert coordinator.transaction_log[0]["status"] == "ok"
+
+    class _ClosedLoop:
+        def call_soon_threadsafe(self, *args):
+            raise RuntimeError("Event loop is closed")
+
+    coordinator.hass = SimpleNamespace(loop=_ClosedLoop())
+    coordinator.read_register_raw(0, REGISTER_TYPE_HOLDING, DATA_TYPE_UINT16, 1)
+    assert coordinator.transaction_log[0]["status"] == "ok"
+
+
+def test_install_response_capture_hooks_client_transaction_manager() -> None:
+    from custom_components.modbus_usb.capture import ResponseCapture
+
+    class _Manager:
+        trace_packet = None
+
+    class _TracedClient(_Client):
+        def __init__(self, **kwargs) -> None:
+            super().__init__(**kwargs)
+            self.transaction = _Manager()
+
+    client = _TracedClient(value=0x2A)
+    coordinator = _coordinator(client)
+    coordinator.response_capture = ResponseCapture()
+    coordinator._install_response_capture()
+    assert coordinator.capture_hook == "trace_packet"
+
+    client.transaction.trace_packet(True, TX_READ)
+    client.transaction.trace_packet(False, RX_READ)
+    coordinator.read_register_raw(7, REGISTER_TYPE_HOLDING, DATA_TYPE_UINT16, 1)
+    entry = coordinator.transaction_log[0]
+    assert entry["response_hex"] == _capture_hex(RX_READ)
+    assert entry["request_captured"] is True
+
+
+def test_install_response_capture_falls_back_to_logging_and_close_detaches() -> None:
+    import logging
+
+    from custom_components.modbus_usb.capture import ResponseCapture
+
+    logger = logging.getLogger("pymodbus.logging")
+    handlers_before = list(logger.handlers)
+
+    class _OpaqueClient:
+        connected = True
+        port = "/dev/ttyUSB0"
+
+        def connect(self) -> bool:
+            return True
+
+        def close(self) -> None:
+            self.connected = False
+
+    coordinator = _coordinator(_OpaqueClient())
+    coordinator.response_capture = ResponseCapture()
+    coordinator._install_response_capture()
+    assert coordinator.capture_hook == "logging"
+    assert len(logger.handlers) == len(handlers_before) + 1
+
+    coordinator.close()
+    assert logger.handlers == handlers_before
+
+
+def test_reconfigure_serial_reinstalls_capture_hook() -> None:
+    from unittest.mock import patch
+
+    from custom_components.modbus_usb.capture import ResponseCapture
+    from custom_components.modbus_usb.const import (
+        CONF_BAUDRATE,
+        CONF_BYTESIZE,
+        CONF_PARITY,
+        CONF_PORT,
+        CONF_STOPBITS,
+    )
+
+    coordinator = _coordinator(_Client(value=1))
+    coordinator.response_capture = ResponseCapture()
+    coordinator.serial_config = {
+        CONF_PORT: "/dev/ttyUSB0",
+        CONF_BAUDRATE: 9600,
+        CONF_BYTESIZE: 8,
+        CONF_PARITY: "N",
+        CONF_STOPBITS: 1,
+    }
+
+    class _Manager:
+        trace_packet = None
+
+    class _NewPymodbusClient:
+        connected = False
+        port = "/dev/ttyUSB0"
+        retries = 0
+
+        def __init__(self, *args, **kwargs) -> None:
+            self.transaction = _Manager()
+
+        def connect(self) -> bool:
+            self.connected = True
+            return True
+
+        def close(self) -> None:
+            self.connected = False
+
+    with patch("pymodbus.client.ModbusSerialClient", _NewPymodbusClient):
+        assert coordinator.reconfigure_serial({CONF_BAUDRATE: 19200}) is True
+
+    assert isinstance(coordinator.client, _NewPymodbusClient)
+    assert coordinator.capture_hook == "trace_packet"
+    assert coordinator.serial_config[CONF_BAUDRATE] == 19200

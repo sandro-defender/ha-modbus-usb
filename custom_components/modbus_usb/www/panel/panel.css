@@ -1350,6 +1350,12 @@
   .designer-decodings td { padding: 0.2rem 0.4rem; border-bottom: 1px solid rgba(255,255,255,0.04); }
   .designer-declared-row td { color: #6ee7b7; font-weight: 600; }
 
+/* ─── Traffic Inspector live stream & Designer apply (v2.6.0) ─────── */
+  .inspector-live-badge { align-self: center; animation: inspector-live-pulse 2s ease-in-out infinite; }
+  @keyframes inspector-live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+  .designer-apply-row { margin-top: 0.6rem; padding-top: 0.7rem; border-top: 1px dashed var(--border-subtle); }
+  .designer-fingerprint-section { margin-bottom: 1rem; padding-bottom: 0.4rem; border-bottom: 1px dashed var(--border-subtle); }
+
   @media (max-width: 1000px) {
     .inspector-layout, .designer-layout { grid-template-columns: 1fr; }
   }

@@ -1,9 +1,12 @@
 """Live bus traffic inspector and Modbus RTU frame analyzer.
 
 Pure parsing helpers for the Traffic Inspector panel tab. The coordinator
-keeps a rolling log of reconstructed request frames; these helpers decode
+keeps a rolling log of request frames (captured TX bytes when pymodbus
+tracing is available, otherwise reconstructed requests) and of real response
+frames captured from the wire (see ``capture.py``); these helpers decode
 each frame byte-by-byte (slave ID, function code, address, count, payload,
-CRC16 low/high) and assemble the latency waterfall used by the panel.
+CRC16 low/high), pair request/response per transaction, and assemble the
+latency waterfall used by the panel.
 
 The module intentionally avoids Home Assistant imports so it stays trivially
 unit-testable.
@@ -185,7 +188,9 @@ def _parse_byte_count_response(
         ]
 
 
-def parse_rtu_frame(frame_hex: str | bytes) -> dict[str, Any]:
+def parse_rtu_frame(
+    frame_hex: str | bytes, *, as_response: bool = False
+) -> dict[str, Any]:
     """Decode one Modbus RTU frame into a field-by-field breakdown.
 
     Returns a dictionary with the slave ID, function code, address/count or
@@ -194,13 +199,15 @@ def parse_rtu_frame(frame_hex: str | bytes) -> dict[str, Any]:
     raising, so the panel can display a partially decoded frame.
 
     Note: an 8-byte FC01-FC04 frame is ambiguous (read request vs. a response
-    carrying 5 data bytes). The integration logs reconstructed requests, so
-    8-byte frames are classified as read requests.
+    carrying 5 data bytes). Pass ``as_response=True`` for captured RX bytes so
+    every FC01-FC04 frame decodes as a byte-count response; by default frames
+    decode as the reconstructed requests the integration logs.
     """
     frame = normalize_frame_hex(frame_hex)
     parsed: dict[str, Any] = {
         "raw_hex": _format_bytes(frame),
         "frame_length": len(frame),
+        "direction": "response" if as_response else "request",
         "errors": [],
     }
 
@@ -237,6 +244,8 @@ def parse_rtu_frame(frame_hex: str | bytes) -> dict[str, Any]:
     if function_code >= 0x80:
         base_code = function_code - 0x80
         parsed["frame_kind"] = "exception_response"
+        # Exception frames only ever travel from slave to master.
+        parsed["direction"] = "response"
         parsed["function_code"] = function_code
         parsed["base_function_code"] = base_code
         parsed["function_name"] = FUNCTION_CODE_NAMES.get(
@@ -264,7 +273,7 @@ def parse_rtu_frame(frame_hex: str | bytes) -> dict[str, Any]:
     parsed["function_name"] = function_name or f"Function 0x{function_code:02X}"
 
     if function_code in (0x01, 0x02, 0x03, 0x04):
-        if len(frame) == 8:
+        if len(frame) == 8 and not as_response:
             parsed["frame_kind"] = "read_request"
             _read_request_fields(frame, parsed)
         elif len(frame) >= 5:
@@ -333,19 +342,33 @@ def parse_rtu_frame(frame_hex: str | bytes) -> dict[str, Any]:
     return parsed
 
 
+def _safe_parse_frame(
+    frame_hex: str | bytes | None, *, as_response: bool
+) -> dict[str, Any] | None:
+    """Parse one captured/reconstructed frame, downgrading errors to results."""
+    if not frame_hex:
+        return None
+    try:
+        return parse_rtu_frame(frame_hex, as_response=as_response)
+    except ValueError as err:
+        return {
+            "valid": False,
+            "direction": "response" if as_response else "request",
+            "errors": [str(err)],
+            "raw_hex": str(frame_hex),
+        }
+
+
 def analyze_transaction(transaction: dict[str, Any]) -> dict[str, Any]:
-    """Attach a decoded frame breakdown to one recorded bus transaction."""
-    frame: dict[str, Any] | None = None
+    """Attach decoded request/response frame breakdowns to one transaction.
+
+    ``request_hex`` decodes as a request frame (reconstructed or captured TX
+    bytes); ``response_hex`` — present when pymodbus transaction tracing
+    caught the real RX bytes — decodes as a response frame, so the panel can
+    show the paired request/response of one bus transaction.
+    """
     request_hex = transaction.get("request_hex")
-    if request_hex:
-        try:
-            frame = parse_rtu_frame(request_hex)
-        except ValueError as err:
-            frame = {
-                "valid": False,
-                "errors": [str(err)],
-                "raw_hex": str(request_hex),
-            }
+    response_hex = transaction.get("response_hex")
     return {
         "transaction": {
             "timestamp": transaction.get("timestamp"),
@@ -357,10 +380,13 @@ def analyze_transaction(transaction: dict[str, Any]) -> dict[str, Any]:
             "error": transaction.get("error"),
             "function_code": transaction.get("function_code"),
             "request_hex": request_hex,
+            "request_captured": bool(transaction.get("request_captured")),
+            "response_hex": response_hex,
             "duration_ms": transaction.get("duration_ms"),
             "latency": dict(transaction.get("latency") or {}),
         },
-        "frame": frame,
+        "frame": _safe_parse_frame(request_hex, as_response=False),
+        "response_frame": _safe_parse_frame(response_hex, as_response=True),
     }
 
 
@@ -415,16 +441,24 @@ def build_inspector_view(coordinator: Any, limit: int = 100) -> dict[str, Any]:
         stats = _duration_stats(bucket.pop("durations"))
         bucket.update(stats)
 
+    capture_hook = getattr(coordinator, "capture_hook", None)
     return {
         "entry_id": getattr(coordinator, "entry_id", None),
         "connected": bool(getattr(coordinator.client, "connected", False)),
         "default_slave_id": getattr(coordinator, "slave_id", None),
+        "capture": {
+            "hook": capture_hook,
+            "supported": capture_hook is not None,
+        },
         "stats": {
             "total": len(transactions),
             "errors": sum(
                 1
                 for transaction in transactions
                 if transaction.get("status") == "error"
+            ),
+            "responses": sum(
+                1 for transaction in transactions if transaction.get("response_hex")
             ),
             **_duration_stats(durations),
         },

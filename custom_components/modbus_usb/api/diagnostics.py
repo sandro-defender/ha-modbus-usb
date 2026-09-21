@@ -25,7 +25,7 @@ from ..const import (
     DOMAIN,
     REGISTER_TYPE_COIL,
 )
-from ..coordinator import traffic_signal
+from ..coordinator import scan_progress_signal, traffic_signal
 from ..diagnostics import (
     ACTIVITY_LOG_CSV_FIELDS,
     activity_log_csv_rows,
@@ -679,6 +679,73 @@ async def ws_scan_bus(
     except Exception as err:
         _LOGGER.warning("RS-485 bus scan failed: %s", err)
         connection.send_error(msg["id"], "scan_failed", str(err))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "modbus_usb/stop_bus_scan",
+        vol.Required("entry_id"): cv.string,
+    }
+)
+@websocket_api.async_response
+async def ws_stop_bus_scan(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Ask a running bus scan to stop between probes (modbus_usb/stop_bus_scan).
+
+    The scan finishes as soon as the current probe returns: its result carries
+    ``cancelled: true`` plus whatever devices were already found, and the hub
+    connection is restored either way.
+    """
+    try:
+        coordinator = hass.data[DOMAIN][msg["entry_id"]]
+        coordinator.cancel_scan()
+        connection.send_result(msg["id"], {"stopping": True})
+    except KeyError as err:
+        connection.send_error(msg["id"], "not_found", str(err))
+    except Exception as err:
+        _LOGGER.warning("Stop bus scan failed: %s", err)
+        connection.send_error(msg["id"], "stop_failed", str(err))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "modbus_usb/subscribe_scan_progress",
+        vol.Required("entry_id"): cv.string,
+    }
+)
+@websocket_api.async_response
+async def ws_subscribe_scan_progress(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict
+) -> None:
+    """Stream bus-scan progress to the panel as probes complete.
+
+    Read-only subscription (no admin gate): each event carries
+    {slave, total, completed, baudrate, parity, found_so_far, active,
+    cancelled}. The subscription is removed automatically when the
+    WebSocket connection closes.
+    """
+    coordinator = hass.data.get(DOMAIN, {}).get(msg["entry_id"])
+    if coordinator is None:
+        connection.send_error(
+            msg["id"], "not_found", f"Unknown config entry '{msg['entry_id']}'"
+        )
+        return
+
+    @callback
+    def forward_progress(progress: dict[str, Any]) -> None:
+        connection.send_message(
+            websocket_api.event_message(msg["id"], {"progress": progress})
+        )
+
+    connection.subscriptions[msg["id"]] = async_dispatcher_connect(
+        hass, scan_progress_signal(msg["entry_id"]), forward_progress
+    )
+    connection.send_result(
+        msg["id"],
+        {"subscribed": True, "progress": coordinator.scan_progress_snapshot()},
+    )
 
 
 @websocket_api.websocket_command(

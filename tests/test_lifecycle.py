@@ -10,6 +10,12 @@ from custom_components.modbus_usb.const import DATA_PRESERVE_SERIAL_RELOAD, DOMA
 from custom_components.modbus_usb.coordinator import ModbusUsbCoordinator
 
 
+async def _ha_executor_job(target, *args):
+    # Mirrors HA's HomeAssistant.async_add_executor_job(target, *args):
+    # positional args only — keyword arguments raise TypeError, like in HA.
+    return target(*args)
+
+
 def unload_hass(*, success=True, preserve=False, other=False):
     coordinator = Mock(spec=ModbusUsbCoordinator)
     domain_data = {"hub": coordinator}
@@ -22,7 +28,8 @@ def unload_hass(*, success=True, preserve=False, other=False):
         config_entries=SimpleNamespace(
             async_unload_platforms=AsyncMock(return_value=success)
         ),
-        async_add_executor_job=AsyncMock(),
+        # side_effect enforces HA's real positional-only executor signature.
+        async_add_executor_job=AsyncMock(side_effect=_ha_executor_job),
     )
     return hass, coordinator
 

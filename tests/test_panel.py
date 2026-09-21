@@ -360,3 +360,57 @@ def test_panel_wires_designer_error_highlighting_and_export() -> None:
     assert "error_line" in core_js
     for selector in (".designer-gutter-line-error", ".designer-error-location"):
         assert selector in css, f"missing designer style {selector}"
+
+
+def test_panel_wires_hub_ownership_banner_and_stable_path() -> None:
+    """v2.9.0: hub tab explains a non-openable port in one sentence and
+    offers the persistent by-id path via the existing save_hub command."""
+    hub_js = _panel_script("hub.js")
+    core_js = _panel_script("core.js")
+    # One-sentence ownership banner (reason colours: ok/missing/busy/...).
+    assert "renderHubOwnershipRow" in hub_js
+    assert "hub-ownership-row" in hub_js
+    assert "hub-ownership-banner" in hub_js
+    for reason in ("ok", "missing", "busy", "permission", "unknown"):
+        assert f"{reason}:" in hub_js or f"'{reason}'" in hub_js, reason
+    assert "HUB_OWNERSHIP_COLORS" in hub_js
+    # "Use stable path" button, saved via the existing save_hub command.
+    assert "btn-use-stable-path" in hub_js
+    assert "applyStableHubPath" in hub_js
+    assert "apiCall('save_hub'" in hub_js
+    # Ownership is read-only; the mock mode carries the new fields.
+    assert "apiCall('get_serial_status'" in hub_js
+    assert "ownership" in core_js
+    assert "stable_path" in core_js
+    assert "by_id_candidates" in core_js
+
+
+def test_panel_wires_scan_stop_and_progress_stream() -> None:
+    html = _html()
+    diag = _panel_script("diagnostics.js")
+    core = _panel_script("core.js")
+    # Stop button lives in the progress row and is wired to stopRs485Scan()
+    assert 'id="btn-stop-scan-bus"' in html
+    assert 'onclick="stopRs485Scan()"' in html
+    # Live progress subscription + stop command + progress-line format
+    for token in (
+        "function stopRs485Scan()",
+        "apiCall('stop_bus_scan'",
+        "modbus_usb/subscribe_scan_progress",
+        "function ensureScanProgressSubscription(",
+        "function applyScanProgressEvent(",
+        "teardownScanProgressSubscription()",
+        "slave ${scan.slave}/${total} @ ${scan.baudrate} 8${scan.parity || 'N'}1",
+        "result.cancelled",
+    ):
+        assert token in diag, f"diagnostics.js missing: {token}"
+    # The 500 ms polling fallback stays in place
+    assert "setInterval(refreshScanProgress, 500)" in diag
+    # Mock mode emulates scan progress and accepts the new commands
+    for token in (
+        "mockRunScan",
+        "stop_bus_scan",
+        "subscribe_scan_progress",
+        "_mockScan",
+    ):
+        assert token in core, f"core.js missing: {token}"

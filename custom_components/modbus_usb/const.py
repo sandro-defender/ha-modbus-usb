@@ -74,6 +74,11 @@ DEFAULT_RESPONSE_TIMEOUT_API = 1.5
 # diagnostics dumps, or logs.
 SECRET_CONF_KEYS = (CONF_API_ENCRYPTION_KEY, CONF_API_PASSWORD)
 
+# v2.9.0: USB adapter identity (VID:PID + serial number) learned at the
+# first successful connect; used to re-discover a re-plugged adapter that
+# came back on a different ttyUSB index.
+CONF_ADAPTER_IDENTITY = "adapter_identity"
+
 DEFAULT_PORT = "/dev/ttyUSB0"
 DEFAULT_BAUDRATE = 9600
 DEFAULT_BYTESIZE = 8

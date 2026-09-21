@@ -9,6 +9,12 @@ from homeassistant.exceptions import HomeAssistantError
 from custom_components.modbus_usb.number import ModbusUsbNumber
 
 
+async def _ha_executor_job(target, *args):
+    # Mirrors HA's HomeAssistant.async_add_executor_job(target, *args):
+    # positional args only — keyword arguments raise TypeError, like in HA.
+    return target(*args)
+
+
 def make_number(data_type, scale=1, **overrides):
     coordinator = Mock(data={}, last_update_success=True)
     coordinator.async_request_refresh = AsyncMock()
@@ -27,7 +33,10 @@ def make_number(data_type, scale=1, **overrides):
             **overrides,
         },
     )
-    entity.hass = SimpleNamespace(async_add_executor_job=AsyncMock())
+    entity.hass = SimpleNamespace(
+        # side_effect enforces HA's real positional-only executor signature.
+        async_add_executor_job=AsyncMock(side_effect=_ha_executor_job)
+    )
     return entity, coordinator
 
 

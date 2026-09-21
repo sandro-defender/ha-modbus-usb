@@ -190,5 +190,15 @@
     "error": {
       "no_entities": "No entities are configured yet. Use 'Add a sensor or switch' first."
     }
+  },
+  "issues": {
+    "serial_adapter_lost": {
+      "title": "Modbus USB adapter not found",
+      "description": "The USB adapter for hub port {port} disappeared from the system and has stayed gone for more than 60 seconds. Re-plug the adapter or check USB passthrough. Saving a stable /dev/serial/by-id path ({by_id}) in the Hub & Serial tab lets Home Assistant find the adapter again even if it returns on a different /dev/ttyUSB index; polling resumes automatically the moment it reappears."
+    },
+    "serial_port_busy": {
+      "title": "Serial port busy",
+      "description": "The hub port {port} has been held open by another program for more than 60 seconds, so Home Assistant cannot own the RS-485 bus. Close the other program{holder}, then re-check the port in the Hub & Serial tab."
+    }
   }
 }

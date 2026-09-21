@@ -286,7 +286,7 @@
         </div>
         <div id="scan-result-box" style="display:none; margin-top:1rem; padding:0.85rem; border-radius:8px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.06); font-family:var(--font-mono); font-size:0.8rem;"></div>
         <div id="scan-progress-wrap" style="display:none; margin-top:0.7rem;">
-          <div class="flex justify-between text-sm text-muted"><span id="scan-progress-text">Preparing scan…</span><span id="scan-progress-percent">0%</span></div>
+          <div class="flex justify-between items-center gap-2 text-sm text-muted"><span id="scan-progress-text">Preparing scan…</span><button class="btn btn-secondary btn-sm" id="btn-stop-scan-bus" hidden onclick="stopRs485Scan()">⏹ Stop</button><span id="scan-progress-percent">0%</span></div>
           <div style="height:8px; margin-top:0.35rem; overflow:hidden; border-radius:99px; background:rgba(255,255,255,0.08);"><div id="scan-progress-bar" style="width:0%; height:100%; background:linear-gradient(90deg,#3b82f6,#34d399); transition:width .2s ease;"></div></div>
         </div>
       </div>

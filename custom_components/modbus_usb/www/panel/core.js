@@ -108,6 +108,59 @@
       return handleMockCall(type, payload);
     }
 
+    // ─── Mock RS-485 bus scan (standalone preview) ─────────────
+    let _mockScan = null;
+
+    function emptyMockScanProgress() {
+      return { active: false, completed: 0, total: 0, found: 0, slave: null, baudrate: null, parity: null, cancelled: false };
+    }
+
+    function mockRunScan(entry, payload) {
+      const baudrates = (payload.baudrates || [9600]).map(Number).filter(Boolean);
+      const parities = (payload.parities || ['N']).map(String);
+      const start = Math.max(1, Math.min(247, Number(payload.start_slave) || 1));
+      const end = Math.max(start, Math.min(247, Number(payload.end_slave) || 20));
+      const combos = [];
+      for (const b of baudrates) {
+        for (const pr of parities) {
+          for (let s = start; s <= end; s += 1) combos.push({ b, pr, s });
+        }
+      }
+      const scan = {
+        active: true, completed: 0, total: combos.length, found: 0,
+        slave: null, baudrate: null, parity: null, cancelled: false, stopRequested: false,
+      };
+      _mockScan = scan;
+      entry.scan = scan; // the 500 ms get_data poll drives the progress bar
+      const found = [];
+      let i = 0;
+      return new Promise((resolve) => {
+        const timer = setInterval(() => {
+          if (i >= combos.length || scan.stopRequested) {
+            clearInterval(timer);
+            scan.active = false;
+            scan.cancelled = scan.stopRequested;
+            _mockScan = null;
+            resolve({
+              found, probed: i, start_slave: start, end_slave: end,
+              transport: 'serial', baudrate_fixed: false, cancelled: scan.cancelled,
+            });
+            return;
+          }
+          const combo = combos[i];
+          i += 1;
+          scan.completed = i;
+          scan.slave = combo.s;
+          scan.baudrate = combo.b;
+          scan.parity = combo.pr;
+          if (combo.s === 1 && combo.b === 9600 && combo.pr === 'N') {
+            found.push({ slave_id: 1, baudrate: 9600, parity: 'N', response: 'register response', suggestions: [] });
+            scan.found = found.length;
+          }
+        }, 60);
+      });
+    }
+
     function handleMockCall(type, payload) {
       const entry = MOCK_DATA.entries.find(e => e.entry_id === (payload.entry_id || _currentEntryId)) || MOCK_DATA.entries[0];
 
@@ -206,9 +259,14 @@
         return { results };
       }
       if (type === 'stop_probe_registers') return { stopping: true };
-      if (type === 'scan_bus') {
-        return { found: [{ slave_id: 1, baudrate: 9600, response: 'register response' }], probed: 20 };
+      if (type === 'stop_bus_scan') {
+        if (_mockScan && _mockScan.active) _mockScan.stopRequested = true;
+        return { stopping: true };
       }
+      if (type === 'subscribe_scan_progress') {
+        return { subscribed: true, progress: _mockScan ? { ..._mockScan } : emptyMockScanProgress() };
+      }
+      if (type === 'scan_bus') return mockRunScan(entry, payload);
       if (type === 'test_hub_connection') {
         const hub = entry.hub || {};
         return hub.transport === 'esphome_tcp' || hub.transport === 'esphome_api'
@@ -221,9 +279,9 @@
       if (type === 'manual_hex_write') return { slave_id: 1, function_code: '0x06', address: 128, count: 1 };
       if (type === 'get_serial_status') {
         if ((entry.hub || {}).transport === 'esphome_tcp') {
-          return { serial: { port: null, baudrate: 9600, bytesize: 8, parity: 'N', stopbits: 1, connection_owner: 'Home Assistant Modbus USB', operation_active: false, transport: 'esphome_tcp', label: 'ESPHome · RTU over TCP', endpoint: 'modbus-bridge.local:8899', baudrate_fixed: true, capture_support: 'trace_packet' }, adapter: null, esphome: true };
+          return { serial: { port: null, baudrate: 9600, bytesize: 8, parity: 'N', stopbits: 1, connection_owner: 'Home Assistant Modbus USB', operation_active: false, transport: 'esphome_tcp', label: 'ESPHome · RTU over TCP', endpoint: 'modbus-bridge.local:8899', baudrate_fixed: true, capture_support: 'trace_packet' }, adapter: null, esphome: true, ownership: null, by_id_candidates: [], stable_path: null };
         }
-        return { serial: { port: '/dev/ttyUSB0', baudrate: 9600, bytesize: 8, parity: 'N', stopbits: 1, connection_owner: 'Home Assistant Modbus USB', operation_active: false, transport: 'serial', label: 'Serial (USB adapter)', endpoint: '/dev/ttyUSB0', baudrate_fixed: false }, adapter: { port: '/dev/ttyUSB0', description: 'USB-RS485 Adapter', details: 'CH340 USB-Serial' } };
+        return { serial: { port: '/dev/ttyUSB0', baudrate: 9600, bytesize: 8, parity: 'N', stopbits: 1, connection_owner: 'Home Assistant Modbus USB', operation_active: false, transport: 'serial', label: 'Serial (USB adapter)', endpoint: '/dev/ttyUSB0', baudrate_fixed: false, state: 'ok', resolved_from: 'configured', reconnects_total: 1 }, adapter: { port: '/dev/ttyUSB0', description: 'USB-RS485 Adapter', details: 'CH340 USB-Serial' }, ownership: { reason: 'ok', hint: 'Port is open — Home Assistant is currently using it.', holders: [], probed: false }, by_id_candidates: ['/dev/serial/by-id/usb-FTDI_D2XX_P12345-0000'], stable_path: '/dev/serial/by-id/usb-FTDI_D2XX_P12345-0000' };
       }
       if (type === 'test_device_entities') {
         const device = entry.devices.find(d => d.id === payload.device_id);

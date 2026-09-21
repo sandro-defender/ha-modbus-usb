@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 
 from .api import async_register_api
 from .const import (
+    CONF_ADAPTER_IDENTITY,
     CONF_DEVICE_ID,
     CONF_DEVICES,
     CONF_ENTITIES,
@@ -131,6 +132,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry_id=entry.entry_id,
             serial_config=connection,
         )
+
+        # Adopt any previously learned USB adapter identity (v2.9.0 hot-plug
+        # watch) so a re-plugged adapter on a new ttyUSB index can be found.
+        coordinator.note_adapter_identity(entry.data.get(CONF_ADAPTER_IDENTITY))
+        if connected:
+            # Learn the identity of the adapter that just opened, on a
+            # worker thread (it scans /sys), so hot-plug re-discovery has
+            # it stored before the adapter ever disappears.
+            await hass.async_add_executor_job(coordinator.learn_current_identity)
 
         # An offline RS-485 board must not block Home Assistant setup. The normal
         # coordinator interval starts after entity setup and retries in background.

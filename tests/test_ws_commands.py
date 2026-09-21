@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from homeassistant.exceptions import Unauthorized
 
 from custom_components.modbus_usb.api import diagnostics as api_diagnostics
 from custom_components.modbus_usb.api import templates as api_templates
@@ -519,8 +520,11 @@ async def test_ws_apply_template_still_works_after_refactor() -> None:
 # ───────────── v2.7.1: designer_validate reports the error location ─────────────
 
 
-async def _run_in_executor(func, *args, **kwargs):
-    return func(*args, **kwargs)
+async def _run_in_executor(func, *args):
+    # Mirrors HA's HomeAssistant.async_add_executor_job(target, *args):
+    # positional args only — keyword arguments must raise TypeError here,
+    # exactly like they do on a real HomeAssistant instance.
+    return func(*args)
 
 
 async def test_designer_validate_reply_includes_error_location() -> None:
@@ -610,3 +614,418 @@ async def test_designer_validate_plain_value_error_has_no_location_keys() -> Non
         "error": "Slave ID must be between 1 and 247",
         "entities": [],
     }
+
+
+# ───────── v2.8.1 regression: designer_validate executor kwargs ─────────
+#
+# HA's HomeAssistant.async_add_executor_job(target, *args) forwards
+# POSITIONAL arguments only; keyword arguments raise TypeError at the call
+# site. The fakes below use the exact same signature, so a regression in
+# async_validate_template_design (e.g. slave_id=... passed to the executor)
+# fails in CI instead of only in production.
+
+DESIGNER_REGRESSION_YAML = """
+name: Regression Meter
+id: regression_meter
+default_slave_id: 2
+entities:
+  - name: Voltage
+    entity_type: sensor
+    register_type: input
+    address: 0
+    data_type: uint16
+  - name: Relay
+    entity_type: switch
+    register_type: coil
+    address: 5
+"""
+
+
+class _FakeDesignerCoordinator:
+    """Minimal coordinator whose read_raw_words drives the designer."""
+
+    def __init__(self, words=None) -> None:
+        self.calls: list[tuple] = []
+        self._words = words if words is not None else [42]
+
+    def read_raw_words(self, address, register_type, count, slave):
+        self.calls.append((address, register_type, count, slave))
+        return self._words
+
+
+def _strict_hass(coordinator) -> SimpleNamespace:
+    return SimpleNamespace(
+        data={DOMAIN: {"e1": coordinator}},
+        # Positional-only executor, exactly like HA's real method.
+        async_add_executor_job=_run_in_executor,
+    )
+
+
+async def test_ws_designer_validate_regression_slave_id_no_test_reads() -> None:
+    """Validate with slave_id set and test_reads off must succeed.
+
+    This is the exact production report: the keyword was forwarded to
+    async_add_executor_job, which raised TypeError with the kwargs.
+    """
+    coordinator = _FakeDesignerCoordinator()
+    hass = _strict_hass(coordinator)
+    connection = _connection()
+    await _unwrap(api_templates.ws_designer_validate)(
+        hass,
+        connection,
+        {
+            "id": 11,
+            "type": "modbus_usb/designer_validate",
+            "entry_id": "e1",
+            "content": DESIGNER_REGRESSION_YAML,
+            "slave_id": 9,
+            "test_reads": False,
+        },
+    )
+    connection.send_error.assert_not_called()
+    msg_id, result = connection.send_result.call_args[0]
+    assert msg_id == 11
+    assert result["valid"] is True
+    assert result["test_reads"] is False
+    assert result["slave_id"] == 9
+    assert result["skipped"] == 2
+    assert coordinator.calls == []  # no test reads performed
+
+
+async def test_ws_designer_validate_regression_test_reads_through_coordinator() -> None:
+    """Test reads flow through the fake coordinator read_raw_words."""
+    coordinator = _FakeDesignerCoordinator(words=[7])
+    hass = _strict_hass(coordinator)
+    connection = _connection()
+    await _unwrap(api_templates.ws_designer_validate)(
+        hass,
+        connection,
+        {
+            "id": 12,
+            "type": "modbus_usb/designer_validate",
+            "entry_id": "e1",
+            "content": DESIGNER_REGRESSION_YAML,
+            "slave_id": 3,
+            "test_reads": True,
+        },
+    )
+    connection.send_error.assert_not_called()
+    _, result = connection.send_result.call_args[0]
+    assert result["valid"] is True
+    assert result["test_reads"] is True
+    assert result["slave_id"] == 3
+    assert result["passed"] == 2
+    assert result["failed"] == 0
+    # Both entities were read from the bus through the coordinator.
+    assert coordinator.calls == [
+        (0, "input", 1, 3),
+        (5, "coil", 1, 3),
+    ]
+
+
+# ── v2.9.0: get_serial_status port-ownership diagnostics ─────────────────
+
+
+class _StatusCoordinator:
+    """Minimal coordinator surface for the serial-status WS command."""
+
+    def __init__(self, port: str = "/dev/ttyUSB0", connected: bool = True) -> None:
+        self.serial_config = {"transport": "serial", "port": port}
+        self.client = SimpleNamespace(connected=connected)
+
+    def get_diagnostics(self) -> dict:
+        return {"serial": {"port": self.serial_config["port"]}}
+
+
+def _status_hass(entry: _FakeEntry, coordinator) -> SimpleNamespace:
+    hass = _hass(entry)
+    hass.data[DOMAIN][entry.entry_id] = coordinator
+
+    async def _executor(target, *args):
+        return target(*args)
+
+    hass.async_add_executor_job = _executor
+    return hass
+
+
+async def test_ws_get_serial_status_connected_reports_ok_without_probe() -> None:
+    """While the integration owns the port the probe must not run (it would
+    fail with EBUSY against Home Assistant's own open handle)."""
+    from custom_components.modbus_usb.api import hub as api_hub
+
+    entry = _FakeEntry("e1")
+    coordinator = _StatusCoordinator(connected=True)
+    hass = _status_hass(entry, coordinator)
+    conn = _connection()
+    probe = Mock(side_effect=AssertionError("must not probe a port we own"))
+    with (
+        patch(
+            "custom_components.modbus_usb.api.hub._list_serial_ports",
+            return_value=[
+                {
+                    "port": "/dev/ttyUSB0",
+                    "persistent_path": "/dev/serial/by-id/usb-FTDI_D2XX_1",
+                }
+            ],
+        ),
+        patch("custom_components.modbus_usb.api.hub.probe_port_ownership", probe),
+        patch(
+            "custom_components.modbus_usb.api.hub.stable_by_id_path",
+            return_value="/dev/serial/by-id/usb-FTDI_D2XX_1",
+        ),
+    ):
+        await _unwrap(api_hub.ws_get_serial_status)(
+            hass,
+            conn,
+            {"id": 1, "type": "modbus_usb/get_serial_status", "entry_id": "e1"},
+        )
+    assert conn.send_error.call_count == 0
+    result = conn.send_result.call_args[0][1]
+    assert result["ownership"]["reason"] == "ok"
+    assert result["ownership"]["probed"] is False
+    assert "Home Assistant" in result["ownership"]["hint"]
+    assert probe.call_count == 0
+    assert result["stable_path"] == "/dev/serial/by-id/usb-FTDI_D2XX_1"
+    assert result["by_id_candidates"] == ["/dev/serial/by-id/usb-FTDI_D2XX_1"]
+
+
+async def test_ws_get_serial_status_unconnected_busy_port_reports_holders() -> None:
+    """A closed but busy port: the probe result (reason, hint, holders) is
+    passed through to the panel verbatim."""
+    from custom_components.modbus_usb.api import hub as api_hub
+
+    entry = _FakeEntry("e1")
+    coordinator = _StatusCoordinator(connected=False)
+    hass = _status_hass(entry, coordinator)
+    conn = _connection()
+    probe_result = {
+        "reason": "busy",
+        "hint": "/dev/ttyUSB0 is already open by another program.",
+        "holders": [{"pid": 4242, "name": "minicom"}],
+    }
+    with (
+        patch(
+            "custom_components.modbus_usb.api.hub._list_serial_ports",
+            return_value=[],
+        ),
+        patch(
+            "custom_components.modbus_usb.api.hub.probe_port_ownership",
+            return_value=dict(probe_result),
+        ),
+        patch(
+            "custom_components.modbus_usb.api.hub.stable_by_id_path",
+            return_value=None,
+        ),
+    ):
+        await _unwrap(api_hub.ws_get_serial_status)(
+            hass,
+            conn,
+            {"id": 2, "type": "modbus_usb/get_serial_status", "entry_id": "e1"},
+        )
+    assert conn.send_error.call_count == 0
+    result = conn.send_result.call_args[0][1]
+    assert result["ownership"]["reason"] == "busy"
+    assert result["ownership"]["probed"] is True
+    assert result["ownership"]["holders"] == [{"pid": 4242, "name": "minicom"}]
+    assert result["stable_path"] is None
+    assert result["by_id_candidates"] == []
+
+
+async def test_ws_get_serial_status_missing_port_not_probed() -> None:
+    """A nonexistent port is classified missing without opening anything."""
+    from custom_components.modbus_usb.api import hub as api_hub
+
+    entry = _FakeEntry("e1")
+    coordinator = _StatusCoordinator(port="/dev/ttyUSB9", connected=False)
+    hass = _status_hass(entry, coordinator)
+    conn = _connection()
+    probe = Mock(
+        return_value={
+            "reason": "missing",
+            "hint": "/dev/ttyUSB9 does not exist.",
+            "holders": [],
+        }
+    )
+    with (
+        patch(
+            "custom_components.modbus_usb.api.hub._list_serial_ports",
+            return_value=[
+                {"port": "/dev/ttyUSB0", "persistent_path": "/dev/serial/by-id/usb-A"}
+            ],
+        ),
+        patch("custom_components.modbus_usb.api.hub.probe_port_ownership", probe),
+        patch(
+            "custom_components.modbus_usb.api.hub.stable_by_id_path",
+            return_value=None,
+        ),
+    ):
+        await _unwrap(api_hub.ws_get_serial_status)(
+            hass,
+            conn,
+            {"id": 3, "type": "modbus_usb/get_serial_status", "entry_id": "e1"},
+        )
+    result = conn.send_result.call_args[0][1]
+    assert result["ownership"]["reason"] == "missing"
+    assert result["by_id_candidates"] == ["/dev/serial/by-id/usb-A"]
+
+
+async def test_ws_get_serial_status_permission_reason_passes_through() -> None:
+    from custom_components.modbus_usb.api import hub as api_hub
+
+    entry = _FakeEntry("e1")
+    coordinator = _StatusCoordinator(connected=False)
+    hass = _status_hass(entry, coordinator)
+    conn = _connection()
+    with (
+        patch(
+            "custom_components.modbus_usb.api.hub._list_serial_ports",
+            return_value=[],
+        ),
+        patch(
+            "custom_components.modbus_usb.api.hub.probe_port_ownership",
+            return_value={
+                "reason": "permission",
+                "hint": "Add the homeassistant user to the dialout group.",
+                "holders": [],
+            },
+        ),
+        patch(
+            "custom_components.modbus_usb.api.hub.stable_by_id_path",
+            return_value=None,
+        ),
+    ):
+        await _unwrap(api_hub.ws_get_serial_status)(
+            hass,
+            conn,
+            {"id": 4, "type": "modbus_usb/get_serial_status", "entry_id": "e1"},
+        )
+    result = conn.send_result.call_args[0][1]
+    assert result["ownership"]["reason"] == "permission"
+    assert "dialout" in result["ownership"]["hint"]
+
+
+# ── v2.9.0: bus-scan stop + live progress subscription ──────────────────
+
+
+class _ScanCoordinator:
+    """Minimal coordinator exposing the real cancel/progress helpers."""
+
+    def __init__(self) -> None:
+        from custom_components.modbus_usb.coordinator import ModbusUsbCoordinator
+
+        self._real = object.__new__(ModbusUsbCoordinator)
+        self._real.entry_id = "e1"
+        self._real.hass = None
+        self._real.scan_progress = {
+            "active": False,
+            "completed": 0,
+            "total": 0,
+            "found": 0,
+            "slave": None,
+            "baudrate": None,
+            "parity": None,
+            "cancelled": False,
+        }
+
+    def cancel_scan(self) -> None:
+        self._real.cancel_scan()
+
+    def scan_progress_snapshot(self) -> dict:
+        return self._real.scan_progress_snapshot()
+
+    @property
+    def cancel_event(self):
+        return self._real._scan_cancel_event
+
+
+async def test_stop_bus_scan_sets_cancel_event_and_reports_stopping():
+    entry = _FakeEntry("e1")
+    coordinator = _ScanCoordinator()
+    hass = _hass(entry)
+    hass.data[DOMAIN]["e1"] = coordinator
+    conn = _connection()
+    await _unwrap(api_diagnostics.ws_stop_bus_scan)(
+        hass, conn, {"id": 1, "type": "modbus_usb/stop_bus_scan", "entry_id": "e1"}
+    )
+    conn.send_result.assert_called_once()
+    payload = conn.send_result.call_args[0][1]
+    assert payload == {"stopping": True}
+    assert coordinator.cancel_event.is_set()
+
+
+async def test_stop_bus_scan_requires_admin():
+    entry = _FakeEntry("e1")
+    coordinator = _ScanCoordinator()
+    hass = _hass(entry)
+    hass.data[DOMAIN]["e1"] = coordinator
+    conn = _connection()
+    conn.user = SimpleNamespace(is_admin=False)
+    # The decorated handler (not _unwrap) enforces the admin gate by raising.
+    with pytest.raises(Unauthorized):
+        await api_diagnostics.ws_stop_bus_scan(
+            hass, conn, {"id": 2, "type": "modbus_usb/stop_bus_scan", "entry_id": "e1"}
+        )
+    conn.send_result.assert_not_called()
+    coordinator._real._ensure_scan_attrs()  # create the event (unset)
+    assert not coordinator.cancel_event.is_set()
+
+
+async def test_stop_bus_scan_unknown_entry_is_not_found():
+    hass = _hass(_FakeEntry("e1"))
+    conn = _connection()
+    await _unwrap(api_diagnostics.ws_stop_bus_scan)(
+        hass, conn, {"id": 3, "type": "modbus_usb/stop_bus_scan", "entry_id": "missing"}
+    )
+    conn.send_error.assert_called_once()
+    assert conn.send_error.call_args[0][1] == "not_found"
+
+
+async def test_subscribe_scan_progress_forwards_progress_events():
+    from homeassistant.helpers.dispatcher import async_dispatcher_send
+
+    from custom_components.modbus_usb.coordinator import scan_progress_signal
+
+    entry = _FakeEntry("e1")
+    coordinator = _ScanCoordinator()
+    hass = _hass(entry)
+    hass.data[DOMAIN]["e1"] = coordinator
+    conn = _connection()
+    await _unwrap(api_diagnostics.ws_subscribe_scan_progress)(
+        hass,
+        conn,
+        {"id": 4, "type": "modbus_usb/subscribe_scan_progress", "entry_id": "e1"},
+    )
+    result = conn.send_result.call_args[0][1]
+    assert result["subscribed"] is True
+    assert result["progress"]["active"] is False
+    assert "found_so_far" in result["progress"]
+    # no admin gate: a plain connection (no user attribute) was accepted
+    assert not hasattr(conn, "user")
+
+    # HA's dispatcher send runs targets through hass.async_run_hass_job —
+    # shim the minimal fake so the real dispatcher path is exercised.
+    def _run_hass_job(job, *args):
+        job.target(*args)
+
+    hass.async_run_hass_job = _run_hass_job
+    async_dispatcher_send(
+        hass, scan_progress_signal("e1"), {"active": True, "slave": 7, "total": 20}
+    )
+    conn.send_message.assert_called_once()
+    frame = conn.send_message.call_args[0][0]
+    assert frame["type"] == "event"
+    assert frame["event"]["progress"]["slave"] == 7
+    assert frame["event"]["progress"]["total"] == 20
+
+
+async def test_subscribe_scan_progress_unknown_entry_is_not_found():
+    hass = _hass(_FakeEntry("e1"))
+    conn = _connection()
+    await _unwrap(api_diagnostics.ws_subscribe_scan_progress)(
+        hass,
+        conn,
+        {"id": 5, "type": "modbus_usb/subscribe_scan_progress", "entry_id": "missing"},
+    )
+    conn.send_error.assert_called_once()
+    assert conn.send_error.call_args[0][1] == "not_found"
+    assert conn.subscriptions == {}

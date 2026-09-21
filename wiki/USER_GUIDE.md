@@ -58,7 +58,10 @@ slave ID, and poll interval.
    - **Integration name** — e.g. `Workshop RS-485`.
    - **Serial port** — e.g. `/dev/ttyUSB0` (Linux/HA OS) or `COM3` (Windows).
      Prefer a `/dev/serial/by-id/...` path: it survives reboots and re-plugged
-     adapters. Use the panel's **Hub & Serial** tab later to find candidates.
+     adapters. Use the panel's **Hub & Serial** tab later to find candidates —
+     and if you did save a dynamic `/dev/ttyUSB*` node, the tab's
+     **Use stable path** button (since v2.9.0) switches the entry to the
+     matching by-id link for you.
    - **Baud rate / Data bits / Parity / Stop bits** — from your device manual.
      Most boards use `9600 / 8 / N / 1`.
    - **Slave / Unit ID** — your device's Modbus address (usually `1`).
@@ -127,8 +130,12 @@ Use this when the slave ID or baud rate is unknown:
 1. Open **Diagnostics & Debug → 🔎 Find RS-485 Devices**.
 2. Pick the baud rate(s) from the manual (or try `9600` first) and a small
    slave-ID range such as 1–20.
-3. Run the scan. Each answering board is listed with its slave ID, baud
-   rate, parity, and template suggestions.
+3. Run the scan. The progress line follows every probe live
+   (`slave 37/247 @ 19200 8N1 — N devices found`, streamed over the
+   `modbus_usb/subscribe_scan_progress` subscription); **Stop** interrupts
+   the scan between probes and keeps whatever was already found (v2.9.0).
+   Each answering board is listed with its slave ID, baud rate, parity,
+   and template suggestions.
 4. Click **Use this target** to hand the result to Board Tools, or just note
    the slave ID and add the device via Way 1 or 2.
 
@@ -360,7 +367,7 @@ collapsed with a one-line live summary; expand any card for details.
 |---|---|
 | **📡 RS-485 Connection Health** | Totals, failures, last success/error, and the most recent operation across polling *and* writes. |
 | **🔌 Serial port profile** | Configured port settings, HA ownership, lock activity, detected USB-adapter details. Non-invasive — it never opens the port itself. |
-| **🔎 Find RS-485 Devices** | Scans slave IDs × baud/parity under the serial lock, then restores your client. **Use this target** prefills Board Tools. |
+| **🔎 Find RS-485 Devices** | Scans slave IDs × baud/parity under the serial lock, then restores your client. Live progress ("slave 37/247 @ 19200 8N1") with a **Stop** button since v2.9.0; **Use this target** prefills Board Tools. |
 | **🔬 Live Modbus Read / Write** | One-shot reads/writes for testing, without creating entities. |
 | **✅ Template read verification** | Read-only check of every non-switch entity (outputs are never toggled). |
 | **📜 RS-485 Activity & Error Log** | History of requests, replies, timing, and errors, with one-click JSON/CSV/Text export, sensitive data redaction, and multi-field filtering (slave ID, function code, errors). Since v2.7.1 the CSV export lists **every captured response frame** (one row per frame with `frame_index`, `frame_count`, `response_hex`, `frame_time_ms`); JSON keeps the nested `response_frames` / `response_frame_times_ms` lists. Redaction also masks the register address inside write-echo response frames. |
@@ -760,7 +767,7 @@ your regular HA backup — no other files carry your setup.
 |---|---|---|
 | Timeouts / no response | Wrong slave ID or baud rate | Scan IDs 1–20 at each documented baud; confirm parity/stop bits |
 | Nothing answers at all | A/B swapped, no power, wrong port | Swap A/B **once**, check board power LEDs, verify the port path |
-| `Permission denied` / port busy | OS/container can't open the adapter | Use `/dev/serial/by-id/...`; on Docker pass `--device /dev/ttyUSB0`; ensure nothing else owns the port |
+| `Permission denied` / port busy | OS/container can't open the adapter | The Hub tab banner says exactly why (and who holds a busy port); use `/dev/serial/by-id/...`; on Docker pass `--device /dev/ttyUSB0` |
 | Values shifted by one register | 1-based manual addresses | Subtract 1 from the manual address |
 | Values 10×/100× off | Missing scale | Set `scale: 0.1` / `0.01` on the entity |
 | Gibberish floats | Wrong data type | Compare `uint16` vs `float32` against the manual; verify with Live Read |
@@ -778,6 +785,26 @@ changes apply immediately.
 No. Home Assistant owns a configured adapter exclusively — a second program
 opening the same port interleaves RTU frames and causes timeouts or wrong
 writes. Use a separate adapter + board for bench testing.
+
+**My adapter got a new /dev/ttyUSB number — what now?**
+Nothing (since v2.9.0). When the adapter goes missing the integration enters
+an adapter-lost state (entities turn unavailable) and retries on a 1 s →
+30 s backoff; when it comes back it is re-discovered by its USB identity
+(VID:PID + serial number), so a re-plugged adapter on a *different*
+`/dev/ttyUSB*` index re-attaches automatically — no restart, no config edit.
+If you have several adapters, it never guesses between them: switch the hub
+to a `/dev/serial/by-id/...` path (the Hub tab's **Use stable path** button
+does that in one click) and the ambiguity disappears.
+
+**Port busy — who is using it?**
+The **Hub & Serial** tab (and the Diagnostics serial-port card) shows a
+one-sentence ownership banner: `missing`, `busy`, `permission`, or
+`unknown`. For a busy port the banner names the process holding it open
+(best-effort, via `/proc/*/fd`) — close that program and the port frees up.
+For `permission`, the hint points at the `dialout` group; on a read-only
+overlay (Docker) the port must be passed through with `--device`. While the
+condition persists for a minute, a **serial_port_busy** repair issue appears
+in HA's Repairs section and is deleted on its own once the port opens.
 
 **Why does my relay board need ON=256 / OFF=512?**
 Many holding-register relay boards (all eletechsup models here) use vendor

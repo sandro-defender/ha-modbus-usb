@@ -298,8 +298,11 @@ def test_evaluate_rejects_bad_slave() -> None:
         evaluate_template_design(lambda *args: [0], template, slave_id=999)
 
 
-async def _run_in_executor(func, *args, **kwargs):
-    return func(*args, **kwargs)
+async def _run_in_executor(func, *args):
+    # Mirrors HA's HomeAssistant.async_add_executor_job(target, *args):
+    # positional args only — keyword arguments must raise TypeError here,
+    # exactly like they do on a real HomeAssistant instance.
+    return func(*args)
 
 
 async def test_async_validate_template_design_uses_coordinator_reads() -> None:

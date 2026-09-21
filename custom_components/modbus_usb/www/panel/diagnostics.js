@@ -250,6 +250,25 @@
         : (item.result ?? item.value ?? 'Accepted');
     }
 
+    function scanProgressLine(scan) {
+      const total = Number(scan.total || 0);
+      const found = scan.found ?? scan.found_so_far ?? 0;
+      if (scan.active) {
+        if (scan.slave != null && Number(scan.baudrate)) {
+          return `slave ${scan.slave}/${total} @ ${scan.baudrate} 8${scan.parity || 'N'}1 — ${found} device${found === 1 ? '' : 's'} found`;
+        }
+        if (scan.slave != null) {
+          return `slave ${scan.slave}/${total} (bridge line settings) — ${found} device${found === 1 ? '' : 's'} found`;
+        }
+        const completed = Number(scan.completed || 0);
+        return `Scanning ${completed} of ${total} probes — ${found} device${found === 1 ? '' : 's'} found`;
+      }
+      const completed = Number(scan.completed || 0);
+      return scan.cancelled
+        ? `Scan stopped — ${completed} of ${total} probes, ${found} device${found === 1 ? '' : 's'} found (partial)`
+        : `Scan complete — ${completed} probes, ${found} device${found === 1 ? '' : 's'} found`;
+    }
+
     function renderScanProgress(scan) {
       const wrap = document.getElementById('scan-progress-wrap');
       if (!wrap) return;
@@ -263,9 +282,7 @@
       wrap.style.display = 'block';
       document.getElementById('scan-progress-bar').style.width = `${percent}%`;
       document.getElementById('scan-progress-percent').textContent = `${percent}%`;
-      document.getElementById('scan-progress-text').textContent = scan.active
-        ? `Scanning ${completed} of ${total} probes — ${scan.found || 0} device${scan.found === 1 ? '' : 's'} found`
-        : `Scan complete — ${completed} probes, ${scan.found || 0} device${scan.found === 1 ? '' : 's'} found`;
+      document.getElementById('scan-progress-text').textContent = scanProgressLine(scan);
     }
 
     async function refreshScanProgress() {
@@ -762,6 +779,60 @@
       return fixed;
     }
 
+    let _scanProgressUnsubscribe = null;
+    let _scanProgressEntryId = null;
+
+    async function ensureScanProgressSubscription(entryId) {
+      await teardownScanProgressSubscription();
+      if (!_isLiveHA || !_hass?.connection?.subscribeMessage || !entryId) return;
+      try {
+        _scanProgressEntryId = entryId;
+        _scanProgressUnsubscribe = await _hass.connection.subscribeMessage(
+          (message) => {
+            if (message?.type !== 'event' || !message.event?.progress) return;
+            applyScanProgressEvent(message.event.progress);
+          },
+          { type: 'modbus_usb/subscribe_scan_progress', entry_id: entryId },
+        );
+      } catch (error) {
+        // The 500 ms get_data polling stays as a fallback (older integration,
+        // standalone mock preview, or a closed WebSocket).
+        console.debug('Scan progress stream unavailable, falling back to polling:', error);
+        _scanProgressUnsubscribe = null;
+        _scanProgressEntryId = null;
+      }
+    }
+
+    async function teardownScanProgressSubscription() {
+      const dispose = _scanProgressUnsubscribe;
+      _scanProgressUnsubscribe = null;
+      _scanProgressEntryId = null;
+      if (dispose) {
+        try { await dispose(); } catch (_) { /* connection already gone */ }
+      }
+    }
+
+    function applyScanProgressEvent(progress) {
+      renderScanProgress(progress);
+      const stopButton = document.getElementById('btn-stop-scan-bus');
+      if (stopButton) stopButton.hidden = !progress.active;
+    }
+
+    async function stopRs485Scan() {
+      const entry = getCurrentEntry();
+      const button = document.getElementById('btn-stop-scan-bus');
+      if (!entry || !button || button.disabled) return;
+      button.disabled = true;
+      button.textContent = '⏹ Stopping…';
+      try {
+        await apiCall('stop_bus_scan', { entry_id: entry.entry_id });
+      } catch (error) {
+        toast(`Could not stop the scan: ${error.message}`, 'err');
+        button.disabled = false;
+        button.textContent = '⏹ Stop';
+      }
+    }
+
     async function scanRs485Bus() {
       const entry = getCurrentEntry();
       const fixedBaud = updateScanTransportNote();
@@ -783,6 +854,9 @@
       }
       button.disabled = true;
       button.textContent = '⌛ Scanning…';
+      const stopButton = document.getElementById('btn-stop-scan-bus');
+      if (stopButton) { stopButton.hidden = false; stopButton.disabled = false; stopButton.textContent = '⏹ Stop'; }
+      await ensureScanProgressSubscription(entry.entry_id);
       box.style.display = 'block';
       box.style.color = '#93c5fd';
       box.textContent = fixedBaud
@@ -794,9 +868,10 @@
           entry_id: entry.entry_id, baudrates, parities,
           start_slave: startSlave, end_slave: endSlave,
         });
-        box.style.color = result.found?.length ? '#34d399' : '#fcd34d';
+        const cancelled = Boolean(result.cancelled);
+        box.style.color = result.found?.length ? (cancelled ? '#fcd34d' : '#34d399') : '#fcd34d';
         box.innerHTML = result.found?.length
-          ? `Found: ${result.found.map(item => {
+          ? `${cancelled ? '⏹ Scan stopped — partial results: ' : 'Found: '}${result.found.map(item => {
               const suggestion = item.suggestions?.length
                 ? ` — suggested template: ${escapeHtml(item.suggestions.join(', '))}`
                 : '';
@@ -806,13 +881,17 @@
               const baud = Number(item.baudrate) || Number(entry?.hub?.baudrate) || 9600;
               return `<div style="margin-bottom:0.55rem;">slave ${escapeHtml(item.slave_id)} ${where} (${escapeHtml(item.response)})${suggestion} <button class="btn btn-secondary btn-sm" onclick="useDiscoveredTarget(${Number(item.slave_id)}, ${baud})">Use this target</button></div>`;
             }).join('')}`
-          : `No responding devices found after ${result.probed || 0} probes. Check A/B wires, power, baud rate, and slave ID.`;
+          : cancelled
+            ? `Scan stopped after ${result.probed || 0} probes — no devices answered yet. Check A/B wires, power, baud rate, and slave ID.`
+            : `No responding devices found after ${result.probed || 0} probes. Check A/B wires, power, baud rate, and slave ID.`;
         await refreshData();
       } catch (error) {
         box.style.color = '#f87171';
         box.textContent = `Scan failed: ${error.message}`;
       } finally {
         clearInterval(progressTimer);
+        if (stopButton) { stopButton.hidden = true; stopButton.disabled = false; stopButton.textContent = '⏹ Stop'; }
+        await teardownScanProgressSubscription();
         await refreshScanProgress();
         button.disabled = false;
         button.textContent = '🔎 Scan RS-485 Bus';

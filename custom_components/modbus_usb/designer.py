@@ -18,6 +18,7 @@ trivially unit-testable without Home Assistant.
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 import time
@@ -479,10 +480,14 @@ async def async_validate_template_design(
     def _read_words(address: int, register_type: str, count: int, slave: int):
         return coordinator.read_raw_words(address, register_type, count, slave)
 
+    # HA's async_add_executor_job(target, *args) forwards positional args
+    # only — keyword arguments raise TypeError, so bind them with functools.partial.
     return await hass.async_add_executor_job(
-        evaluate_template_design,
-        _read_words,
-        template,
-        slave_id=slave_id,
-        test_reads=test_reads,
+        functools.partial(
+            evaluate_template_design,
+            _read_words,
+            template,
+            slave_id=slave_id,
+            test_reads=test_reads,
+        )
     )

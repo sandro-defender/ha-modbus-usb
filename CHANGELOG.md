@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 2.8.1
+
+### Fixed
+- **Template Designer "Validate" crash**: clicking **Validate** failed with
+  `HomeAssistant.async_add_executor_job() got an unexpected keyword argument
+  'slave_id'` — the designer forwarded `slave_id`/`test_reads` as *keywords*
+  to `hass.async_add_executor_job`, which only forwards positional arguments.
+  The synchronous evaluation is now bound with `functools.partial`, and every
+  other `async_add_executor_job` call site in the integration was audited and
+  is positional-only. Test fakes for `hass.async_add_executor_job` now mirror
+  Home Assistant's real positional-only signature, so this bug class fails in
+  CI instead of in production.
+
 ## 2.8.0
 
 ### ESPHome device as the Modbus hub

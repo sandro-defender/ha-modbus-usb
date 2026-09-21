@@ -623,7 +623,7 @@ def test_manifest_requires_aioesphomeapi() -> None:
     with open(os.path.join(COMPONENT_DIR, "manifest.json"), encoding="utf-8") as f:
         manifest = json.load(f)
     assert any(req.startswith("aioesphomeapi") for req in manifest["requirements"])
-    assert manifest["version"] == "2.8.0"
+    assert manifest["version"] == "2.8.1"
     with open(
         os.path.join(os.path.dirname(__file__), "..", "requirements_test.txt"),
         encoding="utf-8",

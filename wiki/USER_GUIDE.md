@@ -16,8 +16,9 @@ Modbus USB Controller integration. For the short overview, see the
 8. [Board tools](#8-board-tools)
 9. [Automations & services](#9-automations--services)
 10. [Multiple devices & hubs](#10-multiple-devices--hubs)
-11. [Maintenance](#11-maintenance)
-12. [Troubleshooting & FAQ](#12-troubleshooting--faq)
+11. [Using an ESPHome device as the hub](#11-using-an-esphome-device-as-the-hub)
+12. [Maintenance](#12-maintenance)
+13. [Troubleshooting & FAQ](#13-troubleshooting--faq)
 
 ---
 
@@ -26,7 +27,8 @@ Modbus USB Controller integration. For the short overview, see the
 ### What you need
 
 - Home Assistant 2024.1 or newer.
-- A USB-to-RS-485 adapter connected to the machine running Home Assistant.
+- A USB-to-RS-485 adapter connected to the machine running Home Assistant —
+  **or** an ESP32 with an RS-485 module running ESPHome (chapter 11).
 - A Modbus RTU device, powered and wired (A→A, B→B).
 - Every device on one RS-485 bus must use a **unique slave ID** (1–247).
 
@@ -50,7 +52,9 @@ slave ID, and poll interval.
 
 1. Go to **Settings → Devices & services → Add integration**.
 2. Search for **Modbus USB Controller**.
-3. Fill in the form:
+3. Choose the **connection type**: *Local USB / serial adapter* (this
+   section), or one of the two *ESPHome* options (chapter 11).
+4. Fill in the form:
    - **Integration name** — e.g. `Workshop RS-485`.
    - **Serial port** — e.g. `/dev/ttyUSB0` (Linux/HA OS) or `COM3` (Windows).
      Prefer a `/dev/serial/by-id/...` path: it survives reboots and re-plugged
@@ -60,7 +64,7 @@ slave ID, and poll interval.
    - **Slave / Unit ID** — your device's Modbus address (usually `1`).
      If you don't know it, leave `1` for now and scan later (chapter 7).
    - **Poll interval** — how often registers are read (default 10 s).
-4. Save. A **Modbus USB** entry appears in the sidebar — that panel is where
+5. Save. A **Modbus USB** entry appears in the sidebar — that panel is where
    everything else happens.
 
 > You need a second hub only if you have a **second USB adapter**. All boards
@@ -269,6 +273,22 @@ Designer** tab (since v2.5.0):
      from the template name automatically.
    Saving warns you if the draft hasn't passed live validation.
 
+**Structural errors are located in the draft (since v2.7.1).** When the
+YAML cannot be parsed or fails the template rules (unknown `entity_type`,
+out-of-range `address`, bad `default_slave_id`, …), the report shows a
+clickable **`line N:M`** badge and the key path of the problem (for
+example `entities[1].entity_type`), and the offending line is marked in
+red in the editor gutter. Click the badge to jump to that line; the
+marker disappears as soon as you edit the draft or it validates. YAML
+syntax errors point at the exact character PyYAML complained about (or
+at the opening bracket of an unterminated `[ … ]`).
+
+**⬇️ Export current draft (since v2.7.1)** downloads whatever is in the
+editor as a `.yaml` file — handy for sharing a work-in-progress template
+or keeping a copy before experimenting. The filename comes from the
+*Save as* box, or is derived from the template `name`; nothing is sent
+to the server.
+
 > Test reads and fingerprint probes are real bus traffic. Leave **Live test
 > reads** enabled for the certification workflow; disable it only for an
 > offline structure check (fingerprint probes are skipped too).
@@ -343,7 +363,7 @@ collapsed with a one-line live summary; expand any card for details.
 | **🔎 Find RS-485 Devices** | Scans slave IDs × baud/parity under the serial lock, then restores your client. **Use this target** prefills Board Tools. |
 | **🔬 Live Modbus Read / Write** | One-shot reads/writes for testing, without creating entities. |
 | **✅ Template read verification** | Read-only check of every non-switch entity (outputs are never toggled). |
-| **📜 RS-485 Activity & Error Log** | History of requests, replies, timing, and errors, with one-click JSON/CSV/Text export, sensitive data redaction, and multi-field filtering (slave ID, function code, errors). |
+| **📜 RS-485 Activity & Error Log** | History of requests, replies, timing, and errors, with one-click JSON/CSV/Text export, sensitive data redaction, and multi-field filtering (slave ID, function code, errors). Since v2.7.1 the CSV export lists **every captured response frame** (one row per frame with `frame_index`, `frame_count`, `response_hex`, `frame_time_ms`); JSON keeps the nested `response_frames` / `response_frame_times_ms` lists. Redaction also masks the register address inside write-echo response frames. |
 | **🛠 Board tools** | Launcher for template-aware hardware actions (chapter 8). |
 | **Automatic safe discovery** | Checks the four standard read functions at address 0, then expands only functions that answer. Read-only, with a Stop button. |
 | **Safe board discovery** | Read-only unknown-board probe across functions/addresses, with plain-language interpretation of each reply. |
@@ -370,17 +390,43 @@ one decodes its RTU frames byte by byte:
   an exception followed by a follow-up read). The detail pane renders the
   whole stream as a **list of decoded frames** — each with its own chips and
   CRC validation — and the row badge shows `RX ×N`.
+- **Inter-frame gaps (since v2.7.1)**: every captured response frame is
+  time-stamped on arrival, so multi-frame streams come with a small
+  **waterfall** above the frame list — each bar is the frame's arrival
+  offset from the first request byte (`t+12.5 ms`), the tick marks the
+  previous frame, and the label on the right is the gap between the two
+  (exception frames are drawn in red). Single frames show the arrival
+  chip only. Use it to spot a slow slave inside a batch, or a board that
+  answers an exception first and the real data much later.
 - **Live filters (since v2.7.0)**: the transaction list filters client-side
   and instantly, without touching the live stream:
   - **Slave** — dropdown of every slave ID seen recently;
   - **Status** — `ok`, `error`, or `exception` (matches any transaction
     whose captured RX stream contains an exception response);
+  - **Function** (since v2.7.1) — one Modbus function code (`FC01`–`FC06`,
+    `FC0F`, `FC10`) or `exception (0x8x)`. A transaction matches when the
+    code appears in its request, its recorded function code, or *any*
+    captured response frame — exception replies also match their base
+    code, so `FC03` finds `0x83` responses too;
   - **Hex** — free-text search across request *and* response frames
     (e.g. `01 03`, `0x0103`, or `8302` to find an Illegal Data Address
     exception).
   The counter shows `matching / total` rows, **✕ Clear** resets everything,
   and the filters survive tab switches — new transactions streamed in while
   a filter is active are hidden or shown by it automatically.
+- **Saved views (since v2.7.1)**: once a filter combination is useful
+  (say *slave 3 + exception*), **💾 Save view** stores it under a name in
+  this browser's `localStorage` (up to 24 views). Pick a view from the
+  **Saved view** dropdown to re-apply it; the last-used view is
+  **re-applied automatically whenever the Traffic Inspector tab is
+  opened**. Editing any filter by hand keeps the filters but deselects the
+  view, **🗑 Delete view** removes the selected one, and **✕ Clear** drops
+  both filters and selection. Views never leave the browser.
+- **Capture coverage (since v2.7.1)**: a stats-bar card showing the share
+  of logged transactions that carry captured RX bytes (green ≥ 90 %,
+  amber ≥ 50 %, red below; `n/a` when the pymodbus release exposes no
+  tracing hook). A low value with a working hook usually means many
+  timeouts — the slave never answered — rather than a capture problem.
 - **Checking capture support**: the integration's options flow
   (Settings → Devices & Services → Modbus USB Controller → gear icon →
   **Traffic capture status**) shows the active pymodbus version and hook —
@@ -408,7 +454,11 @@ one decodes its RTU frames byte by byte:
 2. Open the **Activity Log** — the exact failing operation, slave, and error.
 3. For timing or CRC questions, open the **Traffic Inspector** and inspect
    the failing transaction's request/response pair, checksums, and latency
-   waterfall — an exception RX frame tells you *why* the board refused.
+   waterfall — an exception RX frame tells you *why* the board refused, and
+   the inter-frame gap waterfall shows *which* frame of a batch was slow.
+   Save the filter combination as a view so it is one click away next time;
+   export the Activity Log as CSV (one row per captured response frame) when
+   you need to share the raw exchange.
 4. Run **Find RS-485 Devices** on a narrow range to confirm ID/baud/parity.
 5. Use **Live Read** with the detected settings to prove the register map.
 6. For unknown boards, use **Safe discovery** + **Watch inputs** — never guess
@@ -579,7 +629,103 @@ automation:
 
 ---
 
-## 11. Maintenance
+## 11. Using an ESPHome device as the hub
+
+Since v2.8.0 the hub can live on the network: an **ESP32 + RS-485 module**
+running ESPHome carries the bus, and Home Assistant reaches it over Wi-Fi.
+This is useful when the RS-485 devices are far from the HA machine, when HA
+runs in a VM/container without USB pass-through, or when you already have
+ESPHome nodes near the equipment.
+
+### Two transports
+
+| | ESPHome · RTU over TCP (`esphome_tcp`) | ESPHome · native API (`esphome_api`) |
+|---|---|---|
+| Firmware | `esphome/modbus_bridge_esp32.yaml` | `esphome/modbus_api_bridge_esp32.yaml` |
+| Extra ESPHome component | `oxan/esphome-stream-server` (external) | none |
+| How it works | ESP32 forwards raw UART bytes on TCP `8899`; HA speaks Modbus RTU over the socket | HA calls the ESPHome service `modbus_send`; the ESP32 fires `esphome.modbus_rx` events with the reply |
+| Latency per request | ≈ wire speed | +20–60 ms |
+| Feature coverage | Everything (polling, scans, hex console, board tools, inspector) | Everything; capture uses the client's own tracing hook |
+| Pick it when | You can use external components (recommended) | Your ESPHome setup forbids external components, or you want the API's encryption without a second open port |
+
+Both YAML files live in `custom_components/modbus_usb/esphome/` (also in the
+repository). The README there has the wiring table.
+
+### Wiring the ESP32
+
+Generic ESP32 dev board, **UART2** (UART0 stays free for flashing/logs):
+
+- `GPIO17` → RS-485 module **DI** (TX) · `GPIO16` ← module **RO** (RX)
+- `3V3`/`5V` and `GND` → module VCC/GND (check the module's logic level)
+- Module **A/B** → bus A/B; add a common GND on long runs and 120 Ω
+  termination at both bus ends.
+- Auto-direction modules need nothing more. Classic MAX485 boards: tie
+  **DE+RE** to one GPIO (e.g. `GPIO4`) and uncomment `flow_control_pin`.
+
+### Flashing
+
+1. Copy the YAML into your ESPHome dashboard as a new device.
+2. Edit the `substitutions:` block — device `name`, and **`uart_baud` /
+   `uart_parity` / `uart_stop_bits` to match your Modbus devices** (the
+   line settings are compiled into the firmware; HA cannot change them
+   later — the API variant offers an optional `set_serial` service).
+3. Make sure `secrets.yaml` has `wifi_ssid`, `wifi_password`,
+   `api_encryption_key` and `ota_password`.
+4. Install (USB the first time, OTA afterwards). Note the device's
+   hostname (`<name>.local`) or give it a static IP.
+
+### Adding the hub in Home Assistant
+
+1. **Settings → Devices & services → Add integration → Modbus USB
+   Controller**, pick the ESPHome connection type.
+2. Enter the **host** (`modbus-bridge.local` or the IP). For RTU over TCP
+   keep **port 8899** unless you changed `tcp_port`. For the native API
+   enter the **API encryption key** (the same value as
+   `api_encryption_key` in `secrets.yaml`); the legacy API password is
+   only needed on very old firmware.
+3. Enter the same **baud / data bits / parity / stop bits** as in the YAML,
+   the default slave ID and the poll interval.
+4. **Submit** — the flow contacts the device first. Errors:
+   - *Cannot connect* — wrong host/port, device offline, or (TCP) another
+     client is already attached to the stream server (it accepts one).
+   - *Authentication failed* — encryption key mismatch.
+   - *Service missing* — the device runs a firmware without the
+     `modbus_send` service; flash `modbus_api_bridge_esp32.yaml`.
+
+Existing USB hubs are untouched: their entries are migrated to store
+`transport: serial` and behave exactly as before. You can switch a hub from
+USB to ESPHome (or back) later in the panel.
+
+### In the panel
+
+The **🔗 Modbus Hub Connection** tab shows a transport badge and the
+endpoint. **Edit hub** has a **Connection type** selector that swaps the
+serial fields for host/port/credentials. The key/password boxes are
+write-only: leave them blank to keep the stored value, tick *clear* to
+remove it. **Test connection** probes the values in the form *before* you
+save them (it never sends Modbus traffic on serial/TCP; on the API it does
+the handshake and shows the ESPHome device name and version).
+
+Because line settings are fixed on the bridge, the baud/parity inputs are
+marked as such, and the **RS-485 bus scan** (chapter 7) probes slave IDs at
+the bridge's settings only — a note in the scanner says so.
+
+### Limits and tips
+
+- **One ESPHome device = one hub.** RS-485 is request/response; the stream
+  server also accepts a single TCP client. Don't open a second tool against
+  port 8899 while HA is connected.
+- Wi-Fi adds jitter. If you see sporadic *No response received*, raise the
+  hub's **response timeout** (default 3 s for TCP, 1.5 s for the API) or the
+  device's retry count before blaming the wiring.
+- Keep the ESP32's Wi-Fi power save off (the YAMLs already do) — power save
+  is the most common cause of 100–300 ms stalls.
+- The ESP32 shows up in the ESPHome integration too; that's normal and
+  harmless — the Modbus hub does not use its entities.
+
+---
+
+## 12. Maintenance
 
 ### Updating
 
@@ -606,7 +752,7 @@ your regular HA backup — no other files carry your setup.
 
 ---
 
-## 12. Troubleshooting & FAQ
+## 13. Troubleshooting & FAQ
 
 ### Quick symptom table
 

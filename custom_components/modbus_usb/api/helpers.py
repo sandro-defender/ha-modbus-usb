@@ -32,6 +32,7 @@ from ..const import (
     DOMAIN,
     REGISTER_TYPE_COIL,
 )
+from ..transport import connection_config, describe_transport
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -120,6 +121,30 @@ def _get_entry(hass: HomeAssistant, entry_id: str):
     if entry is None:
         raise ValueError(f"Config entry '{entry_id}' not found")
     return entry
+
+
+def _hub_transport_fields(data: dict[str, Any]) -> dict[str, Any]:
+    """Transport-related hub fields for the panel, never including secrets."""
+    summary = describe_transport(connection_config(data))
+    fields = {
+        "transport": summary["transport"],
+        "transport_label": summary["label"],
+        "endpoint": summary["endpoint"],
+        "baudrate_fixed": summary["baudrate_fixed"],
+        "response_timeout": summary["response_timeout"],
+    }
+    for key in (
+        "host",
+        "tcp_port",
+        "api_port",
+        "esphome_service",
+        "esphome_event",
+        "encrypted",
+        "password_set",
+    ):
+        if key in summary:
+            fields[key] = summary[key]
+    return fields
 
 
 def _format_entry_data(hass: HomeAssistant, entry) -> dict[str, Any]:
@@ -213,6 +238,9 @@ def _format_entry_data(hass: HomeAssistant, entry) -> dict[str, Any]:
             CONF_STOPBITS: entry.data.get(CONF_STOPBITS),
             CONF_SLAVE_ID: entry.data.get(CONF_SLAVE_ID, 1),
             CONF_SCAN_INTERVAL: options.get(CONF_SCAN_INTERVAL, 10),
+            # v2.8.0: transport fields; credentials are reduced to presence
+            # flags (``encrypted`` / ``password_set``) by describe_transport.
+            **_hub_transport_fields(entry.data),
         },
         "devices": devices,
         "entities": entities,

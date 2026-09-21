@@ -101,7 +101,12 @@ def test_capture_pairs_request_and_response() -> None:
         "request_hex": _hex(TX_READ),
         "response_hex": _hex(RX_READ),
         "response_frames": [_hex(RX_READ)],
+        "response_frame_times_ms": [
+            pytest.approx(window["response_frame_times_ms"][0])
+        ],
     }
+    assert len(window["response_frame_times_ms"]) == 1
+    assert window["response_frame_times_ms"][0] >= 0.0
     # The window is consumed exactly once.
     assert capture.consume() is None
 
@@ -248,11 +253,10 @@ def test_logging_fallback_captures_frames() -> None:
         logger.debug("send: 0x1 0x3 0x0 0x7 0x0 0x1 0x35 0xcb")
         logger.debug("recv: 0x1 0x3 0x2 0x0 0x2a 0x39 0x9b")
         window = capture.consume()
-        assert window == {
-            "request_hex": _hex(TX_READ),
-            "response_hex": _hex(RX_READ),
-            "response_frames": [_hex(RX_READ)],
-        }
+        assert window["request_hex"] == _hex(TX_READ)
+        assert window["response_hex"] == _hex(RX_READ)
+        assert window["response_frames"] == [_hex(RX_READ)]
+        assert len(window["response_frame_times_ms"]) == 1
     finally:
         capture.detach()
     assert capture._log_handler is None
@@ -554,3 +558,192 @@ def test_capture_runaway_noise_between_frames() -> None:
     capture.on_trace(False, RX_B)
     window = capture.consume()
     assert window["response_frames"] == [_hex(RX_A), _hex(RX_B)]
+
+
+# ───────────────── v2.7.1: per-frame RX arrival timestamps ─────────────────
+
+
+class _FakeClock:
+    """Deterministic monotonic clock: ``tick()`` advances by ``step`` seconds."""
+
+    def __init__(self, start: float = 100.0) -> None:
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def test_capture_records_frame_arrival_relative_to_first_tx() -> None:
+    clock = _FakeClock()
+    capture = ResponseCapture(clock=clock)
+    capture.on_trace(True, TX_READ)  # window opens at t=0
+    clock.advance(0.0125)
+    capture.on_trace(False, RX_READ)  # arrives 12.5 ms later
+    window = capture.consume()
+    assert window["response_frames"] == [_hex(RX_READ)]
+    assert window["response_frame_times_ms"] == [12.5]
+
+
+def test_capture_multi_frame_offsets_span_the_whole_batch() -> None:
+    # Batch: TX1 t=0, RX1 t=15 ms, TX2 t=20 ms, RX2 t=35 ms. Offsets stay
+    # relative to the *first* TX of the window, so the inter-frame gap
+    # (RX1 -> RX2) is simply the difference of consecutive entries.
+    clock = _FakeClock()
+    capture = ResponseCapture(clock=clock)
+    tx_one = _frame("010600010002")
+    tx_two = _frame("010600020004")
+    capture.on_trace(True, tx_one)
+    clock.advance(0.015)
+    capture.on_trace(False, tx_one)
+    clock.advance(0.005)
+    capture.on_trace(True, tx_two)
+    clock.advance(0.015)
+    capture.on_trace(False, tx_two)
+    window = capture.consume()
+    assert window["response_frames"] == [_hex(tx_one), _hex(tx_two)]
+    assert window["response_frame_times_ms"] == [15.0, 35.0]
+
+
+def test_capture_chunked_frame_is_stamped_when_completed() -> None:
+    clock = _FakeClock()
+    capture = ResponseCapture(clock=clock)
+    capture.on_trace(True, TX_READ)
+    clock.advance(0.004)
+    capture.on_trace(False, RX_READ[:4])  # partial: no frame yet
+    assert capture._frame_times == []
+    clock.advance(0.006)
+    capture.on_trace(False, RX_READ[4:])  # completes at t=10 ms
+    window = capture.consume()
+    assert window["response_frame_times_ms"] == [10.0]
+
+
+def test_capture_frames_completed_by_one_chunk_share_a_timestamp() -> None:
+    clock = _FakeClock()
+    capture = ResponseCapture(clock=clock)
+    capture.on_trace(True, TX_READ)
+    clock.advance(0.02)
+    capture.on_trace(False, RX_A + RX_B)  # two complete frames in one chunk
+    window = capture.consume()
+    assert window["response_frames"] == [_hex(RX_A), _hex(RX_B)]
+    assert window["response_frame_times_ms"] == [20.0, 20.0]
+
+
+def test_capture_timestamps_are_bounded_by_frame_cap() -> None:
+    clock = _FakeClock()
+    capture = ResponseCapture(clock=clock)
+    for _ in range(MAX_RESPONSE_FRAMES + 10):
+        capture.on_trace(True, TX_WRITE)
+        clock.advance(0.001)
+        capture.on_trace(False, TX_WRITE)
+    assert len(capture._frame_times) == len(capture._frames) == MAX_RESPONSE_FRAMES
+    window = capture.consume()
+    assert len(window["response_frame_times_ms"]) == MAX_RESPONSE_FRAMES
+    # Offsets are monotonic non-decreasing across the batch.
+    times = window["response_frame_times_ms"]
+    assert all(
+        later >= earlier for earlier, later in zip(times, times[1:], strict=False)
+    )
+
+
+def test_capture_timestamps_reset_between_windows() -> None:
+    clock = _FakeClock()
+    capture = ResponseCapture(clock=clock)
+    capture.on_trace(True, TX_READ)
+    clock.advance(0.05)
+    capture.on_trace(False, RX_READ)
+    assert capture.consume()["response_frame_times_ms"] == [50.0]
+    assert capture._frame_times == []
+    assert capture._window_start is None
+    # The next window starts a fresh clock origin at its own first TX.
+    clock.advance(10.0)
+    capture.on_trace(True, TX_READ)
+    clock.advance(0.007)
+    capture.on_trace(False, RX_READ)
+    assert capture.consume()["response_frame_times_ms"] == [7.0]
+
+
+def test_capture_unsolicited_rx_opens_window_at_first_byte() -> None:
+    clock = _FakeClock()
+    capture = ResponseCapture(clock=clock)
+    clock.advance(1.0)
+    capture.on_trace(False, RX_READ)  # no TX traced: window opens here
+    window = capture.consume()
+    assert window["request_hex"] is None
+    assert window["response_frame_times_ms"] == [0.0]
+
+
+def test_capture_request_only_window_has_no_timestamps() -> None:
+    capture = ResponseCapture(clock=_FakeClock())
+    capture.on_trace(True, TX_READ)
+    window = capture.consume()
+    assert window["response_frames"] is None
+    assert window["response_frame_times_ms"] is None
+
+
+def test_capture_stale_repass_adds_no_timestamp() -> None:
+    clock = _FakeClock()
+    capture = ResponseCapture(clock=clock)
+    capture.on_trace(True, TX_READ)
+    clock.advance(0.01)
+    capture.on_trace(False, RX_READ)
+    clock.advance(0.01)
+    capture.on_trace(False, RX_READ)  # identical re-pass, no new TX
+    window = capture.consume()
+    assert window["response_frames"] == [_hex(RX_READ)]
+    assert window["response_frame_times_ms"] == [10.0]
+
+
+def test_capture_timestamps_never_go_negative() -> None:
+    # A clock that (theoretically) steps backwards must not produce
+    # negative offsets; they are clamped at zero.
+    clock = _FakeClock()
+    capture = ResponseCapture(clock=clock)
+    capture.on_trace(True, TX_READ)
+    clock.advance(-0.5)
+    capture.on_trace(False, RX_READ)
+    assert capture.consume()["response_frame_times_ms"] == [0.0]
+
+
+def test_capture_default_clock_is_monotonic() -> None:
+    capture = ResponseCapture()
+    capture.on_trace(True, TX_READ)
+    capture.on_trace(False, RX_READ)
+    window = capture.consume()
+    times = window["response_frame_times_ms"]
+    assert len(times) == 1
+    assert 0.0 <= times[0] < 1000.0
+
+
+def test_capture_timestamps_thread_safe_with_concurrent_traces() -> None:
+    capture = ResponseCapture()
+    errors: list[Exception] = []
+    windows: list[dict] = []
+
+    def worker() -> None:
+        try:
+            for _ in range(100):
+                capture.on_trace(True, TX_READ)
+                capture.on_trace(False, RX_READ)
+                window = capture.consume()
+                if window is not None:
+                    windows.append(window)
+        except Exception as err:  # pragma: no cover - failure path
+            errors.append(err)
+
+    threads = [threading.Thread(target=worker) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert not errors
+    for window in windows:
+        frames = window["response_frames"]
+        times = window["response_frame_times_ms"]
+        # Frames and timestamps always stay aligned, whatever the interleaving.
+        assert (frames is None) == (times is None)
+        if frames is not None:
+            assert len(frames) == len(times)
+            assert all(stamp >= 0.0 for stamp in times)

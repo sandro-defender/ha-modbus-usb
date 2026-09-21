@@ -29,11 +29,13 @@ jobs:
       - name: Run Ruff
         uses: astral-sh/ruff-action@v3
         with:
+          version: "0.13.0"  # keep in sync with requirements_test.txt
           args: check custom_components tests
 
       - name: Check formatting
         uses: astral-sh/ruff-action@v3
         with:
+          version: "0.13.0"  # keep in sync with requirements_test.txt
           args: format --check custom_components tests
 
   panel:

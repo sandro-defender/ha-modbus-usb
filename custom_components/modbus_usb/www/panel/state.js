@@ -25,8 +25,57 @@
     // Client-side filters over the live transaction list. Kept in shared
     // state so they survive tab switches and hub switches: the filter
     // controls are static DOM nodes (never re-rendered) and the values
-    // below persist in module scope.
-    let _inspectorFilters = { slave: 'all', status: 'all', hex: '' };
+    // below persist in module scope. v2.7.1 adds the function-code filter
+    // (`fc`: 'all', a two-digit hex code such as '03' / '0F' / '10', or
+    // 'exception').
+    const INSPECTOR_DEFAULT_FILTERS = Object.freeze({ slave: 'all', status: 'all', fc: 'all', hex: '' });
+    let _inspectorFilters = { ...INSPECTOR_DEFAULT_FILTERS };
+
+    // ─── TRAFFIC INSPECTOR FILTER SAVED VIEWS (v2.7.1) ──────────
+    // Named filter presets persisted in localStorage. Each preset is
+    // { name, filters: { slave, status, fc, hex } }. The active preset name
+    // is persisted too and re-applied whenever the inspector tab opens, so a
+    // saved view survives page reloads; editing any filter by hand
+    // deselects the preset (the filters themselves stay as edited).
+    const INSPECTOR_PRESETS_STORAGE_KEY = 'modbus_usb_inspector_filter_presets';
+    const INSPECTOR_ACTIVE_PRESET_STORAGE_KEY = 'modbus_usb_inspector_active_preset';
+    const INSPECTOR_MAX_PRESETS = 24;
+    let _inspectorFilterPresets = [];
+    let _inspectorActivePreset = null;
+    try {
+      const stored = JSON.parse(localStorage.getItem(INSPECTOR_PRESETS_STORAGE_KEY) || '[]');
+      if (Array.isArray(stored)) {
+        stored.forEach((preset) => {
+          if (!preset || typeof preset.name !== 'string' || !preset.name.trim()) return;
+          if (_inspectorFilterPresets.length >= INSPECTOR_MAX_PRESETS) return;
+          const filters = preset.filters && typeof preset.filters === 'object' ? preset.filters : {};
+          _inspectorFilterPresets.push({
+            name: preset.name.trim().slice(0, 48),
+            filters: {
+              slave: filters.slave == null || filters.slave === '' ? 'all' : String(filters.slave),
+              status: typeof filters.status === 'string' && filters.status ? filters.status : 'all',
+              fc: typeof filters.fc === 'string' && filters.fc ? filters.fc : 'all',
+              hex: typeof filters.hex === 'string' ? filters.hex : '',
+            },
+          });
+        });
+      }
+      const active = localStorage.getItem(INSPECTOR_ACTIVE_PRESET_STORAGE_KEY);
+      if (active && _inspectorFilterPresets.some((preset) => preset.name === active)) {
+        _inspectorActivePreset = active;
+      }
+    } catch (_) { /* Missing or malformed storage must not block the inspector. */ }
+
+    function persistInspectorFilterPresets() {
+      try {
+        localStorage.setItem(INSPECTOR_PRESETS_STORAGE_KEY, JSON.stringify(_inspectorFilterPresets));
+        if (_inspectorActivePreset) {
+          localStorage.setItem(INSPECTOR_ACTIVE_PRESET_STORAGE_KEY, _inspectorActivePreset);
+        } else {
+          localStorage.removeItem(INSPECTOR_ACTIVE_PRESET_STORAGE_KEY);
+        }
+      } catch (_) { /* Presets still work for this session without storage. */ }
+    }
     let _dashboardFilter = 'all';
     const _deviceTestReports = {};
     const _r413e16StateReports = {};
@@ -52,6 +101,10 @@
           entry_id: 'mock_hub_1',
           title: 'Modbus USB Hub (ttyUSB0)',
           hub: {
+            transport: 'serial',
+            transport_label: 'Serial (USB adapter)',
+            endpoint: '/dev/ttyUSB0',
+            baudrate_fixed: false,
             port: '/dev/ttyUSB0',
             baudrate: 9600,
             bytesize: 8,
@@ -97,6 +150,35 @@
             { id: 'e8', device_id: 'dev_relays_pool', name: 'Underwater Light Relay', entity_type: 'switch', register_type: 'coil', address: 1 },
             { id: 'e9', device_id: 'dev_relays_pool', name: 'Flow Switch Status', entity_type: 'binary_sensor', register_type: 'discrete', address: 0 },
             { id: 'e10', device_id: 'dev_relays_pool', name: 'Pump Speed Setpoint', entity_type: 'number', register_type: 'holding', address: 10, data_type: 'uint16', scale: 1, min_value: 0, max_value: 100, step: 5, unit_of_measurement: '%' }
+          ]
+        },
+        {
+          // v2.8.0: an ESPHome ESP32 + RS-485 module acting as the hub
+          // (RTU over TCP through the stream_server component).
+          entry_id: 'mock_hub_esphome',
+          title: 'Garage Modbus via ESPHome (modbus-bridge)',
+          hub: {
+            transport: 'esphome_tcp',
+            transport_label: 'ESPHome · RTU over TCP',
+            endpoint: 'modbus-bridge.local:8899',
+            baudrate_fixed: true,
+            host: 'modbus-bridge.local',
+            tcp_port: 8899,
+            response_timeout: 3,
+            port: null,
+            baudrate: 9600,
+            bytesize: 8,
+            parity: 'N',
+            stopbits: 1,
+            slave_id: 1,
+            scan_interval: 10,
+          },
+          devices: [
+            { id: 'dev_garage_relays', name: 'Garage Relay Board', slave_id: 1, model: 'R4D3B16', manufacturer: 'Generic', description: 'Door and light relays behind the ESPHome bridge' },
+          ],
+          entities: [
+            { id: 'g1', device_id: 'dev_garage_relays', name: 'Garage Door Relay', entity_type: 'switch', register_type: 'coil', address: 0 },
+            { id: 'g2', device_id: 'dev_garage_relays', name: 'Garage Light', entity_type: 'switch', register_type: 'coil', address: 1 },
           ]
         }
       ],

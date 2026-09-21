@@ -9,10 +9,12 @@ import pytest
 
 from custom_components.modbus_usb.designer import (
     MAX_DESIGNER_ENTITIES,
+    TemplateDraftError,
     async_validate_template_design,
     evaluate_template_design,
     evaluate_template_fingerprint,
     load_template_draft,
+    locate_template_error,
 )
 from custom_components.modbus_usb.validation import validate_template
 
@@ -547,3 +549,174 @@ async def test_async_validate_reports_fingerprint_results() -> None:
     assert result["valid"] is True
     assert result["fingerprint_total"] == 2
     assert result["fingerprint_all_matched"] is True
+
+
+# ───────────── v2.7.1: located structural errors (line / column / path) ─────────────
+
+
+def _draft_error(content: str) -> TemplateDraftError:
+    with pytest.raises(TemplateDraftError) as excinfo:
+        load_template_draft(content)
+    return excinfo.value
+
+
+def test_template_draft_error_is_a_value_error_with_location_dict() -> None:
+    err = TemplateDraftError("boom", line=3, column=7, path="entities[0].address")
+    assert isinstance(err, ValueError)
+    assert str(err) == "boom"
+    assert err.as_dict() == {
+        "error_line": 3,
+        "error_column": 7,
+        "error_path": "entities[0].address",
+    }
+    assert TemplateDraftError("x").as_dict() == {
+        "error_line": None,
+        "error_column": None,
+        "error_path": None,
+    }
+
+
+def test_load_template_draft_locates_entity_type_error() -> None:
+    err = _draft_error(
+        "name: X\n"
+        "entities:\n"
+        "  - name: A\n"
+        "    entity_type: sensor\n"
+        "    register_type: holding\n"
+        "    address: 1\n"
+        "  - name: B\n"
+        "    entity_type: bogus\n"
+        "    address: 2\n"
+    )
+    assert "Unsupported entity type" in str(err)
+    assert (err.line, err.column) == (8, 18)
+    assert err.path == "entities[1].entity_type"
+
+
+def test_load_template_draft_locates_address_error_inside_entity() -> None:
+    err = _draft_error(
+        "name: X\n"
+        "entities:\n"
+        "  - name: A\n"
+        "    entity_type: sensor\n"
+        "    register_type: holding\n"
+        "    address: 70000\n"
+    )
+    assert "address" in str(err).lower()
+    assert (err.line, err.column) == (6, 14)
+    assert err.path == "entities[0].address"
+
+    err = _draft_error(
+        "name: X\n"
+        "entities:\n"
+        "  - name: A\n"
+        "    entity_type: sensor\n"
+        "    register_type: coil\n"
+        "    address: 1\n"
+    )
+    assert "register type" in str(err)
+    assert (err.line, err.column) == (5, 20)
+    assert err.path == "entities[0].register_type"
+
+
+def test_load_template_draft_falls_back_to_entity_first_line() -> None:
+    # "Entity name must be a non-empty string" names the ``name`` key, which
+    # the draft omits — the error is attributed to the entity's first line.
+    err = _draft_error(
+        "name: X\n"
+        "entities:\n"
+        "  - name: A\n"
+        "    entity_type: sensor\n"
+        "    register_type: holding\n"
+        "    address: 1\n"
+        "  - entity_type: sensor\n"
+        "    register_type: holding\n"
+        "    address: 2\n"
+    )
+    assert "Entity name" in str(err)
+    assert (err.line, err.column) == (7, 5)
+    assert err.path == "entities[1]"
+
+
+def test_load_template_draft_locates_template_level_keys() -> None:
+    err = _draft_error("name: X\ndefault_slave_id: 999\nentities: []\n")
+    assert "default_slave_id" in str(err)
+    assert (err.line, err.column) == (2, 19)
+    assert err.path == "default_slave_id"
+
+    err = _draft_error("name: X\nentities:\n  key: value\n")
+    assert "entities must be a list" in str(err)
+    assert (err.line, err.path) == (3, "entities")
+
+    err = _draft_error("name: X\nentities: []\nfingerprint: nope\n")
+    assert (err.line, err.path) == (3, "fingerprint")
+
+
+def test_load_template_draft_template_error_wins_over_entity_error() -> None:
+    # The template-level check fires first in validate_template; the
+    # locator must not misattribute it to the (also invalid) entity.
+    err = _draft_error(
+        "name: X\n"
+        "default_slave_id: 0\n"
+        "entities:\n"
+        "  - name: A\n"
+        "    entity_type: bogus\n"
+        "    address: 1\n"
+    )
+    assert "default_slave_id" in str(err)
+    assert err.line == 2
+    assert err.path == "default_slave_id"
+
+
+def test_load_template_draft_unlocatable_errors_point_at_line_one() -> None:
+    err = _draft_error("- just\n- a\n- list\n")
+    assert err.line == 1
+    assert err.path is None
+
+    err = _draft_error("entities: []\n")  # neither name nor id
+    assert "name" in str(err)
+    assert err.line == 1
+
+
+def test_load_template_draft_yaml_syntax_error_has_position() -> None:
+    err = _draft_error("name: X\nentities:\n  - name: A\n    entity_type: [sensor\n")
+    message = str(err)
+    assert message.startswith("Invalid YAML syntax:")
+    assert "\n" not in message  # single line, suitable for a toast
+    assert err.path is None
+    # An unterminated flow sequence is reported at its opening bracket.
+    assert (err.line, err.column) == (4, 18)
+
+
+def test_load_template_draft_yaml_indentation_error_points_at_offending_line() -> None:
+    err = _draft_error("name: X\nentities:\n  - name: A\n   bad: indent\n")
+    assert str(err).startswith("Invalid YAML syntax:")
+    assert err.line == 4
+
+
+def test_load_template_draft_empty_draft_has_no_location() -> None:
+    err = _draft_error("   \n")
+    assert "must not be empty" in str(err)
+    assert err.as_dict() == {
+        "error_line": None,
+        "error_column": None,
+        "error_path": None,
+    }
+
+
+def test_locate_template_error_never_raises_on_unparseable_input() -> None:
+    assert locate_template_error("name: [", None, "anything") == (None, None, None)
+    assert locate_template_error("name: X\n", None, "weird") == (1, 1, None)
+
+
+async def test_async_validate_template_design_propagates_location() -> None:
+    hass = SimpleNamespace(async_add_executor_job=_run_in_executor)
+    with pytest.raises(TemplateDraftError) as excinfo:
+        await async_validate_template_design(
+            hass,
+            SimpleNamespace(),
+            "name: X\nentities:\n  - name: A\n    entity_type: bogus\n    address: 1\n",
+        )
+    assert excinfo.value.line == 4
+    assert excinfo.value.path == "entities[0].entity_type"
+    assert excinfo.value.as_dict()["error_column"] == 18

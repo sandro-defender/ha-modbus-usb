@@ -126,7 +126,7 @@
           connected: true,
           default_slave_id: 1,
           capture: { hook: 'trace_packet', supported: true },
-          stats: { total: 3, errors: 1, responses: 3, samples: 3, avg_ms: 32.4, min_ms: 12.8, max_ms: 65.2, p95_ms: 65.2 },
+          stats: { total: 3, errors: 1, responses: 3, capture_coverage: 1.0, samples: 3, avg_ms: 32.4, min_ms: 12.8, max_ms: 65.2, p95_ms: 65.2 },
           per_slave: {
             1: { count: 2, errors: 1, last_seen: new Date().toISOString(), samples: 2, avg_ms: 19.1, min_ms: 12.8, max_ms: 25.4, p95_ms: 25.4 },
             3: { count: 1, errors: 0, last_seen: new Date().toISOString(), samples: 1, avg_ms: 65.2, min_ms: 65.2, max_ms: 65.2, p95_ms: 65.2 },
@@ -136,12 +136,12 @@
               // Batch-style transaction: the full RX stream (two frames) is
               // carried in response_frames; response_frame/response_hex hold
               // the last frame, exactly like the live server view.
-              transaction: { timestamp: new Date().toISOString(), operation: 'read_input', slave: 1, address: 0, count: 2, status: 'ok', function_code: '0x04', request_hex: '01 04 00 00 00 02 71 CB', request_captured: true, response_hex: '01 03 04 00 01 00 02 2A 32', response_frames: ['01 04 04 43 66 66 66 A5 95', '01 03 04 00 01 00 02 2A 32'], duration_ms: 25.4, latency: { lock_wait_ms: 0.3, connect_ms: 0.1, frame_delay_ms: 0, request_ms: 25 }, error: null },
+              transaction: { timestamp: new Date().toISOString(), operation: 'read_input', slave: 1, address: 0, count: 2, status: 'ok', function_code: '0x04', request_hex: '01 04 00 00 00 02 71 CB', request_captured: true, response_hex: '01 03 04 00 01 00 02 2A 32', response_frames: ['01 04 04 43 66 66 66 A5 95', '01 03 04 00 01 00 02 2A 32'], response_frame_times_ms: [9.6, 24.1], duration_ms: 25.4, latency: { lock_wait_ms: 0.3, connect_ms: 0.1, frame_delay_ms: 0, request_ms: 25 }, error: null },
               frame: { raw_hex: '01 04 00 00 00 02 71 CB', frame_length: 8, direction: 'request', slave_id: 1, function_code: 4, function_name: 'Read Input Registers', frame_kind: 'read_request', address: 0, count: 2, crc_present: true, crc_low: 113, crc_high: 203, crc_received: 52081, crc_expected: 52081, crc_valid: true, errors: [], valid: true, summary: 'Read Input Registers · slave 1 · addr 0000 · count 2' },
               response_frame: { raw_hex: '01 03 04 00 01 00 02 2A 32', frame_length: 9, direction: 'response', slave_id: 1, function_code: 3, function_name: 'Read Holding Registers', frame_kind: 'read_response', byte_count: 4, data_hex: '00 01 00 02', values: [1, 2], crc_present: true, crc_low: 42, crc_high: 50, crc_received: 12842, crc_expected: 12842, crc_valid: true, errors: [], valid: true, summary: 'Read Holding Registers · slave 1 · 4 data bytes' },
               response_frames: [
-                { raw_hex: '01 04 04 43 66 66 66 A5 95', frame_length: 9, direction: 'response', slave_id: 1, function_code: 4, function_name: 'Read Input Registers', frame_kind: 'read_response', byte_count: 4, data_hex: '43 66 66 66', values: [17254, 26214], crc_present: true, crc_low: 149, crc_high: 165, crc_received: 42389, crc_expected: 42389, crc_valid: true, errors: [], valid: true, summary: 'Read Input Registers · slave 1 · 4 data bytes' },
-                { raw_hex: '01 03 04 00 01 00 02 2A 32', frame_length: 9, direction: 'response', slave_id: 1, function_code: 3, function_name: 'Read Holding Registers', frame_kind: 'read_response', byte_count: 4, data_hex: '00 01 00 02', values: [1, 2], crc_present: true, crc_low: 42, crc_high: 50, crc_received: 12842, crc_expected: 12842, crc_valid: true, errors: [], valid: true, summary: 'Read Holding Registers · slave 1 · 4 data bytes' },
+                { raw_hex: '01 04 04 43 66 66 66 A5 95', frame_length: 9, direction: 'response', slave_id: 1, function_code: 4, function_name: 'Read Input Registers', frame_kind: 'read_response', byte_count: 4, data_hex: '43 66 66 66', values: [17254, 26214], crc_present: true, crc_low: 149, crc_high: 165, crc_received: 42389, crc_expected: 42389, crc_valid: true, errors: [], valid: true, summary: 'Read Input Registers · slave 1 · 4 data bytes', arrival_ms: 9.6, gap_ms: 9.6 },
+                { raw_hex: '01 03 04 00 01 00 02 2A 32', frame_length: 9, direction: 'response', slave_id: 1, function_code: 3, function_name: 'Read Holding Registers', frame_kind: 'read_response', byte_count: 4, data_hex: '00 01 00 02', values: [1, 2], crc_present: true, crc_low: 42, crc_high: 50, crc_received: 12842, crc_expected: 12842, crc_valid: true, errors: [], valid: true, summary: 'Read Holding Registers · slave 1 · 4 data bytes', arrival_ms: 24.1, gap_ms: 14.5 },
               ],
             },
             {
@@ -158,6 +158,23 @@
         };
       }
       if (type === 'designer_validate') {
+        // Standalone preview of v2.7.1 line-error highlighting: an entity
+        // with an unknown entity_type reports the offending line, like
+        // designer.py's TemplateDraftError does in live mode.
+        const draftLines = String(payload.content || '').split('\n');
+        const badLine = draftLines.findIndex((line) => /^\s*entity_type:\s*(?!(sensor|switch|binary_sensor|number)\s*$)\S/.test(line));
+        if (badLine !== -1) {
+          const value = draftLines[badLine].replace(/^\s*entity_type:\s*/, '').trim();
+          const entityIndex = draftLines.slice(0, badLine + 1).filter((line) => /^\s*-\s*name:/.test(line)).length - 1;
+          return {
+            valid: false,
+            error: `Unsupported entity type: '${value}'`,
+            entities: [],
+            error_line: badLine + 1,
+            error_column: draftLines[badLine].indexOf(value) + 1,
+            error_path: `entities[${Math.max(entityIndex, 0)}].entity_type`,
+          };
+        }
         return {
           valid: true,
           template: { name: 'My Custom Meter', id: null, default_slave_id: 1 },
@@ -192,12 +209,21 @@
       if (type === 'scan_bus') {
         return { found: [{ slave_id: 1, baudrate: 9600, response: 'register response' }], probed: 20 };
       }
+      if (type === 'test_hub_connection') {
+        const hub = entry.hub || {};
+        return hub.transport === 'esphome_tcp' || hub.transport === 'esphome_api'
+          ? { reachable: true, latency_ms: 18.4, error: null, error_key: null, live: false, esphome: { name: 'modbus-bridge', esphome_version: '2025.9.0', mac_address: 'A4:CF:12:34:56:78' }, summary: { transport: hub.transport, label: hub.transport_label, endpoint: hub.endpoint } }
+          : { reachable: true, latency_ms: 2.1, error: null, error_key: null, live: true, esphome: null, summary: { transport: 'serial', label: 'Serial (USB adapter)', endpoint: hub.port } };
+      }
       if (type === 'scan_usb_ports') {
         return { ports: [{ port: '/dev/ttyUSB0', description: 'USB-RS485 Adapter', details: 'CH340 USB-Serial' }] };
       }
       if (type === 'manual_hex_write') return { slave_id: 1, function_code: '0x06', address: 128, count: 1 };
       if (type === 'get_serial_status') {
-        return { serial: { port: '/dev/ttyUSB0', baudrate: 9600, bytesize: 8, parity: 'N', stopbits: 1, connection_owner: 'Home Assistant Modbus USB', operation_active: false }, adapter: { port: '/dev/ttyUSB0', description: 'USB-RS485 Adapter', details: 'CH340 USB-Serial' } };
+        if ((entry.hub || {}).transport === 'esphome_tcp') {
+          return { serial: { port: null, baudrate: 9600, bytesize: 8, parity: 'N', stopbits: 1, connection_owner: 'Home Assistant Modbus USB', operation_active: false, transport: 'esphome_tcp', label: 'ESPHome · RTU over TCP', endpoint: 'modbus-bridge.local:8899', baudrate_fixed: true, capture_support: 'trace_packet' }, adapter: null, esphome: true };
+        }
+        return { serial: { port: '/dev/ttyUSB0', baudrate: 9600, bytesize: 8, parity: 'N', stopbits: 1, connection_owner: 'Home Assistant Modbus USB', operation_active: false, transport: 'serial', label: 'Serial (USB adapter)', endpoint: '/dev/ttyUSB0', baudrate_fixed: false }, adapter: { port: '/dev/ttyUSB0', description: 'USB-RS485 Adapter', details: 'CH340 USB-Serial' } };
       }
       if (type === 'test_device_entities') {
         const device = entry.devices.find(d => d.id === payload.device_id);
@@ -447,6 +473,9 @@
         pane.classList.add('active');
       }
       if (tabName === 'inspector') {
+        // v2.7.1: re-apply the persisted saved view (filter preset) before
+        // the first render so the tab opens already filtered.
+        applyStoredInspectorPreset();
         loadTrafficInspector();
         ensureTrafficSubscription();
       } else {

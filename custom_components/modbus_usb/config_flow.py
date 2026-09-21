@@ -18,6 +18,9 @@ from .const import (
     BAUDRATE_OPTIONS,
     BYTESIZE_OPTIONS,
     CONF_ADDRESS,
+    CONF_API_ENCRYPTION_KEY,
+    CONF_API_PASSWORD,
+    CONF_API_PORT,
     CONF_BAUDRATE,
     CONF_BYTESIZE,
     CONF_DATA_TYPE,
@@ -25,6 +28,9 @@ from .const import (
     CONF_ENTITIES,
     CONF_ENTITY_ID,
     CONF_ENTITY_TYPE,
+    CONF_ESPHOME_EVENT,
+    CONF_ESPHOME_SERVICE,
+    CONF_HOST,
     CONF_MAX_VALUE,
     CONF_MIN_VALUE,
     CONF_MODE,
@@ -34,21 +40,30 @@ from .const import (
     CONF_PARITY,
     CONF_PORT,
     CONF_REGISTER_TYPE,
+    CONF_RESPONSE_TIMEOUT,
     CONF_SCALE,
     CONF_SCAN_INTERVAL,
     CONF_SLAVE_ID,
     CONF_STATE_CLASS,
     CONF_STEP,
     CONF_STOPBITS,
+    CONF_TCP_PORT,
+    CONF_TRANSPORT,
     CONF_UNIT_OF_MEASUREMENT,
     DATA_TYPES,
+    DEFAULT_API_PORT,
     DEFAULT_BAUDRATE,
     DEFAULT_BYTESIZE,
+    DEFAULT_ESPHOME_EVENT,
+    DEFAULT_ESPHOME_SERVICE,
     DEFAULT_PARITY,
     DEFAULT_PORT,
+    DEFAULT_RESPONSE_TIMEOUT_API,
+    DEFAULT_RESPONSE_TIMEOUT_TCP,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SLAVE_ID,
     DEFAULT_STOPBITS,
+    DEFAULT_TCP_PORT,
     DEVICE_CLASS_OPTIONS,
     DOMAIN,
     PARITY_OPTIONS,
@@ -59,7 +74,110 @@ from .const import (
     REGISTER_TYPES_SWITCH,
     STATE_CLASS_OPTIONS,
     STOPBITS_OPTIONS,
+    TRANSPORT_ESPHOME_API,
+    TRANSPORT_ESPHOME_TCP,
+    TRANSPORT_SERIAL,
+    TRANSPORTS,
 )
+from .transport import (
+    connection_config,
+    describe_transport,
+    probe_connection,
+    unique_id_for,
+)
+
+
+def _line_settings_schema(d: dict) -> dict:
+    """Baud/data bits/parity/stop bits fields shared by every transport."""
+    return {
+        vol.Required(
+            CONF_BAUDRATE, default=d.get(CONF_BAUDRATE, DEFAULT_BAUDRATE)
+        ): vol.In(BAUDRATE_OPTIONS),
+        vol.Required(
+            CONF_BYTESIZE, default=d.get(CONF_BYTESIZE, DEFAULT_BYTESIZE)
+        ): vol.In(BYTESIZE_OPTIONS),
+        vol.Required(CONF_PARITY, default=d.get(CONF_PARITY, DEFAULT_PARITY)): vol.In(
+            list(PARITY_OPTIONS.keys())
+        ),
+        vol.Required(
+            CONF_STOPBITS, default=d.get(CONF_STOPBITS, DEFAULT_STOPBITS)
+        ): vol.In(STOPBITS_OPTIONS),
+    }
+
+
+def _polling_schema(d: dict) -> dict:
+    return {
+        vol.Required(
+            CONF_SLAVE_ID, default=d.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID)
+        ): vol.All(vol.Coerce(int), vol.Range(min=1, max=247)),
+        vol.Required(
+            CONF_SCAN_INTERVAL,
+            default=d.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
+        ): vol.All(vol.Coerce(int), vol.Range(min=1, max=3600)),
+    }
+
+
+def _transport_schema(defaults: dict | None = None) -> vol.Schema:
+    d = defaults or {}
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_TRANSPORT, default=d.get(CONF_TRANSPORT, TRANSPORT_SERIAL)
+            ): vol.In(TRANSPORTS),
+        }
+    )
+
+
+def _esphome_tcp_schema(defaults: dict | None = None) -> vol.Schema:
+    d = defaults or {}
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_NAME, default=d.get(CONF_NAME, "Modbus via ESPHome")
+            ): str,
+            vol.Required(CONF_HOST, default=d.get(CONF_HOST, "")): str,
+            vol.Required(
+                CONF_TCP_PORT, default=d.get(CONF_TCP_PORT, DEFAULT_TCP_PORT)
+            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
+            **_line_settings_schema(d),
+            vol.Required(
+                CONF_RESPONSE_TIMEOUT,
+                default=d.get(CONF_RESPONSE_TIMEOUT, DEFAULT_RESPONSE_TIMEOUT_TCP),
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=30)),
+            **_polling_schema(d),
+        }
+    )
+
+
+def _esphome_api_schema(defaults: dict | None = None) -> vol.Schema:
+    d = defaults or {}
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_NAME, default=d.get(CONF_NAME, "Modbus via ESPHome API")
+            ): str,
+            vol.Required(CONF_HOST, default=d.get(CONF_HOST, "")): str,
+            vol.Required(
+                CONF_API_PORT, default=d.get(CONF_API_PORT, DEFAULT_API_PORT)
+            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
+            vol.Optional(CONF_API_ENCRYPTION_KEY, default=""): str,
+            vol.Optional(CONF_API_PASSWORD, default=""): str,
+            vol.Required(
+                CONF_ESPHOME_SERVICE,
+                default=d.get(CONF_ESPHOME_SERVICE, DEFAULT_ESPHOME_SERVICE),
+            ): str,
+            vol.Required(
+                CONF_ESPHOME_EVENT,
+                default=d.get(CONF_ESPHOME_EVENT, DEFAULT_ESPHOME_EVENT),
+            ): str,
+            **_line_settings_schema(d),
+            vol.Required(
+                CONF_RESPONSE_TIMEOUT,
+                default=d.get(CONF_RESPONSE_TIMEOUT, DEFAULT_RESPONSE_TIMEOUT_API),
+            ): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=30)),
+            **_polling_schema(d),
+        }
+    )
 
 
 def _hub_schema(defaults: dict | None = None) -> vol.Schema:
@@ -94,11 +212,37 @@ def _hub_schema(defaults: dict | None = None) -> vol.Schema:
 
 
 class ModbusUsbConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle the initial setup of the Modbus USB hub."""
+    """Handle the initial setup of the Modbus USB hub.
 
-    VERSION = 1
+    v2.8.0: the first step picks the hub **transport** — a local serial
+    adapter, an ESPHome device bridging RTU over TCP, or an ESPHome device
+    driven through its native API — and the second step collects the
+    transport-specific connection settings. Legacy callers that post serial
+    fields straight to ``async_step_user`` keep working.
+    """
+
+    VERSION = 2
+
+    def __init__(self) -> None:
+        self._transport: str = TRANSPORT_SERIAL
 
     async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None and CONF_TRANSPORT not in user_input:
+            # Backward compatibility: a direct serial submission (tests,
+            # older automation) skips the transport picker.
+            return await self.async_step_serial(user_input)
+        if user_input is not None:
+            self._transport = user_input[CONF_TRANSPORT]
+            if self._transport == TRANSPORT_ESPHOME_TCP:
+                return await self.async_step_esphome_tcp()
+            if self._transport == TRANSPORT_ESPHOME_API:
+                return await self.async_step_esphome_api()
+            return await self.async_step_serial()
+        return self.async_show_form(step_id="user", data_schema=_transport_schema())
+
+    async def async_step_serial(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
@@ -113,6 +257,7 @@ class ModbusUsbConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_create_entry(
                 title=user_input[CONF_NAME],
                 data={
+                    CONF_TRANSPORT: TRANSPORT_SERIAL,
                     CONF_PORT: user_input[CONF_PORT],
                     CONF_BAUDRATE: user_input[CONF_BAUDRATE],
                     CONF_BYTESIZE: user_input[CONF_BYTESIZE],
@@ -127,7 +272,84 @@ class ModbusUsbConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         return self.async_show_form(
-            step_id="user", data_schema=_hub_schema(), errors=errors
+            step_id="serial", data_schema=_hub_schema(), errors=errors
+        )
+
+    async def _async_finish_esphome(
+        self, transport: str, user_input: dict[str, Any], step_id: str, schema_fn
+    ) -> ConfigFlowResult:
+        """Shared tail of both ESPHome steps: dedupe, probe, create entry."""
+        errors: dict[str, str] = {}
+        probe: dict[str, Any] = {}
+        data = {
+            key: value
+            for key, value in user_input.items()
+            if key not in (CONF_NAME, CONF_SCAN_INTERVAL)
+        }
+        data[CONF_TRANSPORT] = transport
+        data[CONF_HOST] = str(data.get(CONF_HOST, "")).strip()
+        for secret in (CONF_API_ENCRYPTION_KEY, CONF_API_PASSWORD):
+            if secret in data and not str(data[secret]).strip():
+                data.pop(secret)
+        if not data[CONF_HOST]:
+            errors[CONF_HOST] = "invalid_host"
+        else:
+            # One ESPHome bridge serves exactly one hub: RS-485 is
+            # request/response and the TCP stream server accepts one client.
+            self._async_abort_entries_match(
+                {CONF_TRANSPORT: transport, CONF_HOST: data[CONF_HOST]}
+            )
+            await self.async_set_unique_id(unique_id_for(data))
+            self._abort_if_unique_id_configured()
+            probe = await self.hass.async_add_executor_job(
+                probe_connection, connection_config(data), self.hass
+            )
+            if not probe.get("reachable"):
+                errors["base"] = str(probe.get("error_key") or "cannot_connect")
+        if errors:
+            return self.async_show_form(
+                step_id=step_id,
+                data_schema=schema_fn(user_input),
+                errors=errors,
+                description_placeholders={"detail": str(probe.get("error") or "")},
+            )
+        title = user_input[CONF_NAME]
+        device_name = (probe.get("esphome") or {}).get("name")
+        if device_name and device_name not in title:
+            title = f"{title} ({device_name})"
+        return self.async_create_entry(
+            title=title,
+            data=data,
+            options={
+                CONF_SCAN_INTERVAL: user_input[CONF_SCAN_INTERVAL],
+                CONF_ENTITIES: [],
+            },
+        )
+
+    async def async_step_esphome_tcp(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            return await self._async_finish_esphome(
+                TRANSPORT_ESPHOME_TCP, user_input, "esphome_tcp", _esphome_tcp_schema
+            )
+        return self.async_show_form(
+            step_id="esphome_tcp",
+            data_schema=_esphome_tcp_schema(),
+            description_placeholders={"detail": ""},
+        )
+
+    async def async_step_esphome_api(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            return await self._async_finish_esphome(
+                TRANSPORT_ESPHOME_API, user_input, "esphome_api", _esphome_api_schema
+            )
+        return self.async_show_form(
+            step_id="esphome_api",
+            data_schema=_esphome_api_schema(),
+            description_placeholders={"detail": ""},
         )
 
     @staticmethod
@@ -223,6 +445,17 @@ class ModbusUsbOptionsFlow(config_entries.OptionsFlow):
                 "exposes no transaction tracing hook. The Traffic Inspector "
                 "shows reconstructed request frames only — raw response bytes "
                 "cannot be captured."
+            )
+
+        summary = describe_transport(connection_config(self.config_entry.data))
+        details += (
+            f"\n\nHub transport: {summary['label']}"
+            f" · endpoint: {summary.get('endpoint') or 'n/a'}"
+        )
+        if summary["transport"] == TRANSPORT_ESPHOME_API:
+            details += (
+                "\nRX bytes are delivered by the ESPHome device's "
+                f"`{summary['esphome_event']}` events and recorded by the API client."
             )
 
         return self.async_show_form(

@@ -1,0 +1,158 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Modbus USB Controller — ESPHome RS-485 bridge (native API)     [fallback]
+#
+# Same hardware as modbus_bridge_esp32.yaml but WITHOUT any external component:
+# Home Assistant calls the `modbus_send` API service with a raw RTU frame and
+# the device fires one `esphome.modbus_rx` event per reply frame. Expect
+# ~20–60 ms extra latency per request versus the TCP bridge; exactly one
+# request is in flight at any time (the integration enforces this).
+#
+# Home Assistant hub settings:
+#   Transport ............ ESPHome · native API
+#   Host ................. ${name}.local (or the device IP)
+#   Native API port ...... 6053
+#   Encryption key ....... the api: encryption: key below
+#   Service / event ...... modbus_send / esphome.modbus_rx
+#   Baud / parity / stop . MUST equal the uart: block below
+#
+# Wiring: identical to modbus_bridge_esp32.yaml (UART2: TX GPIO17, RX GPIO16,
+# optional DE/RE on GPIO4 — see `flow_control_pin` in the uart-less notes).
+# ─────────────────────────────────────────────────────────────────────────────
+substitutions:
+  name: modbus-api-bridge
+  friendly_name: Modbus RS-485 API Bridge
+  uart_tx: GPIO17
+  uart_rx: GPIO16
+  uart_baud: "9600"
+  uart_parity: "NONE"        # NONE | EVEN | ODD  (HA: N | E | O)
+  uart_stop_bits: "1"
+  # RTU end-of-frame silence in ms. 4 ms is safe at ≥ 9600 baud;
+  # use 8 ms for 4800 and 16 ms for 2400 baud.
+  frame_gap_ms: "4"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  comment: Modbus RTU bridge over the ESPHome native API for Home Assistant
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: none
+  fast_connect: true
+  ap:
+    ssid: "${friendly_name} Fallback"
+
+captive_portal:
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+logger:
+  baud_rate: 0
+  level: INFO
+
+globals:
+  - id: rx_buf
+    type: std::vector<uint8_t>
+  - id: last_rx_ms
+    type: uint32_t
+    initial_value: "0"
+
+uart:
+  id: modbus_uart
+  tx_pin: ${uart_tx}
+  rx_pin: ${uart_rx}
+  baud_rate: ${uart_baud}
+  data_bits: 8
+  parity: ${uart_parity}
+  stop_bits: ${uart_stop_bits}
+  rx_buffer_size: 512
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+  services:
+    # Called by Home Assistant: `data` is the complete RTU frame (incl. CRC)
+    # as a list of byte values. The receive buffer is cleared first so a
+    # late reply of a previous request can never be paired with this one.
+    - service: modbus_send
+      variables:
+        data: int[]
+      then:
+        - lambda: |-
+            id(rx_buf).clear();
+            std::vector<uint8_t> out;
+            out.reserve(data.size());
+            for (auto value : data) out.push_back(static_cast<uint8_t>(value & 0xFF));
+            id(modbus_uart).write_array(out);
+            id(modbus_uart).flush();
+            id(last_rx_ms) = millis();
+    # Optional: lets the Home Assistant RS-485 scanner switch line settings
+    # at runtime. Remove if you prefer a fixed configuration.
+    - service: set_serial
+      variables:
+        baud: int
+        parity: string
+      then:
+        - lambda: |-
+            id(modbus_uart).set_baud_rate(static_cast<uint32_t>(baud));
+            if (parity == "E") id(modbus_uart).set_parity(esphome::uart::UART_CONFIG_PARITY_EVEN);
+            else if (parity == "O") id(modbus_uart).set_parity(esphome::uart::UART_CONFIG_PARITY_ODD);
+            else id(modbus_uart).set_parity(esphome::uart::UART_CONFIG_PARITY_NONE);
+            id(modbus_uart).load_settings();
+
+interval:
+  # RTU frames are delimited by ≥ 3.5 character times of silence. Poll the
+  # UART quickly, and once the bus has been quiet for `frame_gap_ms` publish
+  # everything collected so far as ONE Home Assistant event per frame.
+  - interval: 2ms
+    then:
+      - lambda: |-
+          while (id(modbus_uart).available()) {
+            uint8_t byte;
+            if (!id(modbus_uart).read_byte(&byte)) break;
+            id(rx_buf).push_back(byte);
+            id(last_rx_ms) = millis();
+            if (id(rx_buf).size() >= 260) break;  // longest legal RTU frame is 256 B
+          }
+          if (id(rx_buf).empty()) return;
+          if (millis() - id(last_rx_ms) < ${frame_gap_ms}) return;
+          std::string hex;
+          hex.reserve(id(rx_buf).size() * 3);
+          char tmp[4];
+          for (auto byte : id(rx_buf)) {
+            snprintf(tmp, sizeof(tmp), "%02X ", byte);
+            hex += tmp;
+          }
+          if (!hex.empty()) hex.pop_back();
+          id(rx_buf).clear();
+          api::global_api_server->fire_homeassistant_event(
+            "esphome.modbus_rx",
+            {{"frame", hex}, {"device", App.get_name()}});
+
+binary_sensor:
+  - platform: status
+    name: "${friendly_name} Status"
+
+sensor:
+  - platform: wifi_signal
+    name: "${friendly_name} WiFi Signal"
+    update_interval: 60s
+  - platform: uptime
+    name: "${friendly_name} Uptime"
+
+button:
+  - platform: restart
+    name: "${friendly_name} Restart"
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "${friendly_name} IP"

@@ -43,6 +43,37 @@ CONF_MAX_READ_REGISTERS = "max_read_registers"
 CONF_GAP_TOLERANCE = "gap_tolerance"
 CONF_CIRCUIT_BREAKER = "circuit_breaker"
 
+# --- Hub transport (v2.8.0) ---
+# "serial": USB/RS-485 adapter on the HA host (pymodbus ModbusSerialClient).
+# "esphome_tcp": ESPHome device running a UART<->TCP stream server; Modbus RTU
+#                frames travel over a TCP socket (pymodbus ModbusTcpClient with
+#                the RTU framer). Recommended ESPHome transport.
+# "esphome_api": ESPHome native API — frames are sent through a user-defined
+#                `modbus_send` service and replies arrive as HA events fired by
+#                the device (`esphome.modbus_rx`). No extra ESPHome component.
+CONF_TRANSPORT = "transport"
+TRANSPORT_SERIAL = "serial"
+TRANSPORT_ESPHOME_TCP = "esphome_tcp"
+TRANSPORT_ESPHOME_API = "esphome_api"
+TRANSPORTS = [TRANSPORT_SERIAL, TRANSPORT_ESPHOME_TCP, TRANSPORT_ESPHOME_API]
+CONF_HOST = "host"
+CONF_TCP_PORT = "tcp_port"
+CONF_API_PORT = "api_port"
+CONF_API_ENCRYPTION_KEY = "api_encryption_key"
+CONF_API_PASSWORD = "api_password"
+CONF_ESPHOME_SERVICE = "esphome_service"
+CONF_ESPHOME_EVENT = "esphome_event"
+CONF_RESPONSE_TIMEOUT = "response_timeout"
+DEFAULT_TCP_PORT = 8899
+DEFAULT_API_PORT = 6053
+DEFAULT_ESPHOME_SERVICE = "modbus_send"
+DEFAULT_ESPHOME_EVENT = "esphome.modbus_rx"
+DEFAULT_RESPONSE_TIMEOUT_TCP = 3.0
+DEFAULT_RESPONSE_TIMEOUT_API = 1.5
+# Config-entry data keys that hold credentials: never echoed to the panel,
+# diagnostics dumps, or logs.
+SECRET_CONF_KEYS = (CONF_API_ENCRYPTION_KEY, CONF_API_PASSWORD)
+
 DEFAULT_PORT = "/dev/ttyUSB0"
 DEFAULT_BAUDRATE = 9600
 DEFAULT_BYTESIZE = 8

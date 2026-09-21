@@ -10,29 +10,34 @@ from homeassistant.core import HomeAssistant
 
 from .api import async_register_api
 from .const import (
-    CONF_BAUDRATE,
-    CONF_BYTESIZE,
     CONF_DEVICE_ID,
     CONF_DEVICES,
     CONF_ENTITIES,
     CONF_MANUFACTURER,
     CONF_MODEL,
     CONF_NAME,
-    CONF_PARITY,
-    CONF_PORT,
     CONF_SCAN_INTERVAL,
     CONF_SLAVE_ID,
-    CONF_STOPBITS,
+    CONF_TRANSPORT,
     DATA_PRESERVE_SERIAL_RELOAD,
     DATA_SKIP_DEVICE_RELOAD,
     DATA_SKIP_SERIAL_RELOAD,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    TRANSPORT_SERIAL,
     integration_version,
 )
 from .coordinator import ModbusUsbCoordinator
 from .services import async_register_services, async_unregister_services
 from .templates import ensure_templates_dir
+from .transport import (
+    TRANSPORT_LABELS,
+    build_client,
+    connection_config,
+    connection_error_message,
+    endpoint_of,
+    transport_of,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -104,24 +109,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     coordinator = hass.data[DOMAIN].get(entry.entry_id)
     if coordinator is None:
-        from pymodbus.client import ModbusSerialClient
+        connection = connection_config(entry.data)
 
-        def _build_client() -> ModbusSerialClient:
-            return ModbusSerialClient(
-                port=entry.data[CONF_PORT],
-                baudrate=entry.data[CONF_BAUDRATE],
-                bytesize=entry.data[CONF_BYTESIZE],
-                parity=entry.data[CONF_PARITY],
-                stopbits=entry.data[CONF_STOPBITS],
-                timeout=3,
-            )
-
-        client = await hass.async_add_executor_job(_build_client)
+        client = await hass.async_add_executor_job(
+            lambda: build_client(connection, hass=hass)
+        )
         connected = await hass.async_add_executor_job(client.connect)
         if not connected:
             _LOGGER.warning(
-                "Could not open serial port %s on initial connect; will keep retrying",
-                entry.data[CONF_PORT],
+                "%s (%s) on initial connect; will keep retrying",
+                connection_error_message(connection),
+                endpoint_of(connection),
             )
 
         scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
@@ -131,13 +129,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             slave_id=entry.data[CONF_SLAVE_ID],
             scan_interval=scan_interval,
             entry_id=entry.entry_id,
-            serial_config={
-                CONF_PORT: entry.data[CONF_PORT],
-                CONF_BAUDRATE: entry.data[CONF_BAUDRATE],
-                CONF_BYTESIZE: entry.data[CONF_BYTESIZE],
-                CONF_PARITY: entry.data[CONF_PARITY],
-                CONF_STOPBITS: entry.data[CONF_STOPBITS],
-            },
+            serial_config=connection,
         )
 
         # An offline RS-485 board must not block Home Assistant setup. The normal
@@ -154,7 +146,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         identifiers={(DOMAIN, entry.entry_id)},
         name=entry.title,
         manufacturer="Modbus USB",
-        model="Modbus Serial Hub",
+        model=hub_model_name(entry.data),
     )
 
     for dev in entry.options.get(CONF_DEVICES, []):
@@ -181,6 +173,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Ensure panel is registered (idempotent)
     await _async_register_panel(hass)
 
+    return True
+
+
+def hub_model_name(data: dict) -> str:
+    """Device-registry model string for the hub device."""
+    transport = transport_of(data)
+    if transport == "serial":
+        return "Modbus Serial Hub"
+    return f"Modbus Hub via {TRANSPORT_LABELS[transport]}"
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate config entries created before the hub transport existed.
+
+    v1 entries only ever described a local serial adapter; v2 stores the
+    transport explicitly so the rest of the integration never needs to guess.
+    """
+    if entry.version > 2:
+        return False  # created by a newer release; do not downgrade
+    if entry.version == 1:
+        new_data = {**entry.data}
+        new_data.setdefault(CONF_TRANSPORT, TRANSPORT_SERIAL)
+        hass.config_entries.async_update_entry(entry, data=new_data, version=2)
+        _LOGGER.info(
+            "Migrated Modbus USB entry %s to version 2 (transport=%s)",
+            entry.entry_id,
+            new_data[CONF_TRANSPORT],
+        )
     return True
 
 

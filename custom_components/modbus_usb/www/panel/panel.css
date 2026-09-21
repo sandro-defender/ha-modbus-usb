@@ -1390,6 +1390,37 @@
   .designer-editor .designer-yaml { border-radius: 0; }
   .designer-editor-hint { margin-top: 0.35rem; }
 
+/* ─── v2.7.1: FC filter & saved views, RX gap waterfall, coverage, designer errors ── */
+  .inspector-presets { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem; margin: -0.25rem 0 0.75rem; padding-top: 0.5rem; border-top: 1px dashed var(--border-subtle); }
+  .inspector-preset-select { min-width: 160px; max-width: 260px; }
+
+  .rx-waterfall-card { margin-bottom: 0.75rem; padding: 0.6rem 0.7rem; border-radius: 10px; border: 1px solid var(--border-subtle); background: rgba(255,255,255,0.02); }
+  .rx-waterfall-title { font-size: 0.62rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin-bottom: 0.45rem; }
+  .rx-waterfall-row { grid-template-columns: 150px 1fr 90px; }
+  .rx-waterfall-gap-label { color: var(--text-dim); font-size: 0.66rem; font-weight: 400; }
+  .rx-waterfall-bar { background: linear-gradient(90deg, #a78bfa, #38bdf8); }
+  .rx-waterfall-bar-exc { background: linear-gradient(90deg, #f87171, #fb923c); }
+  .rx-waterfall-tick { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: #e2e8f0; opacity: 0.85; border-radius: 1px; }
+
+  .designer-gutter-line { min-height: 1.45em; padding: 0 0.1rem; border-radius: 4px; }
+  .designer-gutter-line-error { position: relative; color: #fecaca; background: rgba(239,68,68,0.22); font-weight: 700; }
+  .designer-gutter-line-error::before { content: '●'; position: absolute; left: -0.05rem; top: 0; font-size: 0.6em; line-height: 1.45em; color: #f87171; transform: translateX(-100%); }
+  .designer-line-numbers.has-error { padding-left: 0.9rem; }
+  .designer-structural-error-head { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-bottom: 0.4rem; }
+  .designer-structural-error-head:empty { display: none; }
+  .designer-error-location { cursor: pointer; border: 1px solid rgba(248,113,113,0.5); font-size: 0.72rem; font-family: inherit; }
+  .designer-error-location:hover { filter: brightness(1.15); }
+  .designer-structural-error-hint { margin-top: 0.4rem; color: rgba(254,202,202,0.75); }
+
   @media (max-width: 1000px) {
     .inspector-layout, .designer-layout { grid-template-columns: 1fr; }
   }
+
+  /* ─── v2.8.0: hub transport (serial / ESPHome) ─────────────── */
+  .transport-badge { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.02em; border: 1px solid rgba(148,163,184,0.3); background: rgba(148,163,184,0.12); color: #cbd5e1; }
+  .transport-badge.transport-esphome_tcp { background: rgba(45,212,191,0.14); border-color: rgba(45,212,191,0.35); color: #5eead4; }
+  .transport-badge.transport-esphome_api { background: rgba(192,132,252,0.14); border-color: rgba(192,132,252,0.35); color: #d8b4fe; }
+  .hub-connection-test { padding: 0.6rem 0.85rem; border: 1px dashed rgba(255,255,255,0.1); border-radius: 10px; }
+  .esphome-help { padding: 0.6rem 0.85rem; border-left: 3px solid rgba(45,212,191,0.5); background: rgba(45,212,191,0.06); border-radius: 8px; line-height: 1.5; }
+  .esphome-help code { font-size: 0.8rem; color: #99f6e4; }
+  #hub-esphome-fields[hidden], #hub-serial-fields[hidden], #hub-esphome-api-fields[hidden], #hub-esphome-tcp-fields[hidden], #scan-fixed-baud-note[hidden] { display: none !important; }

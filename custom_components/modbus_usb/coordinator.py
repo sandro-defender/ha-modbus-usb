@@ -60,6 +60,12 @@ from .const import (
 from .decoding import as_float, decode_words
 from .diagnostics import diagnostic_request_frame, modbus_crc16
 from .optimizer import group_entities_into_blocks
+from .transport import (
+    build_client,
+    connection_error_message,
+    describe_transport,
+    is_serial,
+)
 
 _LOGGER = logging.getLogger(__name__)
 # Compatibility alias for callers of the former coordinator-local helper.
@@ -396,7 +402,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         if self.client.connected:
             return
         if not self._connect_with_retries():
-            raise UpdateFailed("Could not open the configured serial port")
+            raise UpdateFailed(
+                connection_error_message(getattr(self, "serial_config", None))
+            )
 
     def _connect_with_retries(
         self, attempts: int = 3, base_delay: float = 0.25, max_delay: float = 3.0
@@ -405,15 +413,17 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         import random
 
         # Check if port needs persistent resolution or dynamically switched
+        # (USB adapters only — ESPHome transports address a network host).
         serial_cfg = getattr(self, "serial_config", None)
-        current_port = getattr(self.client, "port", None) or (
-            serial_cfg.get(CONF_PORT) if serial_cfg else None
-        )
-        resolved = self._resolve_port_path(str(current_port or ""))
-        if resolved and resolved != getattr(self.client, "port", None):
-            self.client.port = resolved
-            if serial_cfg is not None:
-                serial_cfg[CONF_PORT] = resolved
+        if is_serial(serial_cfg):
+            current_port = getattr(self.client, "port", None) or (
+                serial_cfg.get(CONF_PORT) if serial_cfg else None
+            )
+            resolved = self._resolve_port_path(str(current_port or ""))
+            if resolved and resolved != getattr(self.client, "port", None):
+                self.client.port = resolved
+                if serial_cfg is not None:
+                    serial_cfg[CONF_PORT] = resolved
 
         for attempt in range(attempts):
             try:
@@ -429,26 +439,24 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         return False
 
     def reconfigure_serial(self, serial_config: dict[str, Any]) -> bool:
-        """Replace the serial client in place without unloading HA entities."""
-        from pymodbus.client import ModbusSerialClient
+        """Replace the bus client in place without unloading HA entities.
 
+        Works for every transport (serial adapter, ESPHome RTU-over-TCP,
+        ESPHome API): the new connection dict is merged over the current one
+        and a fresh client is built through ``transport.build_client``.
+        """
         config = {**self.serial_config, **serial_config}
         with self._serial_lock:
             self.client.close()
             capture = getattr(self, "response_capture", None)
             if capture is not None:
                 capture.detach()  # drop any logging fallback for the old client
-            self.client = ModbusSerialClient(
-                port=config[CONF_PORT],
-                baudrate=config[CONF_BAUDRATE],
-                bytesize=config[CONF_BYTESIZE],
-                parity=config[CONF_PARITY],
-                stopbits=config[CONF_STOPBITS],
-                timeout=3,
-            )
+            self.client = build_client(config, hass=getattr(self, "hass", None))
             self.serial_config = config
             self._install_response_capture()
             return self._connect_with_retries()
+
+    reconfigure_connection = reconfigure_serial
 
     def _apply_inter_frame_delay(self) -> None:
         delay_ms = 0
@@ -515,8 +523,6 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         client tests each baud rate. Any valid Modbus exception response still
         counts as a detected device: it proves the slave and serial settings.
         """
-        from pymodbus.client import ModbusSerialClient
-
         start_slave = max(1, min(247, int(start_slave)))
         end_slave = max(start_slave, min(247, int(end_slave)))
         valid_bauds = sorted({int(rate) for rate in baudrates if int(rate) > 0})
@@ -530,6 +536,14 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         )
         if not set(valid_parities).issubset({"N", "E", "O"}):
             raise ValueError("Parity must be N (none), E (even), or O (odd)")
+
+        # ESPHome bridges fix baud/parity in their own `uart:` block, so the
+        # scan can only sweep slave IDs there — one probe with the configured
+        # line settings, results reported without a baud rate.
+        baudrate_fixed = not is_serial(self.serial_config)
+        if baudrate_fixed:
+            valid_bauds = [int(self.serial_config.get(CONF_BAUDRATE) or 0) or 0]
+            valid_parities = [str(self.serial_config.get(CONF_PARITY, "N"))]
 
         found: list[dict[str, Any]] = []
         probed = 0
@@ -545,14 +559,13 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             try:
                 for baudrate in valid_bauds:
                     for parity in valid_parities:
-                        probe = ModbusSerialClient(
-                            port=self.serial_config[CONF_PORT],
-                            baudrate=baudrate,
-                            bytesize=self.serial_config[CONF_BYTESIZE],
+                        probe = build_client(
+                            self.serial_config,
+                            baudrate=baudrate or None,
                             parity=parity,
-                            stopbits=self.serial_config[CONF_STOPBITS],
-                            timeout=0.2,
+                            timeout=0.2 if not baudrate_fixed else 0.5,
                             retries=0,
+                            hass=getattr(self, "hass", None),
                         )
                         try:
                             if not probe.connect():
@@ -584,7 +597,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                                         found.append(
                                             {
                                                 "slave_id": slave,
-                                                "baudrate": baudrate,
+                                                "baudrate": None
+                                                if baudrate_fixed
+                                                else baudrate,
                                                 "parity": parity,
                                                 "response": response_kind,
                                                 "suggestions": suggestions,
@@ -595,7 +610,11 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                                             "scan_found",
                                             slave=slave,
                                             address=0,
-                                            result=f"{baudrate} baud, {parity} parity — {response_kind}",
+                                            result=(
+                                                f"{response_kind} (bridge line settings)"
+                                                if baudrate_fixed
+                                                else f"{baudrate} baud, {parity} parity — {response_kind}"
+                                            ),
                                         )
                                 except (
                                     Exception
@@ -612,6 +631,8 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             "probed": probed,
             "start_slave": start_slave,
             "end_slave": end_slave,
+            "transport": describe_transport(self.serial_config)["transport"],
+            "baudrate_fixed": baudrate_fixed,
         }
 
     def _match_templates(
@@ -689,7 +710,9 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         Operations that send several frames before one record (batch writes,
         board block readers) keep the last TX frame as ``request_hex`` and
         the full raw RX stream as ``response_frames`` (one entry per
-        response frame, oldest first).
+        response frame, oldest first) together with the per-frame arrival
+        times ``response_frame_times_ms`` (milliseconds since the first TX
+        of the operation, same index as ``response_frames``).
         """
         timestamp = datetime.now().astimezone().isoformat()
         detected_function, detected_request = diagnostic_request_frame(
@@ -726,6 +749,12 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 # multi-frame responses (batch reads, block readers) keep
                 # every frame instead of only the last one.
                 item["response_frames"] = list(window["response_frames"])
+                frame_times = window.get("response_frame_times_ms")
+                if frame_times and len(frame_times) == len(item["response_frames"]):
+                    # Per-frame arrival times (ms since the first TX) feed
+                    # the inspector's inter-frame gap waterfall and the
+                    # per-frame CSV export.
+                    item["response_frame_times_ms"] = list(frame_times)
         if duration_ms is not None:
             item["duration_ms"] = round(duration_ms, 1)
         tx_stages = self._get_tx_stages()
@@ -944,8 +973,24 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 "stopbits": self.serial_config.get(CONF_STOPBITS),
                 "connection_owner": "Home Assistant Modbus USB",
                 "operation_active": self._serial_lock.locked(),
+                # v2.8.0: transport summary (never includes credentials).
+                **self._transport_diagnostics(),
             },
         }
+
+    def _transport_diagnostics(self) -> dict[str, Any]:
+        summary = describe_transport(self.serial_config)
+        client = self.client
+        esphome = getattr(client, "device_info", None)
+        if isinstance(esphome, dict) and esphome:
+            summary["esphome_device"] = dict(esphome)
+        stats = getattr(client, "stats", None)
+        if isinstance(stats, dict):
+            summary["bridge_stats"] = dict(stats)
+        last_error = getattr(client, "last_error", None)
+        if isinstance(last_error, str) and last_error:
+            summary["last_error"] = last_error
+        return summary
 
     def clear_transaction_log(self) -> None:
         """Clear only the rolling activity log; preserve health counters."""
@@ -1674,6 +1719,10 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
 
 
 # Changelog:
+# 2026-09-21 — v2.8.0: transport-aware client construction (serial / ESPHome TCP /
+#              ESPHome API); scan_bus sweeps slave IDs only on fixed-baud bridges.
+# 2026-09-20 — v2.7.1: recorded transactions carry per-frame RX arrival times
+#              (response_frame_times_ms) next to response_frames.
 # 2026-09-20 — v2.7.0: recorded transactions keep the full framed RX stream
 #              (response_frames) of multi-frame operations, not only the last pair.
 # 2026-09-20 — v2.6.0: real TX/RX response capture (capture.py) attached to every

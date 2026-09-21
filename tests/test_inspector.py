@@ -12,6 +12,8 @@ from custom_components.modbus_usb.diagnostics import modbus_crc16
 from custom_components.modbus_usb.inspector import (
     analyze_transaction,
     build_inspector_view,
+    capture_coverage,
+    frame_timing,
     normalize_frame_hex,
     parse_rtu_frame,
 )
@@ -578,3 +580,209 @@ def test_build_inspector_view_propagates_multi_frame_responses() -> None:
     assert analyzed["transaction"]["response_frames"] == [first, second]
     assert len(analyzed["response_frames"]) == 2
     assert analyzed["response_frames"][0]["slave_id"] == 2
+
+
+# ───────────────── v2.7.1: per-frame RX timing & capture coverage ─────────────────
+
+
+def test_frame_timing_derives_arrival_and_gaps() -> None:
+    assert frame_timing([15.0, 35.0, 35.5], 3) == [
+        {"arrival_ms": 15.0, "gap_ms": 15.0},
+        {"arrival_ms": 35.0, "gap_ms": 20.0},
+        {"arrival_ms": 35.5, "gap_ms": 0.5},
+    ]
+
+
+def test_frame_timing_rejects_mismatched_or_malformed_lists() -> None:
+    assert frame_timing(None, 2) == []
+    assert frame_timing([], 0) == []
+    assert frame_timing([1.0], 2) == []  # length mismatch
+    assert frame_timing([1.0, "x"], 2) == []  # non-numeric entry
+    assert frame_timing([1.0, True], 2) == []  # bools are not timings
+    assert frame_timing("12.0", 1) == []  # not a list at all
+
+
+def test_frame_timing_never_reports_negative_gaps() -> None:
+    timing = frame_timing([10.0, 8.0], 2)
+    assert timing[1]["gap_ms"] == 0.0
+    assert timing[1]["arrival_ms"] == 8.0
+
+
+def test_analyze_transaction_attaches_frame_arrival_and_gap() -> None:
+    first = _frame_with_crc("02040400010002")
+    second = _frame_with_crc("020302002A")
+    analyzed = analyze_transaction(
+        {
+            "operation": "read_input",
+            "slave": 2,
+            "status": "ok",
+            "request_hex": _frame_with_crc("020400000004"),
+            "response_hex": second,
+            "response_frames": [first, second],
+            "response_frame_times_ms": [9.6, 24.1],
+            "duration_ms": 25.0,
+        }
+    )
+    frames = analyzed["response_frames"]
+    assert frames[0]["arrival_ms"] == 9.6
+    assert frames[0]["gap_ms"] == 9.6
+    assert frames[1]["arrival_ms"] == 24.1
+    assert frames[1]["gap_ms"] == pytest.approx(14.5)
+    # The legacy last-frame view carries the last frame's timing too.
+    assert analyzed["response_frame"]["arrival_ms"] == 24.1
+    assert analyzed["transaction"]["response_frame_times_ms"] == [9.6, 24.1]
+
+
+def test_analyze_transaction_single_frame_timing() -> None:
+    analyzed = analyze_transaction(
+        {
+            "operation": "read_holding",
+            "slave": 1,
+            "request_hex": _frame_with_crc("010300070001"),
+            "response_hex": _frame_with_crc("010302002A"),
+            "response_frames": [_frame_with_crc("010302002A")],
+            "response_frame_times_ms": [12.5],
+        }
+    )
+    assert analyzed["response_frame"]["arrival_ms"] == 12.5
+    assert analyzed["response_frame"]["gap_ms"] == 12.5
+    assert analyzed["response_frames"][0]["arrival_ms"] == 12.5
+
+
+def test_analyze_transaction_legacy_response_hex_with_timing() -> None:
+    # A one-frame capture that only carries response_hex (older entry
+    # shape) still gets its arrival stamped when a timing list is present.
+    analyzed = analyze_transaction(
+        {
+            "operation": "read_holding",
+            "request_hex": _frame_with_crc("010300070001"),
+            "response_hex": _frame_with_crc("010302002A"),
+            "response_frame_times_ms": [3.0],
+        }
+    )
+    assert analyzed["response_frame"]["arrival_ms"] == 3.0
+    assert analyzed["transaction"]["response_frame_times_ms"] == [3.0]
+
+
+def test_analyze_transaction_without_timing_decodes_as_before() -> None:
+    first = _frame_with_crc("02040400010002")
+    second = _frame_with_crc("020302002A")
+    analyzed = analyze_transaction(
+        {
+            "operation": "read_input",
+            "request_hex": _frame_with_crc("020400000004"),
+            "response_hex": second,
+            "response_frames": [first, second],
+        }
+    )
+    assert analyzed["transaction"]["response_frame_times_ms"] is None
+    assert all("arrival_ms" not in frame for frame in analyzed["response_frames"])
+    assert "arrival_ms" not in analyzed["response_frame"]
+
+
+def test_analyze_transaction_ignores_mismatched_timing_list() -> None:
+    first = _frame_with_crc("02040400010002")
+    second = _frame_with_crc("020302002A")
+    analyzed = analyze_transaction(
+        {
+            "operation": "read_input",
+            "request_hex": _frame_with_crc("020400000004"),
+            "response_hex": second,
+            "response_frames": [first, second],
+            "response_frame_times_ms": [1.0],  # one stamp for two frames
+        }
+    )
+    assert analyzed["transaction"]["response_frame_times_ms"] is None
+    assert all("arrival_ms" not in frame for frame in analyzed["response_frames"])
+
+
+def test_analyze_transaction_timing_survives_garbage_frame() -> None:
+    analyzed = analyze_transaction(
+        {
+            "operation": "batch_write",
+            "request_hex": _frame_with_crc("010600010002"),
+            "response_hex": _frame_with_crc("010600010002"),
+            "response_frames": ["zz", _frame_with_crc("010600010002")],
+            "response_frame_times_ms": [2.0, 9.0],
+        }
+    )
+    assert analyzed["response_frames"][0]["valid"] is False
+    assert analyzed["response_frames"][0]["arrival_ms"] == 2.0
+    assert analyzed["response_frames"][1]["gap_ms"] == 7.0
+
+
+def test_analyze_transaction_no_response_has_no_timing() -> None:
+    analyzed = analyze_transaction(
+        {
+            "operation": "read_holding",
+            "status": "error",
+            "request_hex": _frame_with_crc("010300070001"),
+            "response_frame_times_ms": [1.0],  # stale/bogus without frames
+        }
+    )
+    assert analyzed["response_frames"] is None
+    assert analyzed["transaction"]["response_frame_times_ms"] is None
+
+
+def test_capture_coverage_fraction() -> None:
+    assert capture_coverage(0, 0) is None
+    assert capture_coverage(3, 4) == 0.75
+    assert capture_coverage(2, 3) == 0.667
+    assert capture_coverage(5, 5) == 1.0
+    assert capture_coverage(0, 5) == 0.0
+    # Defensive clamping: never above 1.0 or below 0.0.
+    assert capture_coverage(9, 4) == 1.0
+    assert capture_coverage(-1, 4) == 0.0
+
+
+def test_build_inspector_view_reports_capture_coverage() -> None:
+    coordinator = _coordinator_with_log(
+        [
+            _transaction(response_hex=_frame_with_crc("010302002A")),
+            _transaction(response_hex=_frame_with_crc("010302002A")),
+            _transaction(response_hex=_frame_with_crc("010302002A")),
+            _transaction(),
+        ]
+    )
+    coordinator.capture_hook = "trace_packet"
+    view = build_inspector_view(coordinator)
+    assert view["stats"]["responses"] == 3
+    assert view["stats"]["total"] == 4
+    assert view["stats"]["capture_coverage"] == 0.75
+
+
+def test_build_inspector_view_capture_coverage_empty_and_full() -> None:
+    empty = build_inspector_view(_coordinator_with_log([]))
+    assert empty["stats"]["capture_coverage"] is None
+
+    full = build_inspector_view(
+        _coordinator_with_log(
+            [_transaction(response_hex=_frame_with_crc("010302002A"))]
+        )
+    )
+    assert full["stats"]["capture_coverage"] == 1.0
+
+    none = build_inspector_view(_coordinator_with_log([_transaction()]))
+    assert none["stats"]["capture_coverage"] == 0.0
+
+
+def test_build_inspector_view_propagates_frame_timing() -> None:
+    first = _frame_with_crc("02040400010002")
+    second = _frame_with_crc("020302002A")
+    coordinator = _coordinator_with_log(
+        [
+            _transaction(
+                slave=2,
+                response_hex=second,
+                response_frames=[first, second],
+                response_frame_times_ms=[9.6, 24.1],
+            )
+        ]
+    )
+    view = build_inspector_view(coordinator)
+    analyzed = view["transactions"][0]
+    assert analyzed["transaction"]["response_frame_times_ms"] == [9.6, 24.1]
+    assert [frame["gap_ms"] for frame in analyzed["response_frames"]] == [
+        9.6,
+        pytest.approx(14.5),
+    ]

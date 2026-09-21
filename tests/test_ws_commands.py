@@ -514,3 +514,99 @@ async def test_ws_apply_template_still_works_after_refactor() -> None:
     new_options = hass.config_entries.async_update_entry.call_args.kwargs["options"]
     assert new_options["devices"][0]["m0_short"] is True
     assert new_options["devices"][0]["slave_id"] == 2
+
+
+# ───────────── v2.7.1: designer_validate reports the error location ─────────────
+
+
+async def _run_in_executor(func, *args, **kwargs):
+    return func(*args, **kwargs)
+
+
+async def test_designer_validate_reply_includes_error_location() -> None:
+    connection = _connection()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"e1": SimpleNamespace()}},
+        async_add_executor_job=_run_in_executor,
+    )
+    await _unwrap(api_templates.ws_designer_validate)(
+        hass,
+        connection,
+        {
+            "id": 7,
+            "type": "modbus_usb/designer_validate",
+            "entry_id": "e1",
+            "content": (
+                "name: X\n"
+                "entities:\n"
+                "  - name: A\n"
+                "    entity_type: bogus\n"
+                "    address: 1\n"
+            ),
+            "test_reads": False,
+        },
+    )
+    connection.send_error.assert_not_called()
+    msg_id, result = connection.send_result.call_args[0]
+    assert msg_id == 7
+    assert result["valid"] is False
+    assert result["entities"] == []
+    assert "Unsupported entity type" in result["error"]
+    assert result["error_line"] == 4
+    assert result["error_column"] == 18
+    assert result["error_path"] == "entities[0].entity_type"
+
+
+async def test_designer_validate_reply_yaml_syntax_error_location() -> None:
+    connection = _connection()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"e1": SimpleNamespace()}},
+        async_add_executor_job=_run_in_executor,
+    )
+    await _unwrap(api_templates.ws_designer_validate)(
+        hass,
+        connection,
+        {
+            "id": 8,
+            "type": "modbus_usb/designer_validate",
+            "entry_id": "e1",
+            "content": "name: X\nentities:\n  - name: [A\n",
+            "test_reads": False,
+        },
+    )
+    _, result = connection.send_result.call_args[0]
+    assert result["valid"] is False
+    assert result["error"].startswith("Invalid YAML syntax:")
+    assert result["error_line"] == 3
+    assert result["error_column"] == 11
+    assert result["error_path"] is None
+
+
+async def test_designer_validate_plain_value_error_has_no_location_keys() -> None:
+    connection = _connection()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"e1": SimpleNamespace()}},
+        async_add_executor_job=_run_in_executor,
+    )
+    with patch.object(
+        api_templates,
+        "async_validate_template_design",
+        AsyncMock(side_effect=ValueError("Slave ID must be between 1 and 247")),
+    ):
+        await _unwrap(api_templates.ws_designer_validate)(
+            hass,
+            connection,
+            {
+                "id": 9,
+                "type": "modbus_usb/designer_validate",
+                "entry_id": "e1",
+                "content": "name: X\nentities: []\n",
+                "slave_id": 999,
+            },
+        )
+    _, result = connection.send_result.call_args[0]
+    assert result == {
+        "valid": False,
+        "error": "Slave ID must be between 1 and 247",
+        "entities": [],
+    }

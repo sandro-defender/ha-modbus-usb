@@ -19,6 +19,19 @@
       request_ms: 'Serial request',
     };
 
+    // v2.7.1: function codes offered by the FC filter (two-digit hex, as
+    // shown in the select) with their Modbus names.
+    const INSPECTOR_FUNCTION_CODES = [
+      ['01', 'Read Coils'],
+      ['02', 'Read Discrete Inputs'],
+      ['03', 'Read Holding Registers'],
+      ['04', 'Read Input Registers'],
+      ['05', 'Write Single Coil'],
+      ['06', 'Write Single Register'],
+      ['0F', 'Write Multiple Coils'],
+      ['10', 'Write Multiple Registers'],
+    ];
+
     function durationTone(durationMs) {
       if (typeof durationMs !== 'number') return 'slate';
       if (durationMs < 50) return 'green';
@@ -132,6 +145,7 @@
       stats.total = (stats.total || 0) + 1;
       if (txn.status === 'error') stats.errors = (stats.errors || 0) + 1;
       if (txn.response_hex) stats.responses = (stats.responses || 0) + 1;
+      stats.capture_coverage = inspectorCaptureCoverage(stats);
       if (txn.slave != null) {
         const perSlave = _inspectorView.per_slave || (_inspectorView.per_slave = {});
         const bucket = perSlave[String(txn.slave)] || (perSlave[String(txn.slave)] = {
@@ -194,13 +208,35 @@
     // transaction list; the WebSocket stream, pause/resume, and reload
     // behavior are untouched — filtered rows simply hide, and new pushes
     // respect the active filters. The filter state lives in state.js so it
-    // persists across tab switches.
+    // persists across tab switches. v2.7.1 adds a function-code filter
+    // (FC01–FC10 + exception) and named saved views (localStorage presets
+    // re-applied whenever the tab opens).
 
     function normalizeInspectorHexQuery(text) {
       return String(text ?? '')
         .replace(/0[xX]/g, '')
         .replace(/[^0-9a-fA-F]/g, '')
         .toLowerCase();
+    }
+
+    function normalizeInspectorFilters(raw) {
+      const source = raw && typeof raw === 'object' ? raw : {};
+      return {
+        slave: source.slave == null || source.slave === '' ? 'all' : String(source.slave),
+        status: typeof source.status === 'string' && source.status ? source.status : 'all',
+        fc: normalizeInspectorFunctionCode(source.fc),
+        hex: typeof source.hex === 'string' ? source.hex : '',
+      };
+    }
+
+    function normalizeInspectorFunctionCode(value) {
+      // Accepts 'all', 'exception', '03', '0x03', 3, 'FC03' → 'all' | 'exception' | '03'.
+      if (value == null || value === '' || value === 'all') return 'all';
+      if (String(value).toLowerCase() === 'exception') return 'exception';
+      const digits = String(value).replace(/^(fc|0x)/i, '').trim();
+      const parsed = typeof value === 'number' ? value : parseInt(digits, 16);
+      if (!Number.isFinite(parsed) || parsed < 0 || parsed > 0xFF) return 'all';
+      return parsed.toString(16).toUpperCase().padStart(2, '0');
     }
 
     function inspectorResponseFrameList(item) {
@@ -214,6 +250,37 @@
       return inspectorResponseFrameList(item).some(
         (frame) => frame && frame.frame_kind === 'exception_response'
       );
+    }
+
+    function inspectorTransactionFunctionCodes(item) {
+      // Every function code involved in the transaction: the logged code,
+      // the request frame, and each captured response frame (exception
+      // frames contribute their base function code so an FC03 exception
+      // still matches the FC03 filter).
+      const codes = new Set();
+      const add = (value) => {
+        const normalized = normalizeInspectorFunctionCode(value);
+        if (normalized !== 'all' && normalized !== 'exception') codes.add(normalized);
+      };
+      const txn = item.transaction || {};
+      if (txn.function_code != null) add(txn.function_code);
+      if (item.frame && typeof item.frame.function_code === 'number') add(item.frame.function_code);
+      inspectorResponseFrameList(item).forEach((frame) => {
+        if (!frame) return;
+        if (frame.frame_kind === 'exception_response') {
+          if (typeof frame.base_function_code === 'number') add(frame.base_function_code);
+        } else if (typeof frame.function_code === 'number') {
+          add(frame.function_code);
+        }
+      });
+      return codes;
+    }
+
+    function transactionMatchesFunctionCodeFilter(item, fc) {
+      const wanted = normalizeInspectorFunctionCode(fc);
+      if (wanted === 'all') return true;
+      if (wanted === 'exception') return inspectorTransactionHasException(item);
+      return inspectorTransactionFunctionCodes(item).has(wanted);
     }
 
     function inspectorTransactionHexHaystack(item) {
@@ -233,16 +300,17 @@
     }
 
     function transactionMatchesInspectorFilters(item) {
-      const filters = _inspectorFilters || { slave: 'all', status: 'all', hex: '' };
+      const filters = normalizeInspectorFilters(_inspectorFilters);
       const txn = item.transaction || {};
-      if (filters.slave && filters.slave !== 'all' && String(txn.slave ?? '') !== String(filters.slave)) {
+      if (filters.slave !== 'all' && String(txn.slave ?? '') !== String(filters.slave)) {
         return false;
       }
-      if (filters.status && filters.status !== 'all') {
+      if (filters.status !== 'all') {
         if (filters.status === 'ok' && txn.status !== 'ok') return false;
         if (filters.status === 'error' && txn.status !== 'error') return false;
         if (filters.status === 'exception' && !inspectorTransactionHasException(item)) return false;
       }
+      if (!transactionMatchesFunctionCodeFilter(item, filters.fc)) return false;
       const needle = normalizeInspectorHexQuery(filters.hex);
       if (needle && !inspectorTransactionHexHaystack(item).includes(needle)) {
         return false;
@@ -259,10 +327,11 @@
     }
 
     function activeInspectorFilterCount() {
-      const filters = _inspectorFilters || { slave: 'all', status: 'all', hex: '' };
+      const filters = normalizeInspectorFilters(_inspectorFilters);
       let count = 0;
-      if (filters.slave && filters.slave !== 'all') count += 1;
-      if (filters.status && filters.status !== 'all') count += 1;
+      if (filters.slave !== 'all') count += 1;
+      if (filters.status !== 'all') count += 1;
+      if (filters.fc !== 'all') count += 1;
       if (normalizeInspectorHexQuery(filters.hex)) count += 1;
       return count;
     }
@@ -277,43 +346,169 @@
           if (slave != null) slaves.add(String(slave));
         });
       }
+      // A slave selected by a filter or saved view stays selectable even
+      // before that slave shows up in the recent traffic.
+      const filters = normalizeInspectorFilters(_inspectorFilters);
+      if (filters.slave !== 'all') slaves.add(String(filters.slave));
       return [...slaves].sort((a, b) => Number(a) - Number(b));
     }
 
     function setInspectorFilter(key, value) {
-      if (!_inspectorFilters) _inspectorFilters = { slave: 'all', status: 'all', hex: '' };
-      _inspectorFilters[key] = value;
+      _inspectorFilters = normalizeInspectorFilters(_inspectorFilters);
+      _inspectorFilters[key] = key === 'fc' ? normalizeInspectorFunctionCode(value) : value;
+      // Hand-edited filters are no longer the saved view; the edited
+      // filters stay, only the preset selection is dropped.
+      if (_inspectorActivePreset) {
+        _inspectorActivePreset = null;
+        persistInspectorFilterPresets();
+      }
       renderInspectorFilterBar();
       renderInspectorTab();
     }
 
     function clearInspectorFilters() {
-      _inspectorFilters = { slave: 'all', status: 'all', hex: '' };
-      const slave = document.getElementById('inspector-filter-slave');
-      const status = document.getElementById('inspector-filter-status');
-      const hex = document.getElementById('inspector-filter-hex');
-      if (slave) slave.value = 'all';
-      if (status) status.value = 'all';
-      if (hex) hex.value = '';
+      _inspectorFilters = { ...INSPECTOR_DEFAULT_FILTERS };
+      if (_inspectorActivePreset) {
+        _inspectorActivePreset = null;
+        persistInspectorFilterPresets();
+      }
+      syncInspectorFilterControls();
       renderInspectorFilterBar();
       renderInspectorTab();
     }
 
-    function renderInspectorFilterBar() {
-      const filters = _inspectorFilters || { slave: 'all', status: 'all', hex: '' };
+    function syncInspectorFilterControls() {
+      // Push the shared filter state into the static filter controls
+      // (used after presets and clears; typing is never clobbered because
+      // renderInspectorFilterBar skips the focused hex input).
+      const filters = normalizeInspectorFilters(_inspectorFilters);
       const slave = document.getElementById('inspector-filter-slave');
+      const status = document.getElementById('inspector-filter-status');
+      const fc = document.getElementById('inspector-filter-fc');
+      const hex = document.getElementById('inspector-filter-hex');
+      if (slave) slave.value = filters.slave;
+      if (status) status.value = filters.status;
+      if (fc) fc.value = filters.fc;
+      if (hex) hex.value = filters.hex;
+    }
+
+    // ─── v2.7.1: filter saved views (presets) ───────────────────
+
+    function describeInspectorFilters(filters) {
+      const normalized = normalizeInspectorFilters(filters);
+      const parts = [];
+      if (normalized.slave !== 'all') parts.push(`slave ${normalized.slave}`);
+      if (normalized.status !== 'all') parts.push(normalized.status);
+      if (normalized.fc !== 'all') parts.push(normalized.fc === 'exception' ? 'exception FC' : `FC${normalized.fc}`);
+      if (normalizeInspectorHexQuery(normalized.hex)) parts.push(`hex "${normalized.hex.trim()}"`);
+      return parts.length ? parts.join(' · ') : 'no filters';
+    }
+
+    function applyInspectorFilterPreset(name, options = {}) {
+      const preset = (_inspectorFilterPresets || []).find((candidate) => candidate.name === name);
+      if (!preset) {
+        // Blank option (or a preset deleted in another tab): keep the
+        // current filters, just drop the selection.
+        if (_inspectorActivePreset) {
+          _inspectorActivePreset = null;
+          persistInspectorFilterPresets();
+        }
+        renderInspectorPresetBar();
+        return false;
+      }
+      _inspectorFilters = normalizeInspectorFilters(preset.filters);
+      _inspectorActivePreset = preset.name;
+      persistInspectorFilterPresets();
+      syncInspectorFilterControls();
+      renderInspectorFilterBar();
+      renderInspectorTab();
+      if (!options.silent) toast(`Applied view "${preset.name}" — ${describeInspectorFilters(preset.filters)}`, 'inf');
+      return true;
+    }
+
+    function applyStoredInspectorPreset() {
+      // Called when the inspector tab opens: the persisted active view
+      // (if any) is re-applied so it survives page reloads.
+      if (!_inspectorActivePreset) {
+        syncInspectorFilterControls();
+        renderInspectorPresetBar();
+        return false;
+      }
+      return applyInspectorFilterPreset(_inspectorActivePreset, { silent: true });
+    }
+
+    function saveInspectorFilterPreset() {
+      if (!activeInspectorFilterCount()) {
+        toast('Set at least one filter before saving a view', 'err');
+        return;
+      }
+      const suggested = _inspectorActivePreset || describeInspectorFilters(_inspectorFilters);
+      const input = window.prompt('Name for this saved view:', suggested);
+      if (input === null) return;
+      const name = input.trim().slice(0, 48);
+      if (!name) {
+        toast('A saved view needs a name', 'err');
+        return;
+      }
+      const filters = normalizeInspectorFilters(_inspectorFilters);
+      const existing = _inspectorFilterPresets.findIndex((preset) => preset.name === name);
+      if (existing !== -1) {
+        _inspectorFilterPresets[existing] = { name, filters };
+      } else {
+        if (_inspectorFilterPresets.length >= INSPECTOR_MAX_PRESETS) {
+          toast(`At most ${INSPECTOR_MAX_PRESETS} saved views are kept — delete one first`, 'err');
+          return;
+        }
+        _inspectorFilterPresets.push({ name, filters });
+      }
+      _inspectorActivePreset = name;
+      persistInspectorFilterPresets();
+      renderInspectorPresetBar();
+      toast(`${existing !== -1 ? 'Updated' : 'Saved'} view "${name}"`, 'ok');
+    }
+
+    function deleteInspectorFilterPreset() {
+      const name = _inspectorActivePreset;
+      if (!name) return;
+      if (!window.confirm(`Delete the saved view "${name}"?`)) return;
+      _inspectorFilterPresets = _inspectorFilterPresets.filter((preset) => preset.name !== name);
+      _inspectorActivePreset = null;
+      persistInspectorFilterPresets();
+      renderInspectorPresetBar();
+      toast(`Deleted view "${name}"`, 'ok');
+    }
+
+    function renderInspectorPresetBar() {
+      const select = document.getElementById('inspector-filter-preset');
+      const deleteButton = document.getElementById('btn-inspector-delete-preset');
+      if (select) {
+        const presets = _inspectorFilterPresets || [];
+        select.innerHTML = '<option value="">Saved views…</option>' + presets.map((preset) =>
+          `<option value="${escapeHtml(preset.name)}" title="${escapeHtml(describeInspectorFilters(preset.filters))}">${escapeHtml(preset.name)}</option>`).join('');
+        select.value = _inspectorActivePreset && presets.some((preset) => preset.name === _inspectorActivePreset)
+          ? _inspectorActivePreset
+          : '';
+      }
+      if (deleteButton) deleteButton.hidden = !_inspectorActivePreset;
+    }
+
+    function renderInspectorFilterBar() {
+      const filters = normalizeInspectorFilters(_inspectorFilters);
+      const slave = document.getElementById('inspector-filter-slave');
+      const status = document.getElementById('inspector-filter-status');
+      const fc = document.getElementById('inspector-filter-fc');
       const hex = document.getElementById('inspector-filter-hex');
       const clear = document.getElementById('btn-inspector-clear-filters');
       const count = document.getElementById('inspector-filter-count');
       if (slave) {
         const options = inspectorSlaveOptions();
-        const current = options.includes(String(filters.slave)) ? String(filters.slave) : 'all';
         // Rebuild options without losing focus/selection on the other controls.
         slave.innerHTML = '<option value="all">all</option>' + options.map((s) =>
           `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
-        slave.value = current;
-        if (current !== String(filters.slave)) filters.slave = current;
+        slave.value = filters.slave;
       }
+      if (status && status.value !== filters.status) status.value = filters.status;
+      if (fc && fc.value !== filters.fc) fc.value = filters.fc;
       // Never clobber the hex input while the user is typing in it.
       if (hex && document.activeElement !== hex && hex.value !== filters.hex) {
         hex.value = filters.hex;
@@ -324,6 +519,7 @@
         const shown = getFilteredTransactionIndices().length;
         count.textContent = activeInspectorFilterCount() ? `${shown} / ${total}` : '';
       }
+      renderInspectorPresetBar();
     }
 
     // ─── Rendering ───────────────────────────────────────────────
@@ -344,11 +540,13 @@
         const tone = info.errors ? 'amber' : 'blue';
         return `<span class="badge badge-${tone}" title="Average ${formatMs(info.avg_ms)} · max ${formatMs(info.max_ms)}">Slave ${escapeHtml(slave)}: ${info.count} txn · avg ${formatMs(info.avg_ms)}</span>`;
       }).join('');
+      const coverage = captureCoverageStat(view);
 
       statsBar.innerHTML = `
         <div class="stat-card"><div class="stat-num" style="color:#60a5fa;">${stats.total ?? 0}</div><div class="stat-label">Transactions</div></div>
         <div class="stat-card"><div class="stat-num" style="color:${stats.errors ? '#f87171' : '#34d399'};">${stats.errors ?? 0}</div><div class="stat-label">Errors</div></div>
         <div class="stat-card"><div class="stat-num" style="color:#2dd4bf;">${stats.responses ?? 0}</div><div class="stat-label">RX captured</div></div>
+        <div class="stat-card" title="${escapeHtml(coverage.title)}"><div class="stat-num" style="color:${coverage.color};">${escapeHtml(coverage.text)}</div><div class="stat-label">Capture coverage</div></div>
         <div class="stat-card"><div class="stat-num" style="color:#38bdf8;">${formatMs(stats.avg_ms)}</div><div class="stat-label">Avg duration</div></div>
         <div class="stat-card"><div class="stat-num" style="color:#fbbf24;">${formatMs(stats.p95_ms)}</div><div class="stat-label">p95 duration</div></div>
         <div class="stat-card"><div class="stat-num" style="color:#c084fc;">${formatMs(stats.max_ms)}</div><div class="stat-label">Slowest</div></div>
@@ -364,7 +562,7 @@
       // transactions render, but the selection indexes the full list.
       const indices = getFilteredTransactionIndices();
       if (!indices.length) {
-        list.innerHTML = '<div class="empty-box"><div class="empty-icon">🔍</div><h3>No transactions match the filters</h3><p>Adjust the slave, status, or hex filter above — or clear it to see the whole stream again.</p></div>';
+        list.innerHTML = '<div class="empty-box"><div class="empty-icon">🔍</div><h3>No transactions match the filters</h3><p>Adjust the slave, status, function code, or hex filter above — or clear it to see the whole stream again.</p></div>';
         renderInspectorDetail();
         return;
       }
@@ -402,6 +600,94 @@
       renderInspectorTab();
     }
 
+    // ─── v2.7.1: capture coverage stat ──────────────────────────
+    function inspectorCaptureCoverage(stats) {
+      // Fraction (0–1) of transactions whose RX bytes were captured. Derived
+      // live from the running counters so streamed pushes keep it current;
+      // the server's capture_coverage is the fallback for canned views.
+      if (!stats) return null;
+      const total = Number(stats.total);
+      if (Number.isFinite(total) && total > 0) {
+        const responses = Number(stats.responses) || 0;
+        return Math.min(1, Math.max(0, responses / total));
+      }
+      return typeof stats.capture_coverage === 'number' ? stats.capture_coverage : null;
+    }
+
+    function captureCoverageStat(view) {
+      const stats = (view && view.stats) || {};
+      if (view && view.capture && view.capture.supported === false) {
+        return { text: 'n/a', color: '#94a3b8', title: 'Raw response capture is unavailable on this pymodbus release (no tracing hook).' };
+      }
+      const coverage = inspectorCaptureCoverage(stats);
+      if (coverage === null) {
+        return { text: '—', color: '#94a3b8', title: 'No transactions recorded yet.' };
+      }
+      const percent = Math.round(coverage * 100);
+      const color = coverage >= 0.9 ? '#34d399' : coverage >= 0.5 ? '#fbbf24' : '#f87171';
+      return {
+        text: `${percent}%`,
+        color,
+        title: `${stats.responses ?? 0} of ${stats.total ?? 0} transactions have their RX bytes captured from the wire.`,
+      };
+    }
+
+    // ─── v2.7.1: RX inter-frame gap mini waterfall ───────────────
+    function responseFrameTimings(frames, transaction) {
+      // Per-frame arrival offsets (ms since the request window opened) and
+      // the gap since the previous frame; taken from the decoded frames
+      // (inspector.py attaches arrival_ms/gap_ms) or, for pre-parsed views,
+      // recomputed from transaction.response_frame_times_ms.
+      const fallback = Array.isArray(transaction?.response_frame_times_ms)
+        && transaction.response_frame_times_ms.length === frames.length
+        ? transaction.response_frame_times_ms
+        : null;
+      let previous = 0;
+      const timings = frames.map((frame, index) => {
+        let arrival = frame && typeof frame.arrival_ms === 'number' ? frame.arrival_ms : null;
+        if (arrival === null && fallback && typeof fallback[index] === 'number') arrival = fallback[index];
+        if (arrival === null) return null;
+        const gap = frame && typeof frame.gap_ms === 'number' ? frame.gap_ms : Math.max(0, arrival - previous);
+        previous = arrival;
+        return { arrival, gap };
+      });
+      return timings.every((timing) => timing !== null) ? timings : null;
+    }
+
+    function rxFrameWaterfall(frames, transaction) {
+      const timings = responseFrameTimings(frames, transaction);
+      if (!timings) {
+        return '<div class="text-sm" style="color:var(--text-dim);">No per-frame arrival times recorded for this transaction (captured before v2.7.1).</div>';
+      }
+      const lastArrival = timings[timings.length - 1].arrival;
+      const total = Math.max(
+        lastArrival,
+        typeof transaction?.duration_ms === 'number' ? transaction.duration_ms : 0,
+        0.001,
+      );
+      const rows = timings.map((timing, index) => {
+        const start = Math.max(0, timing.arrival - timing.gap);
+        const left = (start / total) * 100;
+        const width = Math.max(1.2, (timing.gap / total) * 100);
+        const frame = frames[index] || {};
+        const label = index === 0 ? 'after request' : `after #${index}`;
+        const exc = frame.frame_kind === 'exception_response' ? ' rx-waterfall-bar-exc' : '';
+        return `<div class="waterfall-row rx-waterfall-row" title="Frame #${index + 1} arrived ${formatMs(timing.arrival)} after the request window opened (${formatMs(timing.gap)} ${label})">
+          <span class="waterfall-label mono">#${index + 1} <span class="rx-waterfall-gap-label">${escapeHtml(label)}</span></span>
+          <span class="waterfall-track"><span class="waterfall-bar rx-waterfall-bar${exc}" style="left:${left.toFixed(2)}%; width:${Math.min(width, 100 - left).toFixed(2)}%;"></span><span class="rx-waterfall-tick" style="left:${((timing.arrival / total) * 100).toFixed(2)}%;"></span></span>
+          <span class="waterfall-value mono">+${formatMs(timing.gap)}</span>
+        </div>`;
+      }).join('');
+      return `<div class="rx-waterfall">
+        ${rows}
+        <div class="waterfall-row waterfall-total rx-waterfall-row">
+          <span class="waterfall-label">Last frame at</span>
+          <span class="waterfall-track"><span class="waterfall-bar waterfall-bar-total" style="width:${((lastArrival / total) * 100).toFixed(2)}%;"></span></span>
+          <span class="waterfall-value mono badge-${durationTone(lastArrival)}">${formatMs(lastArrival)}</span>
+        </div>
+      </div>`;
+    }
+
     function frameFieldChips(frame) {
       const chips = [];
       const add = (label, value, tone = 'slate') => {
@@ -422,6 +708,10 @@
       if (frame.data_hex) add('Data payload', frame.data_hex, 'green');
       if (Array.isArray(frame.values) && frame.values.length && frame.values.length <= 16) {
         add('Decoded', frame.values.join(', '), 'green');
+      }
+      if (typeof frame.arrival_ms === 'number') {
+        // v2.7.1: arrival offset of a captured RX frame since the request.
+        add('Arrival', `t+${formatMs(frame.arrival_ms)}`, 'slate');
       }
       return chips;
     }
@@ -484,18 +774,26 @@
       </div>`;
     }
 
-    function multiFrameResponseSection(frames) {
+    function multiFrameResponseSection(frames, transaction) {
       // v2.7.0: a full raw RX stream (batch reads, block readers, exception
       // plus follow-up) renders as a list of decoded frames instead of only
-      // the last pair.
+      // the last pair. v2.7.1: the per-frame arrival times render as a mini
+      // waterfall of inter-frame gaps above the list, and each frame shows
+      // its arrival offset.
+      const timings = responseFrameTimings(frames, transaction) || [];
       return `<div class="inspector-detail-section">
         <div class="card-title" style="margin-bottom:0.5rem;">Response frames (RX) — ${frames.length} frames</div>
+        <div class="rx-waterfall-card">
+          <div class="rx-waterfall-title">Inter-frame gaps</div>
+          ${rxFrameWaterfall(frames, transaction)}
+        </div>
         <div class="inspector-frame-list">
           ${frames.map((frame, index) => `
             <div class="inspector-frame-item">
               <div class="inspector-frame-item-head">
                 <span class="inspector-frame-item-index mono">#${index + 1}</span>
                 <span class="inspector-frame-item-summary mono">${escapeHtml(frame.summary || frame.raw_hex || 'unparsed frame')}</span>
+                ${timings[index] ? `<span class="badge badge-slate mono" title="Arrival ${formatMs(timings[index].arrival)} after the request window opened">t+${formatMs(timings[index].arrival)}</span>` : ''}
                 ${frame.frame_kind === 'exception_response' ? '<span class="badge badge-red">EXC</span>' : ''}
               </div>
               <div class="frame-hex mono">${escapeHtml(frame.raw_hex || 'no frame recorded')}</div>
@@ -544,7 +842,7 @@
         </div>
         ${frameAnalyzerSection('Request frame (TX)', frame, requestFallback)}
         ${responseFrames.length > 1
-          ? multiFrameResponseSection(responseFrames)
+          ? multiFrameResponseSection(responseFrames, transaction)
           : frameAnalyzerSection('Response frame (RX)', responseFrame, responseFallback)}
         <div class="inspector-detail-section">
           <div class="card-title" style="margin-bottom:0.5rem;">Latency waterfall</div>

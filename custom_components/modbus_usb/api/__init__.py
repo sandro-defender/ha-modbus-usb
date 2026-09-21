@@ -30,7 +30,13 @@ from .diagnostics import (
     ws_verify_device_reads,
 )
 from .entities import ws_delete_entity, ws_save_entity
-from .hub import ws_get_data, ws_get_serial_status, ws_save_hub, ws_scan_usb_ports
+from .hub import (
+    ws_get_data,
+    ws_get_serial_status,
+    ws_save_hub,
+    ws_scan_usb_ports,
+    ws_test_hub_connection,
+)
 from .templates import (
     ws_apply_template,
     ws_delete_template,
@@ -55,6 +61,7 @@ async def async_register_api(hass: HomeAssistant) -> None:
 
     # Register WebSocket handlers
     websocket_api.async_register_command(hass, ws_get_data)
+    websocket_api.async_register_command(hass, ws_test_hub_connection)
     websocket_api.async_register_command(hass, ws_diagnostic_read)
     websocket_api.async_register_command(hass, ws_diagnostic_write)
     websocket_api.async_register_command(hass, ws_manual_hex_write)

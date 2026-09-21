@@ -27,7 +27,11 @@ from ..const import (
     DATA_PRESERVE_SERIAL_RELOAD,
     DOMAIN,
 )
-from ..designer import async_validate_template_design, load_template_draft
+from ..designer import (
+    TemplateDraftError,
+    async_validate_template_design,
+    load_template_draft,
+)
 from ..templates import (
     async_delete_template,
     async_load_templates,
@@ -88,8 +92,16 @@ async def ws_designer_validate(
     except ValueError as err:
         # Structural validation failures are expected user input errors; the
         # designer renders them inline rather than treating them as crashes.
+        # v2.7.1: TemplateDraftError carries the draft line/column/key path
+        # (error_line / error_column / error_path) for gutter highlighting.
         connection.send_result(
-            msg["id"], {"valid": False, "error": str(err), "entities": []}
+            msg["id"],
+            {
+                "valid": False,
+                "error": str(err),
+                "entities": [],
+                **(err.as_dict() if isinstance(err, TemplateDraftError) else {}),
+            },
         )
     except Exception as err:
         _LOGGER.error("ws_designer_validate failed: %s", err, exc_info=True)

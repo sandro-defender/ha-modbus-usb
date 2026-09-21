@@ -222,3 +222,141 @@ def test_panel_wires_designer_template_import() -> None:
     assert "designer-filename" in designer_js
     # The option list is refreshed whenever templates are reloaded.
     assert "renderDesignerImportOptions()" in core_js
+
+
+# ───────────── v2.7.1: FC filter, saved views, RX waterfall, designer errors ─────────────
+
+
+def test_panel_wires_inspector_function_code_filter() -> None:
+    html = _html()
+    inspector_js = _panel_script("inspector.js")
+    state_js = _panel_script("state.js")
+
+    assert 'id="inspector-filter-fc"' in html, "missing function-code filter select"
+    assert "setInspectorFilter('fc', this.value)" in html
+    # FC01–FC10 plus the exception pseudo-code are selectable.
+    for code in ("01", "02", "03", "04", "05", "06", "0F", "10"):
+        assert f'<option value="{code}">FC{code}' in html, f"missing FC{code} option"
+    assert '<option value="exception">' in html
+    # The default filter state carries the new dimension.
+    assert re.search(r"INSPECTOR_DEFAULT_FILTERS\s*=[^{]*\{[^}]*fc:\s*'all'", state_js)
+    for function in (
+        "INSPECTOR_FUNCTION_CODES",
+        "normalizeInspectorFunctionCode",
+        "inspectorTransactionFunctionCodes",
+        "transactionMatchesFunctionCodeFilter",
+        "inspectorTransactionHasException",
+    ):
+        assert function in inspector_js, f"missing FC filter function {function}"
+    # Exception frames match through their base function code as well.
+    assert "base_function_code" in inspector_js
+
+
+def test_panel_wires_inspector_saved_views() -> None:
+    html = _html()
+    inspector_js = _panel_script("inspector.js")
+    state_js = _panel_script("state.js")
+    core_js = _panel_script("core.js")
+
+    assert 'id="inspector-presets"' in html, "missing saved-views bar"
+    assert 'id="inspector-filter-preset"' in html, "missing preset select"
+    assert 'id="btn-inspector-save-preset"' in html, "missing save-view button"
+    assert 'id="btn-inspector-delete-preset"' in html, "missing delete-view button"
+    assert "applyInspectorFilterPreset(this.value)" in html
+    assert "saveInspectorFilterPreset()" in html
+    assert "deleteInspectorFilterPreset()" in html
+
+    # Presets persist in localStorage via state.js.
+    assert (
+        "INSPECTOR_PRESETS_STORAGE_KEY = 'modbus_usb_inspector_filter_presets'"
+        in state_js
+    )
+    assert (
+        "INSPECTOR_ACTIVE_PRESET_STORAGE_KEY = 'modbus_usb_inspector_active_preset'"
+        in state_js
+    )
+    assert "INSPECTOR_MAX_PRESETS" in state_js
+    assert "_inspectorFilterPresets" in state_js
+    assert "_inspectorActivePreset" in state_js
+    assert "function persistInspectorFilterPresets" in state_js
+    assert "localStorage.setItem(INSPECTOR_PRESETS_STORAGE_KEY" in state_js
+
+    for function in (
+        "applyInspectorFilterPreset",
+        "applyStoredInspectorPreset",
+        "saveInspectorFilterPreset",
+        "deleteInspectorFilterPreset",
+        "renderInspectorPresetBar",
+        "syncInspectorFilterControls",
+    ):
+        assert function in inspector_js, f"missing preset function {function}"
+    assert "persistInspectorFilterPresets()" in inspector_js
+    # The stored view is applied when the inspector tab opens.
+    assert re.search(
+        r"tabName === 'inspector'[\s\S]{0,400}applyStoredInspectorPreset\(\)", core_js
+    ), "switchTab('inspector') must apply the stored preset"
+
+
+def test_panel_renders_rx_frame_waterfall_and_coverage() -> None:
+    inspector_js = _panel_script("inspector.js")
+    core_js = _panel_script("core.js")
+    css = _panel_script("panel.css")
+
+    for function in (
+        "responseFrameTimings",
+        "rxFrameWaterfall",
+        "captureCoverageStat",
+        "inspectorCaptureCoverage",
+    ):
+        assert function in inspector_js, f"missing inspector function {function}"
+    assert "Inter-frame gaps" in inspector_js
+    assert "Capture coverage" in inspector_js
+    # Timing comes from the decoded frames (arrival_ms/gap_ms) with a
+    # fallback to the raw per-transaction list.
+    assert "arrival_ms" in inspector_js
+    assert "gap_ms" in inspector_js
+    assert "response_frame_times_ms" in inspector_js
+    assert "capture_coverage" in inspector_js
+    # The standalone mock ships timing so the waterfall renders offline.
+    assert "response_frame_times_ms" in core_js
+    assert "capture_coverage" in core_js
+    for selector in (".rx-waterfall-card", ".rx-waterfall-bar", ".rx-waterfall-tick"):
+        assert selector in css, f"missing waterfall style {selector}"
+
+
+def test_panel_wires_designer_error_highlighting_and_export() -> None:
+    html = _html()
+    designer_js = _panel_script("designer.js")
+    core_js = _panel_script("core.js")
+    css = _panel_script("panel.css")
+
+    assert 'id="btn-designer-export"' in html, "missing export-draft button"
+    assert "exportDesignerDraft()" in html
+
+    for function in (
+        "setDesignerErrorLine",
+        "focusDesignerLine",
+        "designerLineRange",
+        "designerStructuralErrorBox",
+        "designerDraftFilename",
+        "exportDesignerDraft",
+    ):
+        assert function in designer_js, f"missing designer function {function}"
+    # Structural error location from designer_validate drives the gutter.
+    assert "error_line" in designer_js
+    assert "error_column" in designer_js
+    assert "error_path" in designer_js
+    assert "designer-gutter-line-error" in designer_js
+    assert (
+        "setDesignerErrorLine(_designerResult?.valid ? null : _designerResult?.error_line)"
+        in designer_js
+    )
+    # Export is a client-side blob download of the editor content.
+    assert "new Blob(" in designer_js
+    assert "text/yaml" in designer_js
+    assert "URL.createObjectURL" in designer_js
+    assert "URL.revokeObjectURL" in designer_js
+    # The standalone mock returns a located error for the preview.
+    assert "error_line" in core_js
+    for selector in (".designer-gutter-line-error", ".designer-error-location"):
+        assert selector in css, f"missing designer style {selector}"

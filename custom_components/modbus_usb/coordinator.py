@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import struct
 import threading
 import time
@@ -25,6 +26,7 @@ from .bus import call_modbus_on_client
 from .capture import ResponseCapture, install_response_capture
 from .circuit_breaker import SlaveCircuitBreaker
 from .const import (
+    CONF_ADAPTER_IDENTITY,
     CONF_ADDRESS,
     CONF_ASSUMED_STATE,
     CONF_BAUDRATE,
@@ -60,6 +62,20 @@ from .const import (
 from .decoding import as_float, decode_words
 from .diagnostics import diagnostic_request_frame, modbus_crc16
 from .optimizer import group_entities_into_blocks
+from .serial_watch import (
+    RESOLVED_CONFIGURED,
+    AdapterIdentity,
+    BackoffSchedule,
+    PortResolution,
+    classify_port_error,
+    find_port_holders,
+    identity_from_port,
+    is_adapter_gone_error,
+    list_port_records,
+    redact_serial_number,
+    resolve_port_path,
+    stable_by_id_path,
+)
 from .transport import (
     build_client,
     connection_error_message,
@@ -162,6 +178,23 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         self._boost_original_interval: timedelta | None = None
         self._boost_interval: timedelta | None = None
         self._boost_until: datetime | None = None
+        # v2.9.0: USB adapter hot-plug watch (serial transport only).
+        # state: "ok" | "adapter_lost" | "reconnecting"
+        self._adapter_state = "ok"
+        self._adapter_lost_since: float | None = None
+        self._adapter_reconnect_attempts = 0
+        self._adapter_next_retry_at: float | None = None
+        self._adapter_resolved_from = RESOLVED_CONFIGURED
+        self._adapter_last_error: str | None = None
+        self._adapter_recovery_task: asyncio.Task | None = None
+        self._adapter_backoff = BackoffSchedule()
+        self._adapter_identity: dict[str, Any] | None = None
+        # Port-open failure tracking (repair issues; v2.9.0).
+        self._port_busy_since: float | None = None
+        self._repair_issue_tasks: dict[str, asyncio.Task] = {}
+        # Total successful (re)connects of the hub client — feeds the
+        # hub reconnects sensor (total_increasing).
+        self.reconnect_count = 0
 
     def get_command_state(self, entity_id: str) -> bool | None:
         """Return the last known state when a board read is temporarily unavailable."""
@@ -366,42 +399,72 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             pass  # loop already closed during shutdown
 
     def _resolve_port_path(self, port: str) -> str:
-        """Detect when /dev/ttyUSB* dynamically switches index or has a persistent /dev/serial/by-id link."""
-        import os
+        """Resolve the adapter's current port (v2.9.0: identity-aware).
 
+        Delegates to the pure ``serial_watch.resolve_port_path``: configured
+        path → its /dev/serial/by-id link → learned USB identity → the only
+        ttyUSB/ttyACM present. Returns the input unchanged when nothing
+        better is found (the caller keeps retrying the configured path).
+        """
         if not port or not isinstance(port, str):
             return port
-        if port.startswith("/dev/serial/by-id/") and os.path.exists(port):
-            return port
-        by_id_dir = "/dev/serial/by-id"
-        if os.path.isdir(by_id_dir):
-            if os.path.exists(port):
-                real_target = os.path.realpath(port)
-                for name in sorted(os.listdir(by_id_dir)):
-                    link_path = os.path.join(by_id_dir, name)
-                    try:
-                        if os.path.realpath(link_path) == real_target:
-                            return link_path
-                    except OSError:
-                        continue
-                return port
-            for name in sorted(os.listdir(by_id_dir)):
-                link_path = os.path.join(by_id_dir, name)
-                try:
-                    real_target = os.path.realpath(link_path)
-                    if os.path.exists(real_target) and (
-                        "ttyUSB" in real_target or "ttyACM" in real_target
-                    ):
-                        return link_path
-                except OSError:
-                    continue
-        return port
+        resolution = self._resolve_adapter_port(port)
+        return resolution.path or port
+
+    def note_adapter_identity(self, data: dict[str, Any] | None) -> None:
+        """Adopt the adapter identity stored in ``entry.data`` (if any)."""
+        self._ensure_adapter_watch_attrs()
+        identity = AdapterIdentity.from_dict(data) if isinstance(data, dict) else None
+        self._adapter_identity = identity.as_dict() if identity else None
+
+    def _stored_adapter_identity(self) -> dict[str, Any] | None:
+        """Learned USB identity: in-memory cache, else the entry."""
+        self._ensure_adapter_watch_attrs()
+        if self._adapter_identity is not None:
+            return self._adapter_identity
+        hass = getattr(self, "hass", None)
+        if hass is None or not hasattr(hass, "config_entries"):
+            return None
+        try:
+            entry = hass.config_entries.async_get_entry(self.entry_id)
+        except Exception:
+            return None
+        if entry is None:
+            return None
+        data = (entry.data or {}).get(CONF_ADAPTER_IDENTITY)
+        identity = AdapterIdentity.from_dict(data) if isinstance(data, dict) else None
+        return identity.as_dict() if identity else None
+
+    def _resolve_adapter_port(self, configured: str | None = None) -> PortResolution:
+        """Full adapter re-discovery (serial transport only)."""
+        port = configured
+        if port is None:
+            port = (
+                (self.serial_config or {}).get(CONF_PORT)
+                or getattr(self.client, "port", "")
+                or ""
+            )
+        return resolve_port_path(
+            str(port or ""),
+            list_port_records(),
+            AdapterIdentity.from_dict(self._stored_adapter_identity()),
+        )
 
     def _ensure_connected(self) -> None:
         """Open the serial adapter or raise a useful error before a request."""
         if self.client.connected:
             return
         if not self._connect_with_retries():
+            if (
+                is_serial(getattr(self, "serial_config", None))
+                and self._adapter_state == "adapter_lost"
+            ):
+                wait = max(0.0, (self._adapter_next_retry_at or 0) - time.monotonic())
+                raise UpdateFailed(
+                    "USB adapter not found — entities stay unavailable until it "
+                    f"reappears (next check in {wait:.0f} s; "
+                    f"last error: {self._adapter_last_error})"
+                )
             raise UpdateFailed(
                 connection_error_message(getattr(self, "serial_config", None))
             )
@@ -416,27 +479,479 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         # (USB adapters only — ESPHome transports address a network host).
         serial_cfg = getattr(self, "serial_config", None)
         if is_serial(serial_cfg):
+            self._ensure_adapter_watch_attrs()
+            if self._adapter_state == "adapter_lost":
+                # The recovery task owns re-discovery while the adapter is
+                # known to be gone; fail fast instead of hammering retries.
+                return False
             current_port = getattr(self.client, "port", None) or (
                 serial_cfg.get(CONF_PORT) if serial_cfg else None
             )
-            resolved = self._resolve_port_path(str(current_port or ""))
-            if resolved and resolved != getattr(self.client, "port", None):
-                self.client.port = resolved
+            resolution = self._resolve_adapter_port(str(current_port or ""))
+            if resolution.path and resolution.path != getattr(
+                self.client, "port", None
+            ):
+                self.client.port = resolution.path
                 if serial_cfg is not None:
-                    serial_cfg[CONF_PORT] = resolved
+                    serial_cfg[CONF_PORT] = resolution.path
+            self._adapter_resolved_from = resolution.source
 
+        last_error: Exception | None = None
         for attempt in range(attempts):
             try:
                 if self.client.connect():
+                    self._note_successful_connect()
                     return True
-            except Exception:
-                pass
+            except Exception as err:
+                last_error = err
+                if is_serial(serial_cfg) and is_adapter_gone_error(err):
+                    # The adapter disappeared mid-flight: stop retrying
+                    # here and hand over to the backoff recovery loop.
+                    self._enter_adapter_lost(err)
+                    return False
             if attempt < attempts - 1:
                 # Exponential backoff with random jitter
                 backoff = min(max_delay, base_delay * (2**attempt))
                 jitter = random.uniform(0, 0.25 * backoff)
                 sleep(backoff + jitter)
+        if is_serial(serial_cfg) and last_error is not None:
+            self._note_connect_failure(last_error)
         return False
+
+    # ───────────── v2.9.0: USB adapter hot-plug watch ─────────────
+
+    def _ensure_adapter_watch_attrs(self) -> None:
+        """Lazily initialize adapter-watch state.
+
+        Test helpers build coordinators with ``object.__new__`` and skip
+        ``__init__``; lazy creation keeps those minimal instances working
+        (same pattern as ``_get_tx_stages``).
+        """
+        if hasattr(self, "_adapter_state"):
+            return
+        self._adapter_state = "ok"
+        self._adapter_lost_since = None
+        self._adapter_reconnect_attempts = 0
+        self._adapter_next_retry_at = None
+        self._adapter_resolved_from = RESOLVED_CONFIGURED
+        self._adapter_last_error = None
+        self._adapter_recovery_task = None
+        self._adapter_backoff = BackoffSchedule()
+        self._adapter_identity = None
+        self._port_busy_since = None
+        self._repair_issue_tasks = {}
+        self.reconnect_count = 0
+
+    def _enter_adapter_lost(self, error: BaseException | str) -> None:
+        """Enter the explicit adapter_lost state (serial transport only).
+
+        Closes the dead client, keeps all child entities unavailable
+        (polling now fails fast), and starts the backoff re-discovery.
+        """
+        self._ensure_adapter_watch_attrs()
+        if not is_serial(getattr(self, "serial_config", None)):
+            return
+        if self._adapter_state == "adapter_lost":
+            self._adapter_last_error = str(error)
+            return
+        now = time.monotonic()
+        self._adapter_state = "adapter_lost"
+        self._adapter_lost_since = now
+        self._adapter_reconnect_attempts = 0
+        self._adapter_next_retry_at = now + self._adapter_backoff.delay_for_attempt(0)
+        self._adapter_last_error = str(error)
+        try:
+            self.client.close()
+        except Exception:  # pragma: no cover - closing a dead client
+            pass
+        _LOGGER.warning(
+            "USB adapter lost on %s (%s); backing off until it reappears "
+            "(next check in %.0f s)",
+            (self.serial_config or {}).get(CONF_PORT),
+            error,
+            self._adapter_backoff.delay_for_attempt(0),
+        )
+        self._schedule_repair_issue("adapter_lost")
+        self._start_adapter_recovery()
+
+    def _start_adapter_recovery(self) -> None:
+        """Schedule the backoff re-discovery loop on the HA event loop."""
+        self._ensure_adapter_watch_attrs()
+        hass = getattr(self, "hass", None)
+        loop = getattr(hass, "loop", None) if hass is not None else None
+        if loop is None:
+            return
+        if (
+            self._adapter_recovery_task is not None
+            and not self._adapter_recovery_task.done()
+        ):
+            return
+
+        def _spawn() -> None:
+            self._adapter_recovery_task = asyncio.ensure_future(
+                self._adapter_recovery_loop()
+            )
+
+        try:
+            loop.call_soon_threadsafe(_spawn)
+        except RuntimeError:  # event loop already closed (shutdown)
+            pass
+
+    async def _adapter_recovery_loop(self) -> None:
+        """Re-poll for the adapter with exponential backoff until it returns.
+
+        On success the client is reopened on the (possibly new) port and
+        polling resumes; the backoff resets. Ambiguous re-discovery (several
+        matching adapters) stays in adapter_lost and says so in the log.
+        """
+        self._ensure_adapter_watch_attrs()
+        while self._adapter_state == "adapter_lost":
+            delay = (self._adapter_next_retry_at or time.monotonic()) - time.monotonic()
+            if delay > 0:
+                await asyncio.sleep(delay)
+            if self._adapter_state != "adapter_lost":
+                return
+            resolution = self._resolve_adapter_port()
+            if not resolution.found:
+                self._bump_adapter_retry(resolution)
+                continue
+            self._adapter_state = "reconnecting"
+            try:
+                self.client.port = resolution.path
+                hass = getattr(self, "hass", None)
+                if hass is not None and hasattr(hass, "async_add_executor_job"):
+                    ok = await hass.async_add_executor_job(self._connect_adapter_once)
+                else:
+                    ok = self._connect_adapter_once()
+            except Exception as err:  # client without a port attribute, etc.
+                ok = False
+                self._adapter_last_error = str(err)
+            if ok:
+                self._note_successful_connect()
+                self._note_adapter_recovered(resolution)
+                return
+            self._bump_adapter_retry(resolution)
+
+    def _connect_adapter_once(self) -> bool:
+        """One connection attempt on the recovery path (no inner backoff)."""
+        try:
+            if self.client.connect():
+                return True
+        except Exception as err:
+            self._adapter_last_error = str(err)
+        return False
+
+    def _bump_adapter_retry(self, resolution: PortResolution) -> None:
+        """Count a failed re-discovery check and schedule the next one."""
+        self._ensure_adapter_watch_attrs()
+        if resolution.ambiguous:
+            _LOGGER.warning(
+                "USB adapter re-discovery is ambiguous (%s) — staying in "
+                "adapter_lost without guessing. Save a /dev/serial/by-id "
+                "path in Hub & Serial to disambiguate.",
+                ", ".join(resolution.candidates),
+            )
+        else:
+            _LOGGER.debug(
+                "USB adapter not found yet (attempt %s)",
+                self._adapter_reconnect_attempts + 1,
+            )
+        self._adapter_reconnect_attempts += 1
+        self._adapter_state = "adapter_lost"
+        self._adapter_next_retry_at = (
+            time.monotonic()
+            + self._adapter_backoff.delay_for_attempt(self._adapter_reconnect_attempts)
+        )
+
+    def _note_adapter_recovered(self, resolution: PortResolution) -> None:
+        """The adapter is back: reset the watch and resume polling."""
+        self._ensure_adapter_watch_attrs()
+        self._adapter_state = "ok"
+        self._adapter_resolved_from = resolution.source
+        self._adapter_reconnect_attempts = 0
+        self._adapter_next_retry_at = None
+        self._adapter_lost_since = None
+        self._port_busy_since = None
+        self._learn_adapter_identity(resolution)
+        self._clear_repair_issues()
+        _LOGGER.info(
+            "USB adapter recovered on %s (resolved from %s); resuming polling",
+            resolution.path,
+            resolution.source,
+        )
+        hass = getattr(self, "hass", None)
+        if hass is not None and hasattr(hass, "async_create_task"):
+            hass.async_create_task(self.async_request_refresh())
+
+    def learn_current_identity(self) -> None:
+        """Public: learn the identity of the adapter we are currently on.
+
+        Called from the setup path (via an executor job) right after the
+        initial connect so the identity exists before the first hot-plug.
+        """
+        self._learn_adapter_identity(
+            PortResolution(
+                str(getattr(self.client, "port", "") or ""),
+                RESOLVED_CONFIGURED,
+            )
+        )
+
+    def _learn_adapter_identity(self, resolution: PortResolution) -> None:
+        """Learn/refresh the USB identity of the adapter we just opened."""
+        self._ensure_adapter_watch_attrs()
+        if not is_serial(getattr(self, "serial_config", None)):
+            return
+        if resolution.path is None:
+            return
+        try:
+            ports = list_port_records()
+        except Exception:
+            return
+        record = next(
+            (
+                item
+                for item in ports
+                if item.get("port") == resolution.path
+                or item.get("persistent_path") == resolution.path
+            ),
+            None,
+        )
+        identity = identity_from_port(record)
+        if identity is None:
+            return
+        data = identity.as_dict()
+        if (self._adapter_identity or {}) == data:
+            return
+        self._adapter_identity = data
+        self._persist_adapter_identity(data)
+
+    def _persist_adapter_identity(self, data: dict[str, Any]) -> None:
+        """Store the learned identity in entry.data (on the event loop)."""
+        hass = getattr(self, "hass", None)
+        if hass is None or not hasattr(hass, "config_entries"):
+            return
+        loop = getattr(hass, "loop", None)
+
+        def _save() -> None:
+            try:
+                entry = hass.config_entries.async_get_entry(self.entry_id)
+                if (
+                    entry is None
+                    or dict(entry.data or {}).get(CONF_ADAPTER_IDENTITY) == data
+                ):
+                    return
+                new_data = dict(entry.data or {})
+                new_data[CONF_ADAPTER_IDENTITY] = data
+                hass.config_entries.async_update_entry(entry, data=new_data)
+            except Exception as err:
+                _LOGGER.debug("Could not persist adapter identity: %s", err)
+
+        try:
+            if loop is not None:
+                loop.call_soon_threadsafe(_save)
+            else:
+                _save()
+        except RuntimeError:
+            pass
+
+    def _note_successful_connect(self) -> None:
+        """Book-keeping for a successful (re)open of the hub client."""
+        self._ensure_adapter_watch_attrs()
+        self.reconnect_count += 1
+        if self._adapter_state in ("adapter_lost", "reconnecting"):
+            self._adapter_state = "ok"
+            self._adapter_lost_since = None
+            self._adapter_reconnect_attempts = 0
+            self._adapter_next_retry_at = None
+            self._clear_repair_issues()
+        self._port_busy_since = None
+        if is_serial(getattr(self, "serial_config", None)):
+            self._learn_adapter_identity(
+                PortResolution(
+                    str(getattr(self.client, "port", "") or ""),
+                    RESOLVED_CONFIGURED,
+                )
+            )
+
+    def _note_connect_failure(self, error: BaseException) -> None:
+        """Track persistent port-open failures (repair issues; v2.9.0)."""
+        self._ensure_adapter_watch_attrs()
+        path = str(
+            (self.serial_config or {}).get(CONF_PORT)
+            or getattr(self.client, "port", "")
+            or ""
+        )
+        reason, _hint = classify_port_error(
+            error, path=path, path_exists=os.path.exists(path)
+        )
+        if reason == "busy":
+            if self._port_busy_since is None:
+                self._port_busy_since = time.monotonic()
+                _LOGGER.warning(
+                    "Serial port %s is busy (held open by another program); "
+                    "a repair issue is raised if it persists",
+                    path,
+                )
+                self._schedule_repair_issue("serial_port_busy")
+        elif self._port_busy_since is not None and reason in ("ok", "missing"):
+            self._port_busy_since = None
+            self._clear_repair_issue("serial_port_busy")
+
+    # ── v2.9.0: repair issues (adapter_lost / serial_port_busy) ──
+
+    def _repair_issue_id(self, kind: str) -> str:
+        return f"{kind}_{self.entry_id}"
+
+    def _repair_placeholders(self, kind: str) -> dict[str, str]:
+        port = str((self.serial_config or {}).get(CONF_PORT) or "")
+        if kind == "serial_port_busy":
+            holder = ""
+            try:
+                holders = find_port_holders(port)
+                if holders:
+                    first = holders[0]
+                    holder = (
+                        f" (currently held open by pid {first['pid']}"
+                        + (f' "{first["name"]}"' if first.get("name") else "")
+                        + ")"
+                    )
+            except Exception:
+                pass
+            return {"port": port or "the configured port", "holder": holder}
+        stable = stable_by_id_path(port or None) or ""
+        return {
+            "port": port or "the configured port",
+            "by_id": stable or "no /dev/serial/by-id link found",
+        }
+
+    def _repair_condition_holds(self, kind: str) -> bool:
+        if kind == "adapter_lost":
+            return getattr(self, "_adapter_state", "ok") == "adapter_lost"
+        if kind == "serial_port_busy":
+            return getattr(self, "_port_busy_since", None) is not None
+        return False
+
+    def _schedule_repair_issue(self, kind: str, delay_s: float = 60.0) -> None:
+        """Raise a repair issue if the condition persists for ``delay_s``."""
+        self._ensure_adapter_watch_attrs()
+        hass = getattr(self, "hass", None)
+        loop = getattr(hass, "loop", None) if hass is not None else None
+        if loop is None:
+            return
+        if (
+            kind in self._repair_issue_tasks
+            and not self._repair_issue_tasks[kind].done()
+        ):
+            return
+
+        async def _watch() -> None:
+            try:
+                await asyncio.sleep(delay_s)
+                if not self._repair_condition_holds(kind):
+                    return
+                from homeassistant.helpers import issue_registry as ir
+
+                ir.async_create_issue(
+                    hass,
+                    DOMAIN,
+                    self._repair_issue_id(kind),
+                    translation_key=kind,
+                    is_fixable=False,
+                    is_persistent=False,
+                    severity=ir.IssueSeverity.WARNING,
+                    translation_placeholders=self._repair_placeholders(kind),
+                )
+                _LOGGER.warning("Raised repair issue %s (condition persists)", kind)
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:
+                _LOGGER.debug("Repair issue scheduling (%s) failed: %s", kind, err)
+
+        def _spawn() -> None:
+            self._repair_issue_tasks[kind] = asyncio.ensure_future(_watch())
+
+        try:
+            loop.call_soon_threadsafe(_spawn)
+        except RuntimeError:  # event loop already closed (shutdown)
+            pass
+
+    def _clear_repair_issue(self, kind: str) -> None:
+        """Drop the pending timer and any raised issue for one condition."""
+        self._ensure_adapter_watch_attrs()
+        hass = getattr(self, "hass", None)
+        task = self._repair_issue_tasks.pop(kind, None)
+        if task is not None:
+            try:
+                task.cancel()
+            except Exception:
+                pass
+        if hass is None or kind not in ("adapter_lost", "serial_port_busy"):
+            return
+        loop = getattr(hass, "loop", None)
+
+        def _delete() -> None:
+            from homeassistant.helpers import issue_registry as ir
+
+            try:
+                ir.async_delete_issue(hass, DOMAIN, self._repair_issue_id(kind))
+            except Exception as err:
+                _LOGGER.debug("Could not clear repair issue %s: %s", kind, err)
+
+        try:
+            if loop is not None:
+                loop.call_soon_threadsafe(_delete)
+            else:
+                _delete()
+        except RuntimeError:
+            pass
+
+    def _clear_repair_issues(self) -> None:
+        """Drop both repair-issue conditions (full recovery)."""
+        self._clear_repair_issue("adapter_lost")
+        self._clear_repair_issue("serial_port_busy")
+
+    def _cancel_adapter_watch(self) -> None:
+        """Cancel all recovery/repair timers (unload, reconfigure, close)."""
+        self._ensure_adapter_watch_attrs()
+        for task in tuple(self._repair_issue_tasks.values()):
+            try:
+                task.cancel()
+            except Exception:
+                pass
+        self._repair_issue_tasks.clear()
+        if self._adapter_recovery_task is not None:
+            try:
+                self._adapter_recovery_task.cancel()
+            except Exception:
+                pass
+
+    def _adapter_diagnostics(self) -> dict[str, Any]:
+        """v2.9.0: adapter-watch fields for the diagnostics "serial" dict."""
+        self._ensure_adapter_watch_attrs()
+        return {
+            "state": self._adapter_state,
+            "resolved_from": self._adapter_resolved_from,
+            "adapter_identity": (
+                {
+                    **self._adapter_identity,
+                    "serial_number": redact_serial_number(
+                        self._adapter_identity.get("serial_number")
+                    ),
+                }
+                if self._adapter_identity
+                else None
+            ),
+            "lost_since": self._adapter_lost_since,
+            "reconnect_attempts": self._adapter_reconnect_attempts,
+            "next_retry_in_s": (
+                round(max(0.0, self._adapter_next_retry_at - time.monotonic()), 2)
+                if self._adapter_next_retry_at
+                else None
+            ),
+            "last_error": self._adapter_last_error,
+            "reconnects_total": self.reconnect_count,
+            "port_busy": self._port_busy_since is not None,
+        }
 
     def reconfigure_serial(self, serial_config: dict[str, Any]) -> bool:
         """Replace the bus client in place without unloading HA entities.
@@ -447,6 +962,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         """
         config = {**self.serial_config, **serial_config}
         with self._serial_lock:
+            self._cancel_adapter_watch()
             self.client.close()
             capture = getattr(self, "response_capture", None)
             if capture is not None:
@@ -454,6 +970,13 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             self.client = build_client(config, hass=getattr(self, "hass", None))
             self.serial_config = config
             self._install_response_capture()
+            # A user-driven reconfigure restarts the adapter watch.
+            self._ensure_adapter_watch_attrs()
+            self._adapter_state = "ok"
+            self._adapter_lost_since = None
+            self._adapter_reconnect_attempts = 0
+            self._adapter_next_retry_at = None
+            self._port_busy_since = None
             return self._connect_with_retries()
 
     reconfigure_connection = reconfigure_serial
@@ -502,9 +1025,19 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 (time.monotonic() - delay_started) * 1000, 2
             )
         request_started = time.monotonic()
-        result = call_modbus_on_client(
-            self.client, method_name, *args, slave=slave, **kwargs
-        )
+        try:
+            result = call_modbus_on_client(
+                self.client, method_name, *args, slave=slave, **kwargs
+            )
+        except Exception as err:
+            # A SerialException / ENOENT / EIO / ENXIO mid-transaction
+            # means the USB adapter was pulled: enter the explicit
+            # adapter_lost state instead of hammering retries.
+            if is_serial(
+                getattr(self, "serial_config", None)
+            ) and is_adapter_gone_error(err):
+                self._enter_adapter_lost(err)
+            raise
         if stages is not None:
             stages["request_ms"] = round((time.monotonic() - request_started) * 1000, 2)
         return result
@@ -975,6 +1508,8 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 "operation_active": self._serial_lock.locked(),
                 # v2.8.0: transport summary (never includes credentials).
                 **self._transport_diagnostics(),
+                # v2.9.0: adapter hot-plug watch state (serial transport).
+                **self._adapter_diagnostics(),
             },
         }
 
@@ -998,6 +1533,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
 
     def close(self) -> None:
         """Close the serial client only after any in-flight transaction finishes."""
+        self._cancel_adapter_watch()
         with self._serial_lock:
             self.client.close()
         capture = getattr(self, "response_capture", None)

@@ -405,3 +405,87 @@ def test_stable_by_id_path_never_raises_when_by_id_dir_missing():
 def test_port_resolution_found_property():
     assert PortResolution("/dev/ttyUSB0", "configured").found
     assert not PortResolution(None, "none").found
+
+
+# ── probe_port_ownership ─────────────────────────────────────────────────
+
+
+def test_probe_port_ownership_missing_when_path_absent():
+    from custom_components.modbus_usb.serial_watch import probe_port_ownership
+
+    opened = []
+    result = probe_port_ownership(
+        "/dev/ttyUSB7", path_exists=False, open_port=lambda p: opened.append(p)
+    )
+    assert result["reason"] == "missing"
+    assert "/dev/ttyUSB7" in result["hint"]
+    assert result["holders"] == []
+    assert opened == []  # never opens a nonexistent port
+
+
+def test_probe_port_ownership_ok_on_clean_open():
+    from custom_components.modbus_usb.serial_watch import probe_port_ownership
+
+    result = probe_port_ownership(
+        "/dev/ttyUSB0", path_exists=True, open_port=lambda p: None
+    )
+    assert result["reason"] == "ok"
+    assert result["holders"] == []
+
+
+def test_probe_port_ownership_busy_names_holding_process(tmp_path):
+    from custom_components.modbus_usb.serial_watch import probe_port_ownership
+
+    target = tmp_path / "tty"
+    target.write_text("")
+    holder = tmp_path / "proc" / "777"
+    (holder / "fd").mkdir(parents=True)
+    (holder / "fd" / "5").symlink_to(target)
+    (holder / "comm").write_text("minicom\n")
+
+    def _busy(path):
+        import errno as _errno
+
+        raise OSError(_errno.EBUSY, "Device or resource busy")
+
+    result = probe_port_ownership(
+        str(target),
+        path_exists=True,
+        open_port=_busy,
+        proc_root=str(tmp_path / "proc"),
+    )
+    assert result["reason"] == "busy"
+    assert result["holders"] == [{"pid": 777, "name": "minicom"}]
+    assert "minicom" in result["hint"]
+
+
+def test_probe_port_ownership_permission_mentions_dialout():
+    from custom_components.modbus_usb.serial_watch import probe_port_ownership
+
+    def _denied(path):
+        import errno as _errno
+
+        raise OSError(_errno.EACCES, "Permission denied")
+
+    result = probe_port_ownership("/dev/ttyUSB0", path_exists=True, open_port=_denied)
+    assert result["reason"] == "permission"
+    assert "dialout" in result["hint"]
+
+
+def test_probe_port_ownership_unknown_for_unclassified_failures():
+    from custom_components.modbus_usb.serial_watch import probe_port_ownership
+
+    def _boom(path):
+        raise RuntimeError("something else entirely")
+
+    result = probe_port_ownership("/dev/ttyUSB0", path_exists=True, open_port=_boom)
+    assert result["reason"] == "unknown"
+    assert "something else entirely" in result["hint"]
+
+
+def test_probe_port_ownership_no_path_is_missing():
+    from custom_components.modbus_usb.serial_watch import probe_port_ownership
+
+    result = probe_port_ownership(None, open_port=lambda p: None)
+    assert result["reason"] == "missing"
+    assert result["holders"] == []

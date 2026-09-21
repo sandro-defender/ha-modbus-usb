@@ -18,6 +18,11 @@ Pure, Home-Assistant-free helpers for the serial transport:
   device node (the panel's "Use stable path" button).
 - ``find_port_holders`` best-effort scans ``/proc/*/fd`` to name the
   process holding a busy port open.
+- ``probe_port_ownership`` is the one-shot open/close probe behind
+  ``modbus_usb/get_serial_status``: it classifies why a port cannot be
+  owned (ok / missing / busy / permission / unknown) and, for busy
+  ports, names the holding process best-effort.
+
 Every filesystem touch goes through injectable callables (``listdir``,
 ``realpath``, ``exists``, ``readlink``, ``proc_root``) so the logic is
 unit-testable without touching ``/dev`` or ``/proc``.
@@ -403,6 +408,83 @@ def _by_id_link_resolving_to(
         except OSError:
             continue
     return None
+
+
+def probe_port_ownership(
+    path: str | None,
+    *,
+    path_exists: bool | None = None,
+    open_port: Callable[[str], Any] | None = None,
+    proc_root: str = "/proc",
+    listdir: Callable[[str], Any] = os.listdir,
+    readlink: Callable[[str], str] = os.readlink,
+    realpath: Callable[[str], str] = os.path.realpath,
+    exists: Callable[[str], bool] = os.path.exists,
+) -> dict[str, Any]:
+    """Classify why a serial port cannot currently be owned.
+
+    Returns ``{"reason", "hint", "holders"}`` where ``reason`` is one of
+    ``ok`` / ``missing`` / ``busy`` / ``permission`` / ``unknown`` and
+    ``hint`` is a one-sentence, actionable explanation (busy hints name
+    the holding process when /proc is readable). Never raises: a
+    failed probe simply degrades to ``unknown``.
+
+    ``open_port(path)`` performs the actual open/close probe and must
+    raise on failure (default: pyserial open + immediate close, ~200 ms
+    timeout). Callers must only run this when the integration is NOT
+    currently holding the port.
+    """
+    if not path:
+        return {
+            "reason": PORT_STATUS_MISSING,
+            "hint": "No port is configured for this hub yet.",
+            "holders": [],
+        }
+    if path_exists is None:
+        try:
+            path_exists = exists(path)
+        except OSError:
+            path_exists = False
+    if not path_exists:
+        _reason, hint = classify_port_error(
+            OSError(errno.ENOENT, "No such file or directory"),
+            path=path,
+            path_exists=False,
+        )
+        return {"reason": PORT_STATUS_MISSING, "hint": hint, "holders": []}
+
+    error: BaseException | None = None
+    try:
+        if open_port is None:
+            import serial as pyserial
+
+            serial_port = pyserial.Serial(port=path, timeout=0.2)
+            serial_port.close()
+        else:
+            open_port(path)
+    except Exception as err:
+        error = err
+
+    reason, hint = classify_port_error(error, path=path, path_exists=True)
+    holders: list[dict[str, Any]] = []
+    if reason == PORT_STATUS_BUSY:
+        try:
+            holders = find_port_holders(
+                path,
+                proc_root=proc_root,
+                listdir=listdir,
+                readlink=readlink,
+                realpath=realpath,
+            )
+        except Exception:  # never break the status probe
+            holders = []
+        if holders:
+            names = ", ".join(
+                f"{item.get('name') or 'process'} (pid {item['pid']})"
+                for item in holders[:3]
+            )
+            hint = f"{hint.rstrip('.')}. Currently held open by {names}."
+    return {"reason": reason, "hint": hint, "holders": holders}
 
 
 def stable_by_id_path(

@@ -29,6 +29,10 @@ from ..const import (
     DOMAIN,
     TRANSPORTS,
 )
+from ..serial_watch import (
+    probe_port_ownership,
+    stable_by_id_path,
+)
 from ..templates import (
     async_load_templates,
 )
@@ -131,7 +135,43 @@ async def ws_get_serial_status(
             ),
             None,
         )
-        connection.send_result(msg["id"], {"serial": serial, "adapter": adapter})
+        # v2.9.0: port-ownership diagnostics. When the integration already
+        # owns the port we do not probe it (opening it would fail with
+        # EBUSY while Home Assistant is mid-transaction).
+        connected = bool(getattr(coordinator.client, "connected", False))
+        if connected:
+            ownership = {
+                "reason": "ok",
+                "hint": "Port is open — Home Assistant is currently using it.",
+                "holders": [],
+                "probed": False,
+            }
+        else:
+            ownership = await hass.async_add_executor_job(
+                probe_port_ownership, configured_port
+            )
+            ownership["probed"] = True
+        by_id_candidates = sorted(
+            {
+                str(item["persistent_path"])
+                for item in ports
+                if item.get("persistent_path")
+                and str(item["persistent_path"]).startswith("/dev/serial/by-id/")
+            }
+        )
+        stable_path = await hass.async_add_executor_job(
+            stable_by_id_path, configured_port
+        )
+        connection.send_result(
+            msg["id"],
+            {
+                "serial": serial,
+                "adapter": adapter,
+                "ownership": ownership,
+                "by_id_candidates": by_id_candidates,
+                "stable_path": stable_path,
+            },
+        )
     except Exception as err:
         _LOGGER.warning("Serial status lookup failed: %s", err)
         connection.send_error(msg["id"], "serial_status_failed", str(err))

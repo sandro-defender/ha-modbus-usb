@@ -69,6 +69,81 @@
           <span class="text-sm" id="hub-connection-test-result" style="color:var(--text-dim);">${esphome ? 'Checks that the ESPHome bridge is reachable. Nothing is sent on the RS-485 bus.' : 'Checks that the serial adapter can be opened. Nothing is sent on the RS-485 bus.'}</span>
         </div>
         ${esphome ? renderEsphomeHelp(transport) : ''}`;
+      if (!esphome) renderHubOwnershipRow(hub);
+    }
+
+    // ─── v2.9.0: PORT OWNERSHIP BANNER + STABLE BY-ID PATH ──────────
+    // One-sentence explanation of why the serial port cannot be opened
+    // (missing / busy / permission / unknown). When the configured port
+    // is a dynamic ttyUSB*/ttyACM* with a matching /dev/serial/by-id
+    // link, a one-click "Use stable path" button offers the persistent
+    // path; confirming it saves the port via the regular save_hub
+    // command (no new mutating endpoint).
+    let _hubStablePath = null;
+    let _hubStableEntryId = null;
+
+    const HUB_OWNERSHIP_COLORS = {
+      ok: '#34d399',
+      missing: '#f87171',
+      busy: '#fbbf24',
+      permission: '#fbbf24',
+      unknown: '#f87171',
+    };
+
+    async function renderHubOwnershipRow(hub) {
+      _hubStablePath = null;
+      _hubStableEntryId = null;
+      const grid = document.getElementById('hub-info-grid');
+      const entry = getCurrentEntry();
+      if (!grid || !entry || !hub) return;
+      const row = document.createElement('div');
+      row.id = 'hub-ownership-row';
+      row.style.cssText = 'grid-column:1/-1; display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;';
+      row.innerHTML = '<span class="text-sm" id="hub-ownership-banner" role="status" style="color:var(--text-dim);">Checking port status…</span>';
+      grid.appendChild(row);
+      try {
+        const result = await apiCall('get_serial_status', { entry_id: entry.entry_id });
+        const banner = document.getElementById('hub-ownership-banner');
+        if (!banner) return;
+        const ownership = result.ownership || { reason: 'unknown', hint: 'Port status is unavailable.' };
+        banner.style.color = HUB_OWNERSHIP_COLORS[ownership.reason] || 'var(--text-dim)';
+        banner.textContent = ownership.hint || ownership.reason;
+        if (result.stable_path && result.stable_path !== hub.port) {
+          _hubStablePath = result.stable_path;
+          _hubStableEntryId = entry.entry_id;
+          const note = document.createElement('span');
+          note.className = 'text-sm';
+          note.id = 'hub-stable-path-hint';
+          note.style.color = 'var(--text-dim)';
+          note.textContent = `Persistent path available: ${result.stable_path}`;
+          const button = document.createElement('button');
+          button.className = 'btn btn-secondary btn-sm';
+          button.id = 'btn-use-stable-path';
+          button.textContent = '🔒 Use stable path';
+          button.title = `Save ${result.stable_path} as the hub port — it survives reboots and re-plugging.`;
+          button.onclick = applyStableHubPath;
+          row.appendChild(note);
+          row.appendChild(button);
+        }
+      } catch (err) {
+        const banner = document.getElementById('hub-ownership-banner');
+        if (banner) banner.textContent = 'Could not check port status: ' + err.message;
+      }
+    }
+
+    async function applyStableHubPath() {
+      if (!_hubStablePath || !_hubStableEntryId) return;
+      const ok = window.confirm(
+        `Save the persistent path?\n\n${_hubStablePath}\n\nThe hub will reconnect on this path.`
+      );
+      if (!ok) return;
+      try {
+        await apiCall('save_hub', { entry_id: _hubStableEntryId, hub: { port: _hubStablePath } });
+        toast('Stable path saved — hub reconnecting…', 'ok');
+        await refreshData();
+      } catch (err) {
+        toast('Failed to save the stable path: ' + err.message, 'err');
+      }
     }
 
     function renderEsphomeHelp(transport) {

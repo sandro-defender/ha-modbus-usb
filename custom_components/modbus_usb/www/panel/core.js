@@ -221,9 +221,9 @@
       if (type === 'manual_hex_write') return { slave_id: 1, function_code: '0x06', address: 128, count: 1 };
       if (type === 'get_serial_status') {
         if ((entry.hub || {}).transport === 'esphome_tcp') {
-          return { serial: { port: null, baudrate: 9600, bytesize: 8, parity: 'N', stopbits: 1, connection_owner: 'Home Assistant Modbus USB', operation_active: false, transport: 'esphome_tcp', label: 'ESPHome · RTU over TCP', endpoint: 'modbus-bridge.local:8899', baudrate_fixed: true, capture_support: 'trace_packet' }, adapter: null, esphome: true };
+          return { serial: { port: null, baudrate: 9600, bytesize: 8, parity: 'N', stopbits: 1, connection_owner: 'Home Assistant Modbus USB', operation_active: false, transport: 'esphome_tcp', label: 'ESPHome · RTU over TCP', endpoint: 'modbus-bridge.local:8899', baudrate_fixed: true, capture_support: 'trace_packet' }, adapter: null, esphome: true, ownership: null, by_id_candidates: [], stable_path: null };
         }
-        return { serial: { port: '/dev/ttyUSB0', baudrate: 9600, bytesize: 8, parity: 'N', stopbits: 1, connection_owner: 'Home Assistant Modbus USB', operation_active: false, transport: 'serial', label: 'Serial (USB adapter)', endpoint: '/dev/ttyUSB0', baudrate_fixed: false }, adapter: { port: '/dev/ttyUSB0', description: 'USB-RS485 Adapter', details: 'CH340 USB-Serial' } };
+        return { serial: { port: '/dev/ttyUSB0', baudrate: 9600, bytesize: 8, parity: 'N', stopbits: 1, connection_owner: 'Home Assistant Modbus USB', operation_active: false, transport: 'serial', label: 'Serial (USB adapter)', endpoint: '/dev/ttyUSB0', baudrate_fixed: false, state: 'ok', resolved_from: 'configured', reconnects_total: 1 }, adapter: { port: '/dev/ttyUSB0', description: 'USB-RS485 Adapter', details: 'CH340 USB-Serial' }, ownership: { reason: 'ok', hint: 'Port is open — Home Assistant is currently using it.', holders: [], probed: false }, by_id_candidates: ['/dev/serial/by-id/usb-FTDI_D2XX_P12345-0000'], stable_path: '/dev/serial/by-id/usb-FTDI_D2XX_P12345-0000' };
       }
       if (type === 'test_device_entities') {
         const device = entry.devices.find(d => d.id === payload.device_id);

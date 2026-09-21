@@ -100,6 +100,16 @@ def traffic_signal(entry_id: str) -> str:
     return f"{DOMAIN}_{entry_id}_traffic"
 
 
+def scan_progress_signal(entry_id: str) -> str:
+    """Return the dispatcher signal carrying bus-scan progress for one hub.
+
+    The (executor-thread) bus scan announces every probe on this signal so
+    the modbus_usb/subscribe_scan_progress subscription can push
+    {slave, total, baudrate, parity, found_so_far} to the panel in real time.
+    """
+    return f"{DOMAIN}_{entry_id}_scan_progress"
+
+
 class ModbusUsbCoordinator(DataUpdateCoordinator):
     """Polls the USB-connected Modbus controller and shares results with entities."""
 
@@ -398,6 +408,61 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             return
         try:
             loop.call_soon_threadsafe(async_dispatcher_send, hass, signal, dict(item))
+        except RuntimeError:
+            pass  # loop already closed during shutdown
+
+    # ── v2.9.0: bus-scan cancellation + live progress ──
+
+    def _ensure_scan_attrs(self) -> None:
+        """Lazily create scan book-keeping (minimal test coordinators)."""
+        if not hasattr(self, "_scan_cancel_event"):
+            self._scan_cancel_event = threading.Event()
+        if not hasattr(self, "scan_progress"):
+            self.scan_progress = {
+                "active": False,
+                "completed": 0,
+                "total": 0,
+                "found": 0,
+                "slave": None,
+                "baudrate": None,
+                "parity": None,
+                "cancelled": False,
+            }
+
+    def cancel_scan(self) -> None:
+        """Ask a running bus scan to stop between probes (modbus_usb/stop_bus_scan)."""
+        self._ensure_scan_attrs()
+        self._scan_cancel_event.set()
+
+    def scan_progress_snapshot(self) -> dict[str, Any]:
+        """Progress payload for the panel / diagnostics (UI-safe copy)."""
+        self._ensure_scan_attrs()
+        progress = dict(self.scan_progress)
+        progress["found_so_far"] = progress.get("found", 0)
+        return progress
+
+    def _notify_scan_progress(self) -> None:
+        """Push the current scan progress to WebSocket subscribers.
+
+        Mirrors _notify_traffic_subscribers: the scan runs in an executor
+        thread, so the dispatcher signal hops to the event loop when needed.
+        """
+        self._ensure_scan_attrs()
+        hass = getattr(self, "hass", None)
+        loop = getattr(hass, "loop", None)
+        if loop is None:
+            return
+        signal = scan_progress_signal(self.entry_id)
+        payload = self.scan_progress_snapshot()
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is loop:
+            async_dispatcher_send(hass, signal, payload)
+            return
+        try:
+            loop.call_soon_threadsafe(async_dispatcher_send, hass, signal, payload)
         except RuntimeError:
             pass  # loop already closed during shutdown
 
@@ -1084,19 +1149,42 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         found: list[dict[str, Any]] = []
         probed = 0
         total = len(valid_bauds) * len(valid_parities) * (end_slave - start_slave + 1)
+        self._ensure_scan_attrs()
+        self._scan_cancel_event.clear()
         self.scan_progress = {
             "active": True,
             "completed": 0,
             "total": total,
             "found": 0,
+            "slave": None,
+            "baudrate": None,
+            "parity": None,
+            "cancelled": False,
         }
+        self._notify_scan_progress()
+        # v2.9.0: probes run against the adapter's *current* path (identity-
+        # aware reindex recovery), not a possibly-stale configured path.
+        probe_port = None
+        if is_serial(self.serial_config):
+            probe_port = self._resolve_adapter_port().path
         with self._serial_lock:
+            was_connected = bool(getattr(self.client, "connected", False))
             self.client.close()
+            cancelled = False
             try:
                 for baudrate in valid_bauds:
                     for parity in valid_parities:
+                        if self._scan_cancel_event.is_set():
+                            cancelled = True
+                            break
+                        probe_config = self.serial_config
+                        if (
+                            probe_port
+                            and self.serial_config.get(CONF_PORT) != probe_port
+                        ):
+                            probe_config = {**self.serial_config, CONF_PORT: probe_port}
                         probe = build_client(
-                            self.serial_config,
+                            probe_config,
                             baudrate=baudrate or None,
                             parity=parity,
                             timeout=0.2 if not baudrate_fixed else 0.5,
@@ -1107,8 +1195,17 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                             if not probe.connect():
                                 continue
                             for slave in range(start_slave, end_slave + 1):
+                                if self._scan_cancel_event.is_set():
+                                    cancelled = True
+                                    break
                                 probed += 1
                                 self.scan_progress["completed"] = probed
+                                self.scan_progress["slave"] = slave
+                                self.scan_progress["baudrate"] = (
+                                    None if baudrate_fixed else baudrate
+                                )
+                                self.scan_progress["parity"] = parity
+                                self._notify_scan_progress()
                                 try:
                                     result = call_modbus_on_client(
                                         probe,
@@ -1159,9 +1256,20 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                         finally:
                             probe.close()
             finally:
-                self.client.connect()
+                # v2.9.0: the hub connection is always restored — even when a
+                # probe raises unexpectedly — reconnected only if it was open.
+                if was_connected:
+                    try:
+                        self.client.connect()
+                    except Exception:  # restore is best-effort
+                        _LOGGER.warning(
+                            "Bus scan finished but the hub connection could not be restored: %s",
+                            self.serial_config.get(CONF_PORT),
+                        )
                 self.scan_progress["active"] = False
                 self.scan_progress["completed"] = probed
+                self.scan_progress["cancelled"] = cancelled
+                self._notify_scan_progress()
         return {
             "found": found,
             "probed": probed,
@@ -1169,6 +1277,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             "end_slave": end_slave,
             "transport": describe_transport(self.serial_config)["transport"],
             "baudrate_fixed": baudrate_fixed,
+            "cancelled": cancelled,
         }
 
     def _match_templates(

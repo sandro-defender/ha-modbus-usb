@@ -23,7 +23,9 @@ from .diagnostics import (
     ws_manual_hex_write,
     ws_probe_registers,
     ws_scan_bus,
+    ws_stop_bus_scan,
     ws_stop_probe_registers,
+    ws_subscribe_scan_progress,
     ws_subscribe_traffic,
     ws_test_device_entities,
     ws_traffic_inspector,
@@ -79,6 +81,8 @@ async def async_register_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_clear_diagnostic_log)
     websocket_api.async_register_command(hass, ws_export_activity_log)
     websocket_api.async_register_command(hass, ws_scan_bus)
+    websocket_api.async_register_command(hass, ws_stop_bus_scan)
+    websocket_api.async_register_command(hass, ws_subscribe_scan_progress)
     websocket_api.async_register_command(hass, ws_traffic_inspector)
     websocket_api.async_register_command(hass, ws_subscribe_traffic)
     websocket_api.async_register_command(hass, ws_designer_validate)

@@ -383,3 +383,34 @@ def test_panel_wires_hub_ownership_banner_and_stable_path() -> None:
     assert "ownership" in core_js
     assert "stable_path" in core_js
     assert "by_id_candidates" in core_js
+
+
+def test_panel_wires_scan_stop_and_progress_stream() -> None:
+    html = _html()
+    diag = _panel_script("diagnostics.js")
+    core = _panel_script("core.js")
+    # Stop button lives in the progress row and is wired to stopRs485Scan()
+    assert 'id="btn-stop-scan-bus"' in html
+    assert 'onclick="stopRs485Scan()"' in html
+    # Live progress subscription + stop command + progress-line format
+    for token in (
+        "function stopRs485Scan()",
+        "apiCall('stop_bus_scan'",
+        "modbus_usb/subscribe_scan_progress",
+        "function ensureScanProgressSubscription(",
+        "function applyScanProgressEvent(",
+        "teardownScanProgressSubscription()",
+        "slave ${scan.slave}/${total} @ ${scan.baudrate} 8${scan.parity || 'N'}1",
+        "result.cancelled",
+    ):
+        assert token in diag, f"diagnostics.js missing: {token}"
+    # The 500 ms polling fallback stays in place
+    assert "setInterval(refreshScanProgress, 500)" in diag
+    # Mock mode emulates scan progress and accepts the new commands
+    for token in (
+        "mockRunScan",
+        "stop_bus_scan",
+        "subscribe_scan_progress",
+        "_mockScan",
+    ):
+        assert token in core, f"core.js missing: {token}"

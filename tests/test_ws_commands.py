@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from homeassistant.exceptions import Unauthorized
 
 from custom_components.modbus_usb.api import diagnostics as api_diagnostics
 from custom_components.modbus_usb.api import templates as api_templates
@@ -901,3 +902,130 @@ async def test_ws_get_serial_status_permission_reason_passes_through() -> None:
     result = conn.send_result.call_args[0][1]
     assert result["ownership"]["reason"] == "permission"
     assert "dialout" in result["ownership"]["hint"]
+
+
+# ── v2.9.0: bus-scan stop + live progress subscription ──────────────────
+
+
+class _ScanCoordinator:
+    """Minimal coordinator exposing the real cancel/progress helpers."""
+
+    def __init__(self) -> None:
+        from custom_components.modbus_usb.coordinator import ModbusUsbCoordinator
+
+        self._real = object.__new__(ModbusUsbCoordinator)
+        self._real.entry_id = "e1"
+        self._real.hass = None
+        self._real.scan_progress = {
+            "active": False,
+            "completed": 0,
+            "total": 0,
+            "found": 0,
+            "slave": None,
+            "baudrate": None,
+            "parity": None,
+            "cancelled": False,
+        }
+
+    def cancel_scan(self) -> None:
+        self._real.cancel_scan()
+
+    def scan_progress_snapshot(self) -> dict:
+        return self._real.scan_progress_snapshot()
+
+    @property
+    def cancel_event(self):
+        return self._real._scan_cancel_event
+
+
+async def test_stop_bus_scan_sets_cancel_event_and_reports_stopping():
+    entry = _FakeEntry("e1")
+    coordinator = _ScanCoordinator()
+    hass = _hass(entry)
+    hass.data[DOMAIN]["e1"] = coordinator
+    conn = _connection()
+    await _unwrap(api_diagnostics.ws_stop_bus_scan)(
+        hass, conn, {"id": 1, "type": "modbus_usb/stop_bus_scan", "entry_id": "e1"}
+    )
+    conn.send_result.assert_called_once()
+    payload = conn.send_result.call_args[0][1]
+    assert payload == {"stopping": True}
+    assert coordinator.cancel_event.is_set()
+
+
+async def test_stop_bus_scan_requires_admin():
+    entry = _FakeEntry("e1")
+    coordinator = _ScanCoordinator()
+    hass = _hass(entry)
+    hass.data[DOMAIN]["e1"] = coordinator
+    conn = _connection()
+    conn.user = SimpleNamespace(is_admin=False)
+    # The decorated handler (not _unwrap) enforces the admin gate by raising.
+    with pytest.raises(Unauthorized):
+        await api_diagnostics.ws_stop_bus_scan(
+            hass, conn, {"id": 2, "type": "modbus_usb/stop_bus_scan", "entry_id": "e1"}
+        )
+    conn.send_result.assert_not_called()
+    coordinator._real._ensure_scan_attrs()  # create the event (unset)
+    assert not coordinator.cancel_event.is_set()
+
+
+async def test_stop_bus_scan_unknown_entry_is_not_found():
+    hass = _hass(_FakeEntry("e1"))
+    conn = _connection()
+    await _unwrap(api_diagnostics.ws_stop_bus_scan)(
+        hass, conn, {"id": 3, "type": "modbus_usb/stop_bus_scan", "entry_id": "missing"}
+    )
+    conn.send_error.assert_called_once()
+    assert conn.send_error.call_args[0][1] == "not_found"
+
+
+async def test_subscribe_scan_progress_forwards_progress_events():
+    from homeassistant.helpers.dispatcher import async_dispatcher_send
+
+    from custom_components.modbus_usb.coordinator import scan_progress_signal
+
+    entry = _FakeEntry("e1")
+    coordinator = _ScanCoordinator()
+    hass = _hass(entry)
+    hass.data[DOMAIN]["e1"] = coordinator
+    conn = _connection()
+    await _unwrap(api_diagnostics.ws_subscribe_scan_progress)(
+        hass,
+        conn,
+        {"id": 4, "type": "modbus_usb/subscribe_scan_progress", "entry_id": "e1"},
+    )
+    result = conn.send_result.call_args[0][1]
+    assert result["subscribed"] is True
+    assert result["progress"]["active"] is False
+    assert "found_so_far" in result["progress"]
+    # no admin gate: a plain connection (no user attribute) was accepted
+    assert not hasattr(conn, "user")
+
+    # HA's dispatcher send runs targets through hass.async_run_hass_job —
+    # shim the minimal fake so the real dispatcher path is exercised.
+    def _run_hass_job(job, *args):
+        job.target(*args)
+
+    hass.async_run_hass_job = _run_hass_job
+    async_dispatcher_send(
+        hass, scan_progress_signal("e1"), {"active": True, "slave": 7, "total": 20}
+    )
+    conn.send_message.assert_called_once()
+    frame = conn.send_message.call_args[0][0]
+    assert frame["type"] == "event"
+    assert frame["event"]["progress"]["slave"] == 7
+    assert frame["event"]["progress"]["total"] == 20
+
+
+async def test_subscribe_scan_progress_unknown_entry_is_not_found():
+    hass = _hass(_FakeEntry("e1"))
+    conn = _connection()
+    await _unwrap(api_diagnostics.ws_subscribe_scan_progress)(
+        hass,
+        conn,
+        {"id": 5, "type": "modbus_usb/subscribe_scan_progress", "entry_id": "missing"},
+    )
+    conn.send_error.assert_called_once()
+    assert conn.send_error.call_args[0][1] == "not_found"
+    assert conn.subscriptions == {}

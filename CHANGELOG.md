@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+## 2.9.0
+
+### Adapter hot-plug recovery (serial hubs)
+- When the USB adapter is unplugged, the integration no longer fails forever: after the first confirmed adapter-gone error it enters an **adapter_lost** state (entities become unavailable) and retries with jittered exponential backoff **1 s → 30 s** until the adapter is re-plugged — no restart, no manual edit.
+- Re-plugged adapters are re-discovered by **USB identity** (VID:PID + serial number, learned on first connect and stored in `entry.data["adapter_identity"]`): configured path → its `/dev/serial/by-id` link → learned identity → the only `ttyUSB`/`ttyACM` present. When several adapters match, it never guesses and stays lost until the ambiguity is resolved.
+- New **repair issues** in HA's Repairs section: `serial_adapter_lost` (raised 60 s after the adapter goes lost, text carries the last known port and the by-id suggestion) and `serial_port_busy` (while the port stays busy for 60 s); both are deleted automatically on recovery.
+
+### Port ownership diagnostics + "Use stable path"
+- The read-only `modbus_usb/get_serial_status` now explains in one sentence why a serial hub's port cannot be opened: `ownership.reason` is `ok` / `missing` / `busy` / `permission` / `unknown` with an actionable `hint` (busy names the holding process best-effort via `/proc/*/fd`; permission points at the `dialout` group), plus `by_id_candidates` and `stable_path`.
+- Hub tab: a one-sentence ownership banner (coloured per reason) and a **Use stable path** button when the hub uses a dynamic `/dev/ttyUSB*` node and a matching `/dev/serial/by-id/...` link exists — confirming saves through the existing admin `modbus_usb/save_hub`.
+
+### Hub health entities
+- Three new entities on the hub device, fed by coordinator book-keeping (no extra bus traffic): **Connected** (`binary_sensor`, connectivity class), **Error rate** (`sensor`, % failed transactions over a rolling 5-minute window, unit `%`) and **Reconnects** (`sensor`, total_increasing). Unique IDs: `{entry_id}_hub_connected` / `{entry_id}_hub_error_rate` / `{entry_id}_hub_reconnects`. All three are unavailable while a poll fails (adapter lost included) and recover on the first good refresh.
+
+### Bus scan hardening
+- Scan probes run against the adapter's **resolved** port path (identity-aware reindex recovery) instead of the possibly-stale configured path; the configured entry is never mutated.
+- The main hub client is **always restored** after a scan (reconnected only if it was open) — even when a probe raises unexpectedly — and the scan result now carries `cancelled: true` plus partial findings.
+- New **admin** WS command `modbus_usb/stop_bus_scan`: stops a running scan between probes.
+- New **read-only** WS subscription `modbus_usb/subscribe_scan_progress`: pushes `{slave, total, completed, baudrate, parity, found_so_far, active, cancelled}` after every probe; the panel shows a live "slave 37/247 @ 19200 8N1 — N devices found" progress line with a **Stop** button (500 ms `get_data` polling kept as fallback). The standalone mock preview emulates scan progress and honours the stop command.
+
+### Development
+- New pure, HA-free module `serial_watch.py` (backoff schedule, adapter identity, port resolution, port-status classification, /proc holder scan, by-id suggestion, ownership probe) — every filesystem touch is injectable and covered by direct unit tests.
+- New entry.data key: `adapter_identity` (`{vid, pid, serial_number, hwid}`).
+- 79 new tests (538 total): backoff schedule, identity match/no-match/ambiguous, port-resolution order, every `get_serial_status` reason (incl. a fake /proc tree), repair-issue raise/clear, hub health entities and the 5-minute error window, scan cancel/progress/restoration (incl. a raising probe), WS admin gating + subscription forwarding, and panel wiring.
+- `ruff check` / `ruff format` (0.13.0) and `node --check` pass; `manifest.json` → **2.9.0**.
+
 ## 2.8.1
 
 ### Fixed

@@ -186,6 +186,7 @@ Add entities from the panel (**Devices → device → Add entity**) or from the 
 - **Connection Health** — totals, failures, last success/error, and most recent operation across polling *and* switch writes.
 - **Serial profile** — configured port settings, HA ownership, lock activity, and detected USB-adapter details.
 - **Find RS-485 Devices** — scan slave IDs × baud/parity profiles under the integration's serial lock, then restore your configured client. **Use this target** hands a result to Board Tools.
+- **Port ownership & adapter recovery (v2.9.0)** — the Hub tab explains in one sentence why a port can't be opened (`missing` / `busy` / `permission`, naming the holding process), the **Use stable path** button switches to the matching `/dev/serial/by-id/...` link, an unplugged adapter re-attaches automatically by USB identity, and a running bus scan is **Stop**pable from the panel with live progress.
 - **Direct Modbus tools** — one-shot reads/writes for testing without creating entities.
 - **Configured-device verification** — read-only check of every non-switch entity (outputs are never toggled).
 - **Safe discovery** — read-only probes of the four standard functions plus an input watcher that highlights addresses that change when you flip a physical input.

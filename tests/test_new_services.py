@@ -289,7 +289,7 @@ def test_services_yaml_documents_every_service() -> None:
         assert "entry_id" in service["fields"]
 
 
-def test_manifest_version_is_281() -> None:
+def test_manifest_version_is_290() -> None:
     import json
     import os
 
@@ -301,7 +301,7 @@ def test_manifest_version_is_281() -> None:
         "manifest.json",
     )
     with open(path, encoding="utf-8") as file:
-        assert json.load(file)["version"] == "2.8.1"
+        assert json.load(file)["version"] == "2.9.0"
 
 
 # ───────────────────────────── batch_write ──────────────────────────────

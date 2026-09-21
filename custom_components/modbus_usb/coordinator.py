@@ -87,6 +87,9 @@ _LOGGER = logging.getLogger(__name__)
 # Compatibility alias for callers of the former coordinator-local helper.
 _decode_words = decode_words
 
+# v2.9.0: window for the hub error-rate sensor (% failed transactions).
+ERROR_RATE_WINDOW_SECONDS = 300.0
+
 
 def traffic_signal(entry_id: str) -> str:
     """Return the dispatcher signal carrying live traffic for one hub.
@@ -571,7 +574,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
             error,
             self._adapter_backoff.delay_for_attempt(0),
         )
-        self._schedule_repair_issue("adapter_lost")
+        self._schedule_repair_issue("serial_adapter_lost")
         self._start_adapter_recovery()
 
     def _start_adapter_recovery(self) -> None:
@@ -825,7 +828,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
         }
 
     def _repair_condition_holds(self, kind: str) -> bool:
-        if kind == "adapter_lost":
+        if kind == "serial_adapter_lost":
             return getattr(self, "_adapter_state", "ok") == "adapter_lost"
         if kind == "serial_port_busy":
             return getattr(self, "_port_busy_since", None) is not None
@@ -885,7 +888,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 task.cancel()
             except Exception:
                 pass
-        if hass is None or kind not in ("adapter_lost", "serial_port_busy"):
+        if hass is None or kind not in ("serial_adapter_lost", "serial_port_busy"):
             return
         loop = getattr(hass, "loop", None)
 
@@ -907,7 +910,7 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
 
     def _clear_repair_issues(self) -> None:
         """Drop both repair-issue conditions (full recovery)."""
-        self._clear_repair_issue("adapter_lost")
+        self._clear_repair_issue("serial_adapter_lost")
         self._clear_repair_issue("serial_port_busy")
 
     def _cancel_adapter_watch(self) -> None:
@@ -1268,6 +1271,16 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 else 0
             ),
         }
+        # v2.9.0: rolling 5-minute window for the hub error-rate sensor
+        # (lazy so object.__new__ test coordinators keep working).
+        tx_window = getattr(self, "_tx_window", None)
+        if tx_window is None:
+            tx_window = self._tx_window = deque()
+        tx_window.append((time.time(), item["status"] == "ok"))
+        cutoff = time.time() - ERROR_RATE_WINDOW_SECONDS
+        while tx_window and tx_window[0][0] < cutoff:
+            tx_window.popleft()
+
         capture = getattr(self, "response_capture", None)
         window = capture.consume() if capture is not None else None
         if window:
@@ -1328,6 +1341,21 @@ class ModbusUsbCoordinator(DataUpdateCoordinator):
                 result,
                 duration_ms or 0,
             )
+
+    def error_rate_percent(self) -> float:
+        """Percentage of failed transactions over the last 5 minutes.
+
+        Feeds the hub error-rate sensor; 0.0 when the window is empty.
+        """
+        tx_window = getattr(self, "_tx_window", None)
+        if not tx_window:
+            return 0.0
+        cutoff = time.time() - ERROR_RATE_WINDOW_SECONDS
+        samples = [ok for ts, ok in tx_window if ts >= cutoff]
+        if not samples:
+            return 0.0
+        failed = sum(1 for ok in samples if not ok)
+        return round(100.0 * failed / len(samples), 1)
 
     def execute_manual_hex_write(
         self, frame_hex: str, generate_crc: bool = False

@@ -39,6 +39,9 @@ async def async_setup_entry(
         for ent in entities
         if ent[CONF_ENTITY_TYPE] == "sensor"
     ]
+    # v2.9.0: hub health sensors (error rate, reconnects) on the hub device.
+    sensors.append(HubErrorRateSensor(coordinator, entry))
+    sensors.append(HubReconnectsSensor(coordinator, entry))
     async_add_entities(sensors)
 
 
@@ -87,6 +90,54 @@ class ModbusUsbSensor(CoordinatorEntity[ModbusUsbCoordinator], SensorEntity):
         return self.coordinator.data.get(self._ent[CONF_ENTITY_ID])
 
 
+class HubSensorBase(CoordinatorEntity[ModbusUsbCoordinator], SensorEntity):
+    """Base for the v2.9.0 hub health sensors on the hub device.
+
+    States come straight from coordinator book-keeping (the rolling
+    transaction window and the reconnect counter) — no extra bus traffic.
+    """
+
+    def __init__(
+        self, coordinator: ModbusUsbCoordinator, entry: ConfigEntry, key: str, name: str
+    ) -> None:
+        super().__init__(coordinator)
+        self._entry = entry
+        self._key = key
+        self._attr_unique_id = f"{entry.entry_id}_hub_{key}"
+        self._attr_name = name
+        self._attr_device_info = get_device_info(entry, {})
+
+
+class HubErrorRateSensor(HubSensorBase):
+    """% of failed transactions over the last 5 minutes."""
+
+    def __init__(self, coordinator: ModbusUsbCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "error_rate", "Error rate")
+        self._attr_native_unit_of_measurement = "%"
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def native_value(self) -> float | None:
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.error_rate_percent()
+
+
+class HubReconnectsSensor(HubSensorBase):
+    """Total successful (re)connects of the hub client (total_increasing)."""
+
+    def __init__(self, coordinator: ModbusUsbCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry, "reconnects", "Reconnects")
+        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+
+    @property
+    def native_value(self) -> int | None:
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.reconnect_count
+
+
 # Changelog:
+# 2026-09-21 — v2.9.0: hub health sensors (error rate, reconnects).
 # 2026-09-06 — Entity picture from device/template image URL.
-# Date modified: 2026-09-06
+# Date modified: 2026-09-21

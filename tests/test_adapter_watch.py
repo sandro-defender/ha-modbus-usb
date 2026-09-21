@@ -376,19 +376,19 @@ def test_repair_issue_adapter_lost_raises_and_clears(entry):
     client = _FakeClient(connected=False)
 
     async def fn(coordinator, hass):
-        issue_id = f"adapter_lost_{entry.entry_id}"
+        issue_id = f"serial_adapter_lost_{entry.entry_id}"
         coordinator._enter_adapter_lost(OSError("pulled"))
         await asyncio.sleep(0)  # let the scheduled spawns run
         # accelerate the 60 s production timer
-        coordinator._repair_issue_tasks["adapter_lost"].cancel()
+        coordinator._repair_issue_tasks["serial_adapter_lost"].cancel()
         await asyncio.sleep(0)
-        coordinator._schedule_repair_issue("adapter_lost", delay_s=0.01)
+        coordinator._schedule_repair_issue("serial_adapter_lost", delay_s=0.01)
         assert await _wait_until(
             lambda: ir.async_get(hass).async_get_issue("modbus_usb", issue_id)
             is not None
         )
         issue = ir.async_get(hass).async_get_issue("modbus_usb", issue_id)
-        assert issue.translation_key == "adapter_lost"
+        assert issue.translation_key == "serial_adapter_lost"
         assert "/dev/ttyUSB0" in issue.translation_placeholders["port"]
 
         # recovery clears the issue
@@ -433,13 +433,13 @@ def test_repair_issue_not_raised_when_recovered_before_timer(entry):
     client = _FakeClient(connected=False)
 
     async def fn(coordinator, hass):
-        issue_id = f"adapter_lost_{entry.entry_id}"
+        issue_id = f"serial_adapter_lost_{entry.entry_id}"
         coordinator._enter_adapter_lost(OSError("pulled"))
         await asyncio.sleep(0)  # let the scheduled spawns run
         # recover long before the (accelerated) timer fires
-        coordinator._repair_issue_tasks["adapter_lost"].cancel()
+        coordinator._repair_issue_tasks["serial_adapter_lost"].cancel()
         await asyncio.sleep(0)
-        coordinator._schedule_repair_issue("adapter_lost", delay_s=0.05)
+        coordinator._schedule_repair_issue("serial_adapter_lost", delay_s=0.05)
         coordinator._note_adapter_recovered(PortResolution("/dev/ttyUSB0", "identity"))
         await asyncio.sleep(0.1)
         assert ir.async_get(hass).async_get_issue("modbus_usb", issue_id) is None

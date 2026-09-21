@@ -40,6 +40,8 @@ async def async_setup_entry(
         for ent in entities
         if ent[CONF_ENTITY_TYPE] == "binary_sensor"
     ]
+    # v2.9.0: hub connectivity on the hub device.
+    binary_sensors.append(HubConnectedSensor(coordinator, entry))
     async_add_entities(binary_sensors)
 
 
@@ -88,6 +90,28 @@ class ModbusUsbBinarySensor(
         return bool(value)
 
 
+class HubConnectedSensor(CoordinatorEntity[ModbusUsbCoordinator], BinarySensorEntity):
+    """v2.9.0: whether the hub client (serial adapter / bridge) is open.
+
+    Mirrors coordinator.client.connected without any extra bus traffic;
+    like every coordinator entity it turns unavailable while a poll
+    fails (e.g. adapter_lost), and comes back on the first good refresh.
+    """
+
+    def __init__(self, coordinator: ModbusUsbCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_hub_connected"
+        self._attr_name = "Connected"
+        self._attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+        self._attr_device_info = get_device_info(entry, {})
+
+    @property
+    def is_on(self) -> bool:
+        return bool(getattr(self.coordinator.client, "connected", False))
+
+
 # Changelog:
+# 2026-09-21 — v2.9.0: hub connectivity sensor on the hub device.
 # 2026-09-06 — Entity picture from device/template image URL.
-# Date modified: 2026-09-06
+# Date modified: 2026-09-21
